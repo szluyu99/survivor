@@ -94,6 +94,12 @@ export const sfx = {
   },
   bossTell() { if (throttle('bossTell', 200)) tone({ freq: 520, to: 700, type: 'square', dur: 0.2, gain: 0.14 }); },
   bossShoot() { if (throttle('bossShoot', 90)) tone({ freq: 260, to: 130, type: 'sawtooth', dur: 0.16, gain: 0.16 }); },
+  bossRage() {
+    // 不谐和的双音，听起来"要出事了"
+    tone({ freq: 140, to: 320, type: 'sawtooth', dur: 0.5, gain: 0.28 });
+    tone({ freq: 196, to: 300, type: 'square', dur: 0.5, gain: 0.18, delay: 0.05 });
+    noise({ dur: 0.4, gain: 0.16, hp: 300 });
+  },
   bossDead() {
     [440, 330, 220, 110].forEach((f, i) => tone({ freq: f, to: f * 0.6, type: 'square', dur: 0.3, gain: 0.22, delay: i * 0.11 }));
     noise({ dur: 0.8, gain: 0.22, hp: 150 });

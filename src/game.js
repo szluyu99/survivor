@@ -1,10 +1,10 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
 import { createWorld, update, chooseUpgrade, VIEW_W, VIEW_H, TRAITS, DASH } from './sim.js';
-import { WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
+import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 
-const WEAPON_NAME = Object.fromEntries(WEAPONS.map((x) => [x.id, x.name]));
+const WEAPON_NAME = Object.fromEntries(ALL_WEAPONS.map((x) => [x.id, x.name]));
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
 
@@ -88,6 +88,14 @@ function consumeFx(w) {
     } else if (f.type === 'bosssummon') {
       burst(f.x, f.y, 16, P.enemy.rusher, 200, 3);
       sfx.bossShoot();
+    } else if (f.type === 'bossrage') {
+      burst(f.x, f.y, 26, P.bossRage, 240, 4);
+      fxState.shake = Math.max(fxState.shake, 9);
+      fxState.flash = 0.22;
+      fxState.warn = 1.4;
+      fxState.warnText = 'BOSS 狂暴';
+      fxState.warnColor = P.bossRage;
+      sfx.bossRage();
     } else if (f.type === 'bossdead') {
       burst(f.x, f.y, 46, P.enemy.boss, 300, 4.5);
       fxState.shake = Math.max(fxState.shake, 12);
@@ -450,15 +458,24 @@ function drawHud(w) {
     const bw = 420, bx = (VIEW_W - bw) / 2;
     ctx.fillStyle = P.bar;
     ctx.fillRect(bx, 14, bw, 10);
-    ctx.fillStyle = P.enemy.boss;
+    ctx.fillStyle = boss.rage ? P.bossRage : P.enemy.boss;
     ctx.fillRect(bx, 14, bw * Math.max(0, boss.hp / boss.maxHp), 10);
+    // 半血刻度：让人知道过了这条线会狂暴
+    ctx.strokeStyle = P.bossRage;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw * 0.5, 14);
+    ctx.lineTo(bx + bw * 0.5, 24);
+    ctx.stroke();
     ctx.strokeStyle = P.warn;
     ctx.lineWidth = 1;
     ctx.strokeRect(bx, 14, bw, 10);
     ctx.textAlign = 'center';
     ctx.fillStyle = P.warn;
     ctx.font = 'bold 12px sans-serif';
-    const label = boss.state === 'telegraph' ? (boss.plan === 'charge' ? 'BOSS 准备冲撞' : boss.plan === 'shoot' ? 'BOSS 准备弹幕' : 'BOSS 准备召唤') : 'BOSS';
+    const tag = boss.rage ? 'BOSS 狂暴' : 'BOSS';
+    const label = boss.state === 'telegraph'
+      ? `${tag}：准备${boss.plan === 'charge' ? '冲撞' : boss.plan === 'shoot' ? '弹幕' : '召唤'}`
+      : tag;
     ctx.fillText(label, VIEW_W / 2, 38);
   }
 
@@ -496,7 +513,8 @@ function drawPausePanel(w) {
     y += 26;
     ctx.fillStyle = P.warn;
     ctx.font = 'bold 15px sans-serif';
-    ctx.fillText(`${def.name}  Lv.${inst.level}/${def.maxLevel}${inst.level >= def.maxLevel ? ' 满级' : ''}`, 48, y);
+    ctx.fillStyle = def.evolved ? P.evo : P.warn;
+    ctx.fillText(`${def.name}${def.evolved ? '（进化）' : ''}  Lv.${inst.level}/${def.maxLevel}${inst.level >= def.maxLevel ? ' 满级' : ''}`, 48, y);
     ctx.fillStyle = P.dim;
     ctx.font = '12px ui-monospace, monospace';
     for (const line of def.info(inst.level, w)) {
@@ -583,8 +601,14 @@ function drawChoices(w) {
     ctx.fillRect(x, CARD_Y, CARD_W, CARD_H);
     ctx.strokeStyle = P.cardLine;
     ctx.strokeRect(x, CARD_Y, CARD_W, CARD_H);
-    ctx.fillStyle = P.warn;
-    ctx.font = 'bold 26px sans-serif';
+    if (u.evo) {
+      ctx.strokeStyle = P.evo;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 2, CARD_Y - 2, CARD_W + 4, CARD_H + 4);
+      ctx.lineWidth = 1;
+    }
+    ctx.fillStyle = u.evo ? P.evo : P.warn;
+    ctx.font = u.evo ? 'bold 22px sans-serif' : 'bold 26px sans-serif';
     ctx.fillText(u.name, x + CARD_W / 2, CARD_Y + 62);
     ctx.fillStyle = P.dim;
     ctx.font = '15px sans-serif';
@@ -723,10 +747,17 @@ function render(w) {
         }
         ctx.globalAlpha = 1;
       }
-      ctx.strokeStyle = P.warn;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = e.rage ? P.bossRage : P.warn;
+      ctx.lineWidth = e.rage ? 3 : 2;
       shapePath('boss', ex, ey, e.r + 6, 0);
       ctx.stroke();
+      if (e.rage) {
+        // 狂暴多一圈，远远就能看出这只已经进二阶段了
+        shapePath('boss', ex, ey, e.r + 13, Math.PI / 6);
+        ctx.globalAlpha = 0.55;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
     if (e.kind === 'elite') {
       // 精英加一圈金边和血条，让人一眼看出该躲还是该打

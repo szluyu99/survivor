@@ -575,3 +575,173 @@ test('召唤技能会在 Boss 身边产小怪', () => {
     assert.ok(Math.hypot(m.x - boss.x, m.y - boss.y) < boss.r + 60, '召唤出来的小怪离 Boss 太远');
   }
 });
+
+// ---- 武器进化 ----
+import { EVOLUTIONS, EVO_LEVEL, EVO_WEAPONS, ALL_WEAPONS, findEvolution } from '../src/weapons.js';
+
+function forceMaterials(seed, ids, level = EVO_LEVEL) {
+  const w = createWorld(seed);
+  w.weapons = ids.map((id) => ({ id, level, timer: 0 }));
+  w.player.maxHp = w.player.hp = 1e9; // 要连抽好几次升级，别让它中途死掉
+  return w;
+}
+function rollUntilChoices(w, maxSeconds = 300) {
+  // 必须绕圈：直线跑的话经验球全被甩在身后（球只以 26px/s 漂过来），等不到下一次升级
+  for (let i = 0; i < maxSeconds * 60 && !w.paused && !w.over; i++) {
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+  }
+  return w.choices;
+}
+
+test('素材没到等级时不会出现进化卡', () => {
+  const w = forceMaterials(3, ['orbit', 'chain'], EVO_LEVEL - 1);
+  assert.equal(findEvolution(w).length, 0, '等级不够却判定可进化');
+  const cards = rollUntilChoices(w);
+  assert.ok(cards && !cards.some((c) => c.evo), `不该出现进化卡：${cards.map((c) => c.name)}`);
+});
+
+test('素材达标后能抽到进化卡，选了就合成并腾出槽位', () => {
+  const w = forceMaterials(3, ['orbit', 'chain']);
+  assert.equal(findEvolution(w).length, 1, '应该刚好有一项可进化');
+  const cards = rollUntilChoices(w);
+  const k = cards.findIndex((c) => c.evo);
+  assert.ok(k >= 0, `没抽到进化卡：${cards.map((c) => c.name)}`);
+  chooseUpgrade(w, k);
+  assert.deepEqual(w.weapons.map((x) => x.id), ['arcfield'], '合成结果不对');
+  assert.deepEqual(w.evolved, ['arcfield']);
+  assert.ok(w.weapons.length < 3, '合成后应该腾出槽位');
+});
+
+test('三条进化线的素材配方都能走通', () => {
+  for (const evo of EVOLUTIONS) {
+    const w = forceMaterials(7, evo.from);
+    // 进化卡只是权重更高，不是必出，所以最多试 6 次升级
+    let picked = false;
+    for (let round = 0; round < 6 && !picked; round++) {
+      const cards = rollUntilChoices(w);
+      assert.ok(cards, `${evo.id} 第 ${round + 1} 次都没升级`);
+      const k = cards.findIndex((c) => c.evo);
+      if (k >= 0) { chooseUpgrade(w, k); picked = true; }
+      else chooseUpgrade(w, cards.length - 1);
+    }
+    assert.ok(picked, `${evo.id} 连续 6 次升级都没抽到进化卡，权重可能太低`);
+    assert.ok(w.weapons.some((x) => x.id === evo.id), `${evo.id} 合成结果不对：${w.weapons.map((x) => x.id)}`);
+  }
+});
+
+test('三把进化武器单独用都能打死人', () => {
+  for (const def of EVO_WEAPONS) {
+    const w = createWorld(4);
+    w.weapons = [{ id: def.id, level: 1, timer: 0 }];
+    for (let i = 0; i < 25 * 60 && !w.over; i++) {
+      if (w.paused) chooseUpgrade(w, 0);
+      const a = (i / 60) * 1.6;
+      update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+      for (const f of w.fx) f.active = false;
+    }
+    assert.ok(w.kills > 20, `${def.name} 25 秒只杀了 ${w.kills} 个，进化武器不该比基础武器还弱`);
+  }
+});
+
+test('归巢弹会拐弯追人', () => {
+  const w = createWorld(4);
+  w.weapons = [{ id: 'homing', level: 1, timer: 0 }];
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 999;
+  for (const e of w.enemies) e.active = false;
+  const e = w.enemies[0];
+  e.active = true;
+  e.kind = 'grunt';
+  e.x = 0; e.y = -260; e.r = 12;
+  e.maxHp = e.hp = 1e9; e.speed = 0; e.dmg = 0; e.gem = 1;
+  e.hitCd = 99; e.orbCd = 99; e.lastBulletId = 0;
+  let turned = false;
+  for (let i = 0; i < 90; i++) {
+    update(w, DT, { dx: 0, dy: 0 });
+    // 只要有子弹的速度方向明显朝上（朝着那只怪），就说明转向生效了
+    for (const b of w.bullets) {
+      if (b.active && b.homing > 0 && b.vy < -0.9 * Math.hypot(b.vx, b.vy)) turned = true;
+    }
+  }
+  assert.ok(turned, '追踪弹没有拐向唯一的目标');
+});
+
+test('每把进化武器的 info() 都能给出可读数值', () => {
+  const w = createWorld(1);
+  for (const def of EVO_WEAPONS) {
+    for (let lv = 1; lv <= def.maxLevel; lv++) {
+      const lines = def.info(lv, w);
+      assert.ok(lines.length >= 1);
+      for (const line of lines) {
+        assert.ok(!line.includes('undefined') && !line.includes('NaN'), `${def.id} Lv.${lv}：${line}`);
+      }
+    }
+  }
+});
+
+test('findWeapon 能找到进化武器，ALL_WEAPONS 包含全部九把', () => {
+  assert.equal(ALL_WEAPONS.length, 9, `武器总数不对：${ALL_WEAPONS.length}`);
+  for (const def of EVO_WEAPONS) assert.ok(findWeapon(def.id), `findWeapon 找不到 ${def.id}`);
+});
+
+// ---- Boss 二阶段 ----
+test('Boss 掉到半血会狂暴，出招变快', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 0.01;
+  update(w, DT, { dx: 0, dy: 0 });
+  const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+  assert.ok(boss && !boss.rage, 'Boss 刚出场就狂暴了');
+  const speed0 = boss.speed;
+  boss.hp = boss.maxHp * 0.4;
+  for (const f of w.fx) f.active = false;
+  update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(boss.rage, 1, '半血没有进入狂暴');
+  assert.ok(boss.speed > speed0, '狂暴后移速没提升');
+  assert.ok(w.fx.some((f) => f.active && f.type === 'bossrage'), '没有发狂暴事件');
+});
+
+test('狂暴后的弹幕比一阶段更密', () => {
+  function volleySize(rage) {
+    const w = createWorld(5);
+    w.spawnTimer = 999;
+    w.eliteTimer = 999;
+    w.bossTimer = 0.01;
+    update(w, DT, { dx: 0, dy: 0 });
+    const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+    boss.maxHp = 1e9;
+    boss.hp = rage ? 1e9 * 0.4 : 1e9;
+    if (rage) update(w, DT, { dx: 0, dy: 0 }); // 狂暴触发时会把状态打回 chase，先让它触发完
+    boss.state = 'telegraph';
+    boss.plan = 'shoot';
+    boss.stateT = 0.01;
+    for (const b of w.bullets) b.active = false;
+    // 一轮弹幕之间有 0.26 秒间隔，跑满 1.5 秒才能把所有轮次都放出来
+    for (let i = 0; i < 90; i++) update(w, DT, { dx: 0, dy: 0 });
+    return w.bullets.filter((b) => b.active && b.foe).length;
+  }
+  const calm = volleySize(false), rage = volleySize(true);
+  assert.ok(rage > calm, `狂暴弹幕没变密：一阶段 ${calm} 发，狂暴 ${rage} 发`);
+});
+
+test('Boss 放弹幕产出的是敌对子弹（走 spawnBullet 这条真实路径）', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 0.01;
+  update(w, DT, { dx: 0, dy: 0 });
+  const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+  boss.maxHp = boss.hp = 1e9;
+  boss.state = 'telegraph';
+  boss.plan = 'shoot';
+  boss.stateT = 0.01;
+  for (const b of w.bullets) b.active = false;
+  for (let i = 0; i < 90; i++) update(w, DT, { dx: 0, dy: 0 });
+  const foes = w.bullets.filter((b) => b.active && b.foe);
+  assert.ok(foes.length >= 10, `Boss 弹幕只有 ${foes.length} 发被标成敌对，spawnBullet 可能没透传 foe`);
+  // 玩家自己的武器也在开火，所以场上同时有非 foe 子弹是正常的
+  assert.ok(foes.every((b) => b.dmg > 0), '敌对子弹伤害为 0');
+});

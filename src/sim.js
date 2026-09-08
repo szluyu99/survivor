@@ -1,6 +1,6 @@
 // 纯逻辑层：不碰 DOM，方便在 node 里跑测试。
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
-import { WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
+import { WEAPONS, MAX_SLOTS, findWeapon, EVOLUTIONS, EVO_LEVEL, findEvolution } from './weapons.js';
 
 export const VIEW_W = 960;
 export const VIEW_H = 540;
@@ -55,8 +55,8 @@ export function createWorld(seed = 1) {
     weapons: [{ id: 'bolt', level: 1, timer: 0 }],
     enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
       // 只有 Boss 用：行为状态机
-      state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '' })),
-    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, color: '' })),
+      state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0 })),
+    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
@@ -69,6 +69,7 @@ export function createWorld(seed = 1) {
     cycleT: 0,
     phase: 'normal',
     choices: null,
+    evolved: [],
   };
 }
 
@@ -91,6 +92,13 @@ export const TRAITS = [
   { id: 'pickup', name: '贪', desc: '拾取范围 +50%', apply: (w) => { w.stats.pickupRange *= 1.5; } },
 ];
 
+function evolveWeapon(w, evo) {
+  // 两把素材合成一把，占一个槽——所以进化也是腾槽位的手段
+  w.weapons = w.weapons.filter((x) => !evo.from.includes(x.id));
+  w.weapons.push({ id: evo.id, level: 1, timer: 0 });
+  w.evolved = (w.evolved || []).concat(evo.id);
+}
+
 function upgradeWeapon(w, id) {
   const inst = w.weapons.find((x) => x.id === id);
   if (inst) inst.level++;
@@ -112,11 +120,19 @@ function rollChoices(w) {
       bag.push({ name: `新武器 · ${def.name}`, desc: def.desc[0], apply: (x) => upgradeWeapon(x, def.id) });
     }
   }
+  for (const evo of findEvolution(w)) {
+    const def = findWeapon(evo.id);
+    const parts = evo.from.map((id) => findWeapon(id).name).join(' + ');
+    const card = { name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
+    bag.push(card, card); // 放两份，提高被抽到的概率：进化是这局的最大惊喜，不该经常抽不到
+  }
   for (const t of TRAITS) bag.push({ name: t.name, desc: t.desc, apply: t.apply });
 
   const out = [];
-  for (let i = 0; i < 3 && bag.length; i++) {
-    out.push(bag.splice(Math.floor(w.rng() * bag.length), 1)[0]);
+  while (out.length < 3 && bag.length) {
+    const card = bag.splice(Math.floor(w.rng() * bag.length), 1)[0];
+    if (out.includes(card)) continue; // 进化卡放了两份，别抽出两张一样的
+    out.push(card);
   }
   return out;
 }
@@ -175,6 +191,8 @@ const api = {
     b.color = opts.color ?? ''; // 空表示让渲染层按 foe 决定颜色
     b.blast = opts.blast ?? 0;   // >0 表示命中后炸一圈
     b.flip = opts.flip ?? -1;    // 剩余寿命低于这个值就反向飞（回旋镖）
+    b.homing = opts.homing ?? 0; // >0 表示每秒最多转这么多弧度去追最近的敌人
+    b.foe = opts.foe ?? false;   // 敌对子弹只打玩家。漏了这一行 Boss 弹幕会变成玩家子弹去打 Boss 自己
   },
   // 找最近的 n 个敌人，给闪电链这种多目标武器用
   nearestN(w, x, y, n, maxDist) {
@@ -245,7 +263,7 @@ export const KINDS = {
   rusher: { name: '冲锋兵', hp: 0.55, speed: 1.8, dmg: 0.7, r: 0.78, gem: 1, unlock: 15, weight: 0.45 },
   tank: { name: '肉盾', hp: 3.2, speed: 0.55, dmg: 1.6, r: 1.7, gem: 2, unlock: 30, weight: 0.25 },
   elite: { name: '精英', hp: 9, speed: 0.8, dmg: 2, r: 2.2, gem: 6, unlock: 30, weight: 0 },
-  boss: { name: 'Boss', hp: 42, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
+  boss: { name: 'Boss', hp: 32, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
 };
 
 function pickKind(w) {
@@ -292,6 +310,7 @@ function spawnEnemy(w, kindId = null, angle = null) {
   e.stateT = id === 'boss' ? 2.5 : 0;
   e.volley = 0;
   e.plan = '';
+  e.rage = 0;
   return e;
 }
 
@@ -307,6 +326,20 @@ function tickBoss(w, e, dt) {
   const toP = Math.atan2(p.y - e.y, p.x - e.x);
   e.stateT -= dt;
 
+  // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
+  if (!e.rage && e.hp <= e.maxHp * 0.5) {
+    e.rage = 1;
+    e.speed *= 1.25;
+    e.state = 'chase';
+    e.stateT = 0.7;
+    emit(w, 'bossrage', e.x, e.y, e.r);
+  }
+  const think = e.rage ? BOSS.think * 0.55 : BOSS.think;
+  const shots = e.rage ? BOSS.shots + 4 : BOSS.shots;
+  const volleys = e.rage ? BOSS.volleys + 1 : BOSS.volleys;
+  const chargeMul = e.rage ? BOSS.chargeMul * 1.25 : BOSS.chargeMul;
+  const minions = e.rage ? BOSS.minions + 3 : BOSS.minions;
+
   if (e.state === 'chase') {
     e.x += Math.cos(toP) * e.speed * dt;
     e.y += Math.sin(toP) * e.speed * dt;
@@ -314,7 +347,7 @@ function tickBoss(w, e, dt) {
       const roll = w.rng();
       e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
       e.state = 'telegraph';
-      e.stateT = BOSS.telegraph;
+      e.stateT = e.rage ? BOSS.telegraph * 0.75 : BOSS.telegraph;
       e.moveX = Math.cos(toP);
       e.moveY = Math.sin(toP);
       emit(w, 'bosstell', e.x, e.y, e.r);
@@ -327,11 +360,11 @@ function tickBoss(w, e, dt) {
     if (e.plan === 'charge') { e.moveX = Math.cos(toP); e.moveY = Math.sin(toP); }
     if (e.stateT <= 0) {
       e.state = e.plan;
-      e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? BOSS.volleys * BOSS.volleyGap : 0.5;
+      e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? volleys * BOSS.volleyGap : 0.5;
       e.volley = 0;
       if (e.plan === 'summon') {
-        for (let i = 0; i < BOSS.minions; i++) {
-          const a = (i / BOSS.minions) * Math.PI * 2;
+        for (let i = 0; i < minions; i++) {
+          const a = (i / minions) * Math.PI * 2;
           const m = spawnEnemy(w, 'rusher', a);
           // 召唤出来的贴着 Boss 放，而不是从视野外走进来
           if (m) { m.x = e.x + Math.cos(a) * (e.r + 26); m.y = e.y + Math.sin(a) * (e.r + 26); }
@@ -343,15 +376,15 @@ function tickBoss(w, e, dt) {
   }
 
   if (e.state === 'charge') {
-    e.x += e.moveX * e.speed * BOSS.chargeMul * dt;
-    e.y += e.moveY * e.speed * BOSS.chargeMul * dt;
+    e.x += e.moveX * e.speed * chargeMul * dt;
+    e.y += e.moveY * e.speed * chargeMul * dt;
   } else if (e.state === 'shoot') {
-    const done = BOSS.volleys - Math.ceil(Math.max(0, e.stateT) / BOSS.volleyGap);
+    const done = volleys - Math.ceil(Math.max(0, e.stateT) / BOSS.volleyGap);
     if (done > e.volley) {
       e.volley = done;
       const base = toP + done * 0.31; // 每轮转一点，形成旋转弹幕
-      for (let i = 0; i < BOSS.shots; i++) {
-        const a = base + (i / BOSS.shots) * Math.PI * 2;
+      for (let i = 0; i < shots; i++) {
+        const a = base + (i / shots) * Math.PI * 2;
         api.spawnBullet(w, e.x, e.y, {
           vx: Math.cos(a) * BOSS.shotSpeed, vy: Math.sin(a) * BOSS.shotSpeed,
           dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true,
@@ -361,7 +394,7 @@ function tickBoss(w, e, dt) {
     }
   }
 
-  if (e.stateT <= 0) { e.state = 'chase'; e.stateT = BOSS.think; }
+  if (e.stateT <= 0) { e.state = 'chase'; e.stateT = think; }
 }
 
 // 波次周期：常规 22s → 冲锋 4s → 喘息 4s
@@ -497,6 +530,21 @@ export function update(w, dt, input) {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     b.life -= dt;
+    // 追踪弹：每帧朝最近的敌人拧一点方向
+    if (b.homing > 0) {
+      const t = api.nearestEnemy(w, b.x, b.y);
+      if (t) {
+        const want = Math.atan2(t.y - b.y, t.x - b.x);
+        const cur = Math.atan2(b.vy, b.vx);
+        let diff = want - cur;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const step = Math.max(-b.homing * dt, Math.min(b.homing * dt, diff));
+        const spd = Math.hypot(b.vx, b.vy);
+        b.vx = Math.cos(cur + step) * spd;
+        b.vy = Math.sin(cur + step) * spd;
+      }
+    }
     // 回旋镖：飞到一半调头往回飞
     if (b.flip >= 0 && b.life <= b.flip) {
       b.vx = -b.vx;

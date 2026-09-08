@@ -207,6 +207,158 @@ export const WEAPONS = [
   },
 ];
 
+
+// ---- 进化武器 ----
+// 两把素材武器都到 3 级时，升级卡池里会出现一张进化卡；选了就合成一把，
+// 两个槽位合成一个（所以进化同时是"腾出槽位"的手段）。
+// 门槛定在 3 级而不是满级：一局大约升 9 次，满级门槛要投 8 次升级才够，
+// 那就等于强制放弃所有别的选择，进化永远见不到。
+export const EVO_LEVEL = 3;
+
+export const EVOLUTIONS = [
+  { id: 'arcfield', from: ['orbit', 'chain'] },
+  { id: 'blastlance', from: ['mine', 'lance'] },
+  { id: 'homing', from: ['boomerang', 'bolt'] },
+];
+
+export const EVO_WEAPONS = [
+  {
+    id: 'arcfield',
+    name: '电场',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['光球绕身旋转，球与球之间连出电弧', '光球 +1，伤害 +30%', '半径 +20%，伤害 +30%'],
+    orbs: T([4, 5, 5]),
+    radius: T([58, 58, 70]),
+    orbR: 22,
+    dmg: T([30, 39, 48]),
+    arcDmg: T([22, 28, 35]),
+    hitCd: 0.24,
+    info(lv, w) {
+      return [
+        `光球 ${this.orbs(lv)} 颗，每下 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}`,
+        `弧光每下 ${(this.arcDmg(lv) * w.stats.damageMul).toFixed(0)}，半径 ${this.radius(lv)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer += dt * 2.2;
+      const n = this.orbs(inst.level);
+      const rad = this.radius(inst.level);
+      const dmg = this.dmg(inst.level) * api.dmgMul(w);
+      const arc = this.arcDmg(inst.level) * api.dmgMul(w);
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const a = inst.timer + (i / n) * Math.PI * 2;
+        const ox = w.player.x + Math.cos(a) * rad;
+        const oy = w.player.y + Math.sin(a) * rad;
+        pts.push([ox, oy]);
+        api.addOrb(w, ox, oy, this.orbR);
+        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd);
+      }
+      // 相邻光球之间连电弧：沿线取几个采样点做小范围伤害，视觉上也画这条线
+      for (let i = 0; i < pts.length; i++) {
+        const [x1, y1] = pts[i];
+        const [x2, y2] = pts[(i + 1) % pts.length];
+        api.chainFx(w, x1, y1, x2, y2);
+        for (let k = 1; k <= 3; k++) {
+          const t = k / 4;
+          api.damageArea(w, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 11, arc, this.hitCd);
+        }
+      }
+    },
+  },
+  {
+    id: 'blastlance',
+    name: '爆破枪',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['穿透弹开路，沿途炸出一条爆炸走廊', '伤害 +40%，多一颗爆点', '攻速 +35%，范围 +20%'],
+    dmg: T([64, 88, 88]),
+    blastDmg: T([42, 58, 58]),
+    rate: T([1.0, 1.0, 1.3]),
+    blast: T([54, 54, 65]),
+    mines: T([3, 4, 4]),
+    info(lv, w) {
+      return [
+        `穿透弹 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，无限穿透`,
+        `沿途 ${this.mines(lv)} 颗爆点，每颗 ${(this.blastDmg(lv) * w.stats.damageMul).toFixed(0)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      const period = 1 / this.rate(inst.level);
+      while (inst.timer <= 0) {
+        inst.timer += period;
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        if (!target) { inst.timer = 0; break; }
+        const ang = Math.atan2(target.y - w.player.y, target.x - w.player.x);
+        api.spawnBullet(w, w.player.x, w.player.y, {
+          vx: Math.cos(ang) * 720, vy: Math.sin(ang) * 720,
+          dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 999, life: 0.95, r: 9, color: P.lance,
+        });
+        // 顺着弹道埋几颗短命雷，形成一条走廊
+        const n = this.mines(inst.level);
+        for (let i = 1; i <= n; i++) {
+          const d = i * 95;
+          api.spawnBullet(w, w.player.x + Math.cos(ang) * d, w.player.y + Math.sin(ang) * d, {
+            vx: 0, vy: 0,
+            dmg: this.blastDmg(inst.level) * api.dmgMul(w),
+            pierce: 1, life: 1.4, r: 7, color: P.mine, blast: this.blast(inst.level),
+          });
+        }
+      }
+    },
+  },
+  {
+    id: 'homing',
+    name: '归巢弹',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['三枚追踪弹绕场找人，穿透且会拐弯', '数量 +2，伤害 +35%', '攻速 +40%，转向更灵'],
+    dmg: T([26, 34, 34]),
+    rate: T([1.0, 1.0, 1.4]),
+    count: T([3, 4, 4]),
+    turn: T([3.4, 3.4, 4.6]),
+    pierce: T([2, 3, 3]),
+    info(lv, w) {
+      return [
+        `${this.count(lv)} 枚 × ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)} 伤害，穿透 ${this.pierce(lv)} 次`,
+        `${(this.rate(lv) * w.stats.rateMul).toFixed(1)} 次/秒，会自动拐向敌人`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      const period = 1 / this.rate(inst.level);
+      while (inst.timer <= 0) {
+        inst.timer += period;
+        const n = this.count(inst.level);
+        const dmg = this.dmg(inst.level) * api.dmgMul(w);
+        // 朝最近的敌人扇形撒出去，再靠转向各自找目标；纯随机撒会有一半飞向空地
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        const base = target ? Math.atan2(target.y - w.player.y, target.x - w.player.x) : w.rng() * Math.PI * 2;
+        for (let i = 0; i < n; i++) {
+          const a = base + (i - (n - 1) / 2) * 0.42;
+          api.spawnBullet(w, w.player.x, w.player.y, {
+            vx: Math.cos(a) * 320, vy: Math.sin(a) * 320,
+            dmg, pierce: this.pierce(inst.level), life: 2.6, r: 6, color: P.boomerang,
+            homing: this.turn(inst.level),
+          });
+        }
+      }
+    },
+  },
+];
+
+export const ALL_WEAPONS = [...WEAPONS, ...EVO_WEAPONS];
+
+export function findEvolution(w) {
+  // 返回当前满足条件的进化项（素材都在手上且都到 EVO_LEVEL）
+  return EVOLUTIONS.filter((evo) => evo.from.every((id) => {
+    const inst = w.weapons.find((x) => x.id === id);
+    return inst && inst.level >= EVO_LEVEL;
+  }));
+}
+
 export function findWeapon(id) {
-  return WEAPONS.find((x) => x.id === id);
+  return ALL_WEAPONS.find((x) => x.id === id);
 }
