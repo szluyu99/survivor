@@ -74,6 +74,28 @@ function consumeFx(w) {
     } else if (f.type === 'dash') {
       burst(f.x, f.y, 12, P.playerRing, 150, 2.5);
       sfx.dash();
+    } else if (f.type === 'boss') {
+      fxState.warn = 1.8;
+      fxState.warnText = 'BOSS 出现';
+      fxState.warnColor = P.enemy.boss;
+      fxState.shake = Math.max(fxState.shake, 8);
+      sfx.boss();
+    } else if (f.type === 'bosstell') {
+      sfx.bossTell();
+    } else if (f.type === 'bossshoot') {
+      burst(f.x, f.y, 8, P.foeBullet, 120, 3);
+      sfx.bossShoot();
+    } else if (f.type === 'bosssummon') {
+      burst(f.x, f.y, 16, P.enemy.rusher, 200, 3);
+      sfx.bossShoot();
+    } else if (f.type === 'bossdead') {
+      burst(f.x, f.y, 46, P.enemy.boss, 300, 4.5);
+      fxState.shake = Math.max(fxState.shake, 12);
+      fxState.flash = 0.3;
+      fxState.warn = 1.4;
+      fxState.warnText = 'BOSS 倒下';
+      fxState.warnColor = P.warn;
+      sfx.bossDead();
     } else if (f.type === 'elite') {
       fxState.warn = 1.2;
       fxState.warnText = '精英出现';
@@ -321,6 +343,14 @@ function shapePath(kind, x, y, r, rot) {
   } else if (kind === 'tank') {
     const s = r * 0.92;
     ctx.rect(x - s, y - s, s * 2, s * 2);
+  } else if (kind === 'boss') {
+    const sd = r;
+    for (let i = 0; i < 6; i++) {
+      const a = rot + (i / 6) * Math.PI * 2;
+      const px = x + Math.cos(a) * sd, py = y + Math.sin(a) * sd;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
   } else if (kind === 'elite') {
     const s = r * 1.25;
     ctx.moveTo(x, y - s);
@@ -413,6 +443,25 @@ function drawHud(w) {
   ctx.font = '12px ui-monospace, monospace';
   ctx.fillStyle = P.faint;
   ctx.fillText(`下一只精英 ${Math.max(0, w.eliteTimer).toFixed(0)}s`, VIEW_W - 16, 112);
+  // 顶部 Boss 血条：场上有 Boss 就显示，多只取血最多的那只
+  let boss = null;
+  for (const e of w.enemies) if (e.active && e.kind === 'boss' && (!boss || e.hp > boss.hp)) boss = e;
+  if (boss) {
+    const bw = 420, bx = (VIEW_W - bw) / 2;
+    ctx.fillStyle = P.bar;
+    ctx.fillRect(bx, 14, bw, 10);
+    ctx.fillStyle = P.enemy.boss;
+    ctx.fillRect(bx, 14, bw * Math.max(0, boss.hp / boss.maxHp), 10);
+    ctx.strokeStyle = P.warn;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, 14, bw, 10);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 12px sans-serif';
+    const label = boss.state === 'telegraph' ? (boss.plan === 'charge' ? 'BOSS 准备冲撞' : boss.plan === 'shoot' ? 'BOSS 准备弹幕' : 'BOSS 准备召唤') : 'BOSS';
+    ctx.fillText(label, VIEW_W / 2, 38);
+  }
+
   ctx.textAlign = 'left';
   // 手机上没有 ESC，这个框要能点
   ctx.strokeStyle = P.btnLine;
@@ -656,6 +705,29 @@ function render(w) {
     // 冲锋兵是三角形，朝向就是它追人的方向
     const rot = e.kind === 'rusher' ? Math.atan2(w.player.y - e.y, w.player.x - e.x) : 0;
     drawEntity(e.kind, ex, ey, e.r, e.flash > 0 ? P.hitFlash : P.enemy[e.kind], rot);
+    if (e.kind === 'boss') {
+      // 预警：黄圈跳动；要冲撞时额外画出方向，让人来得及躲
+      if (e.state === 'telegraph') {
+        const k = 1 - Math.max(0, e.stateT) / 0.8;
+        ctx.strokeStyle = P.bossTell;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.4 + 0.5 * k;
+        ctx.beginPath();
+        ctx.arc(ex, ey, e.r + 10 + k * 14, 0, Math.PI * 2);
+        ctx.stroke();
+        if (e.plan === 'charge') {
+          ctx.beginPath();
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex + e.moveX * 190, ey + e.moveY * 190);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.strokeStyle = P.warn;
+      ctx.lineWidth = 2;
+      shapePath('boss', ex, ey, e.r + 6, 0);
+      ctx.stroke();
+    }
     if (e.kind === 'elite') {
       // 精英加一圈金边和血条，让人一眼看出该躲还是该打
       ctx.strokeStyle = P.warn;
@@ -679,7 +751,7 @@ function render(w) {
       ctx.arc(b.x - camX, b.y - camY, b.blast, 0, Math.PI * 2);
       ctx.stroke();
     }
-    drawEntity('grunt', b.x - camX, b.y - camY, b.r, b.color, 0, 1.5);
+    drawEntity('grunt', b.x - camX, b.y - camY, b.r, b.foe ? P.foeBullet : (b.color || P.bolt), 0, 1.5);
   }
   // 闪电链：一段一段的折线
   ctx.strokeStyle = P.chain;

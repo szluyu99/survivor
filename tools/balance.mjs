@@ -13,17 +13,18 @@ function play({ seed, weapons, mover = circling, pick = () => 0, maxSeconds = 60
   if (weapons) w.weapons = weapons.map((id) => ({ id, level: 1, timer: 0 }));
   let levels = 0;
   let peak = 0;
+  let bossKills = 0;
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
     if (w.paused) { levels++; chooseUpgrade(w, pick(i)); }
     const inp = mover(i);
     // 有冷却就冲：模拟真人一有冲刺就用掉
     update(w, DT, dash ? { ...inp, dash: w.player.dashCd <= 0 } : inp);
-    for (const f of w.fx) f.active = false;
+    for (const f of w.fx) { if (f.active && f.type === 'bossdead') bossKills++; f.active = false; }
     let live = 0;
     for (const e of w.enemies) if (e.active) live++;
     if (live > peak) peak = live;
   }
-  return { t: w.t, kills: w.kills, levels, peak, build: w.weapons.map((x) => `${x.id}${x.level}`).join('/') };
+  return { t: w.t, kills: w.kills, levels, peak, bosses: w.bossCount, bossKills, build: w.weapons.map((x) => `${x.id}${x.level}`).join('/') };
 }
 
 const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -42,9 +43,9 @@ for (const def of WEAPONS) {
 console.log('\n=== 整局节奏（三张卡轮换选）===');
 const runs = SEEDS.map((seed) => play({ seed, pick: (i) => Math.floor(i / 97) % 3 }));
 for (const [i, r] of runs.entries()) {
-  console.log(`seed ${pad(SEEDS[i], 4)} ${pad(clock(r.t), 7)} ${pad(r.kills + '杀', 8)} ${pad('Lv.' + (r.levels + 1), 7)} 峰值${pad(r.peak + '怪', 7)} ${r.build}`);
+  console.log(`seed ${pad(SEEDS[i], 4)} ${pad(clock(r.t), 7)} ${pad(r.kills + '杀', 8)} ${pad('Lv.' + (r.levels + 1), 7)} 峰值${pad(r.peak + '怪', 7)} Boss ${r.bosses}遇/${r.bossKills}杀  ${r.build}`);
 }
-console.log(`平均存活 ${clock(avg(runs.map((r) => r.t)))}  平均击杀 ${avg(runs.map((r) => r.kills)).toFixed(0)}  平均升级 ${avg(runs.map((r) => r.levels)).toFixed(1)} 次`);
+console.log(`平均存活 ${clock(avg(runs.map((r) => r.t)))}  平均击杀 ${avg(runs.map((r) => r.kills)).toFixed(0)}  平均升级 ${avg(runs.map((r) => r.levels)).toFixed(1)} 次  平均遭遇 Boss ${avg(runs.map((r) => r.bosses)).toFixed(1)} 只`);
 
 console.log('\n=== 冲刺对难度的影响（同 seed，其他条件一致）===');
 {
@@ -62,7 +63,7 @@ const first = {};
   for (let i = 0; i < 120 * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) f.active = false;
+    for (const f of w.fx) { if (f.active && f.type === 'bossdead') bossKills++; f.active = false; }
     for (const e of w.enemies) if (e.active && first[e.kind] === undefined) first[e.kind] = w.t;
   }
 }
@@ -79,7 +80,7 @@ for (const [name, dt] of [['30fps', 1 / 30], ['60fps', 1 / 60], ['144fps', 1 / 1
       if (w.paused) chooseUpgrade(w, 0);
       const a = w.t * 1.6;
       update(w, dt, { dx: Math.cos(a), dy: Math.sin(a) });
-      for (const f of w.fx) f.active = false;
+      for (const f of w.fx) { if (f.active && f.type === 'bossdead') bossKills++; f.active = false; }
     }
     return w.t;
   });
@@ -92,7 +93,7 @@ console.log('\n=== 单帧逻辑耗时（峰值实体下）===');
   for (let i = 0; i < 70 * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) f.active = false;
+    for (const f of w.fx) { if (f.active && f.type === 'bossdead') bossKills++; f.active = false; }
   }
   let live = 0;
   for (const e of w.enemies) if (e.active) live++;
@@ -101,7 +102,7 @@ console.log('\n=== 单帧逻辑耗时（峰值实体下）===');
   for (let i = 0; i < 600 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) f.active = false;
+    for (const f of w.fx) { if (f.active && f.type === 'bossdead') bossKills++; f.active = false; }
     n++;
   }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6 / Math.max(1, n);

@@ -53,14 +53,18 @@ export function createWorld(seed = 1) {
     },
     stats: { damageMul: 1, rateMul: 1, pickupRange: 90 },
     weapons: [{ id: 'bolt', level: 1, timer: 0 }],
-    enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0 })),
-    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, color: '#ffd166' })),
+    enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
+      // 只有 Boss 用：行为状态机
+      state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '' })),
+    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
     fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0 })),
     spawnTimer: 0,
     eliteTimer: 30, // 第一只精英 30 秒到，之后每 40 秒一只
+    bossTimer: 45,  // 第一只 Boss 45 秒，之后每 55 秒一只（一局约 100 秒，这样通常能碰到两只）
+    bossCount: 0,
     // 波次节奏：22 秒常规 → 5 秒冲锋 → 3 秒喘息，循环
     cycleT: 0,
     phase: 'normal',
@@ -138,7 +142,7 @@ function dropGem(w, x, y, value = 1) {
 function killEnemy(w, e) {
   e.active = false;
   w.kills++;
-  emit(w, 'kill', e.x, e.y, e.r);
+  emit(w, e.kind === 'boss' ? 'bossdead' : 'kill', e.x, e.y, e.r);
   dropGem(w, e.x, e.y, e.gem);
 }
 
@@ -168,7 +172,7 @@ const api = {
     b.pierce = opts.pierce ?? 1;
     b.life = opts.life ?? 1;
     b.r = opts.r ?? 5;
-    b.color = opts.color ?? '#ffd166';
+    b.color = opts.color ?? ''; // 空表示让渲染层按 foe 决定颜色
     b.blast = opts.blast ?? 0;   // >0 表示命中后炸一圈
     b.flip = opts.flip ?? -1;    // 剩余寿命低于这个值就反向飞（回旋镖）
   },
@@ -241,6 +245,7 @@ export const KINDS = {
   rusher: { name: '冲锋兵', hp: 0.55, speed: 1.8, dmg: 0.7, r: 0.78, gem: 1, unlock: 15, weight: 0.45 },
   tank: { name: '肉盾', hp: 3.2, speed: 0.55, dmg: 1.6, r: 1.7, gem: 2, unlock: 30, weight: 0.25 },
   elite: { name: '精英', hp: 9, speed: 0.8, dmg: 2, r: 2.2, gem: 6, unlock: 30, weight: 0 },
+  boss: { name: 'Boss', hp: 42, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
 };
 
 function pickKind(w) {
@@ -261,13 +266,13 @@ function pickKind(w) {
 
 function spawnEnemy(w, kindId = null, angle = null) {
   const e = alloc(w.enemies);
-  if (!e) return;
+  if (!e) return null;
   const id = kindId || pickKind(w);
   const k = KINDS[id];
   // 在视野外一圈随机位置刷怪
   const ang = angle === null ? w.rng() * Math.PI * 2 : angle;
   const dist = Math.max(VIEW_W, VIEW_H) * 0.62;
-  const wave = w.t / 45; // 每 45 秒强化一档
+  const wave = w.t / 55; // 每 55 秒强化一档
   e.active = true;
   e.kind = id;
   e.x = w.player.x + Math.cos(ang) * dist;
@@ -283,6 +288,80 @@ function spawnEnemy(w, kindId = null, angle = null) {
   e.orbCd = 0;
   e.lastBulletId = 0;
   e.flash = 0;
+  e.state = 'chase';
+  e.stateT = id === 'boss' ? 2.5 : 0;
+  e.volley = 0;
+  e.plan = '';
+  return e;
+}
+
+// Boss 行为：追人 2.5 秒 → 预警 0.8 秒 → 随机放一个技能 → 回到追人。
+// 预警必须有，否则冲撞完全没法躲，只会让人觉得是随机掉血。
+const BOSS = {
+  think: 2.5, telegraph: 0.8, charge: 0.62, chargeMul: 3.4,
+  volleys: 3, volleyGap: 0.26, shots: 10, shotSpeed: 190, minions: 4,
+};
+
+function tickBoss(w, e, dt) {
+  const p = w.player;
+  const toP = Math.atan2(p.y - e.y, p.x - e.x);
+  e.stateT -= dt;
+
+  if (e.state === 'chase') {
+    e.x += Math.cos(toP) * e.speed * dt;
+    e.y += Math.sin(toP) * e.speed * dt;
+    if (e.stateT <= 0) {
+      const roll = w.rng();
+      e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
+      e.state = 'telegraph';
+      e.stateT = BOSS.telegraph;
+      e.moveX = Math.cos(toP);
+      e.moveY = Math.sin(toP);
+      emit(w, 'bosstell', e.x, e.y, e.r);
+    }
+    return;
+  }
+
+  if (e.state === 'telegraph') {
+    // 站住不动，只在冲撞前锁定方向（其他技能不需要方向）
+    if (e.plan === 'charge') { e.moveX = Math.cos(toP); e.moveY = Math.sin(toP); }
+    if (e.stateT <= 0) {
+      e.state = e.plan;
+      e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? BOSS.volleys * BOSS.volleyGap : 0.5;
+      e.volley = 0;
+      if (e.plan === 'summon') {
+        for (let i = 0; i < BOSS.minions; i++) {
+          const a = (i / BOSS.minions) * Math.PI * 2;
+          const m = spawnEnemy(w, 'rusher', a);
+          // 召唤出来的贴着 Boss 放，而不是从视野外走进来
+          if (m) { m.x = e.x + Math.cos(a) * (e.r + 26); m.y = e.y + Math.sin(a) * (e.r + 26); }
+        }
+        emit(w, 'bosssummon', e.x, e.y, e.r);
+      }
+    }
+    return;
+  }
+
+  if (e.state === 'charge') {
+    e.x += e.moveX * e.speed * BOSS.chargeMul * dt;
+    e.y += e.moveY * e.speed * BOSS.chargeMul * dt;
+  } else if (e.state === 'shoot') {
+    const done = BOSS.volleys - Math.ceil(Math.max(0, e.stateT) / BOSS.volleyGap);
+    if (done > e.volley) {
+      e.volley = done;
+      const base = toP + done * 0.31; // 每轮转一点，形成旋转弹幕
+      for (let i = 0; i < BOSS.shots; i++) {
+        const a = base + (i / BOSS.shots) * Math.PI * 2;
+        api.spawnBullet(w, e.x, e.y, {
+          vx: Math.cos(a) * BOSS.shotSpeed, vy: Math.sin(a) * BOSS.shotSpeed,
+          dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true,
+        });
+      }
+      emit(w, 'bossshoot', e.x, e.y, e.r);
+    }
+  }
+
+  if (e.stateT <= 0) { e.state = 'chase'; e.stateT = BOSS.think; }
 }
 
 // 波次周期：常规 22s → 冲锋 4s → 喘息 4s
@@ -359,13 +438,21 @@ export function update(w, dt, input) {
 
   // 刷怪：随时间加速，但有上限；冲锋期加倍，喘息期完全停
   tickWave(w, dt);
-  const base = Math.max(0.06, 1.1 - w.t * 0.012);
+  const base = Math.max(0.08, 1.1 - w.t * 0.009);
   if (w.phase === 'calm') {
     w.spawnTimer = base;
   } else {
     w.spawnTimer -= dt;
     const interval = w.phase === 'surge' ? base * 0.5 : base;
     while (w.spawnTimer <= 0) { spawnEnemy(w); w.spawnTimer += interval; }
+  }
+
+  // Boss 定时出场
+  w.bossTimer -= dt;
+  if (w.bossTimer <= 0) {
+    w.bossTimer += 55;
+    const b = spawnEnemy(w, 'boss');
+    if (b) { w.bossCount++; emit(w, 'boss', p.x, p.y); }
   }
 
   // 精英定时来一只
@@ -385,8 +472,12 @@ export function update(w, dt, input) {
     if (!e.active) continue;
     const ex = p.x - e.x, ey = p.y - e.y;
     const d = Math.hypot(ex, ey) || 1;
-    e.x += (ex / d) * e.speed * dt;
-    e.y += (ey / d) * e.speed * dt;
+    if (e.kind === 'boss') {
+      tickBoss(w, e, dt);
+    } else {
+      e.x += (ex / d) * e.speed * dt;
+      e.y += (ey / d) * e.speed * dt;
+    }
     if (e.flash > 0) e.flash -= dt;
     if (e.hitCd > 0) e.hitCd -= dt;
     if (e.orbCd > 0) e.orbCd -= dt;
@@ -415,6 +506,21 @@ export function update(w, dt, input) {
     if (b.life <= 0) {
       if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg); // 地雷到期自爆
       b.active = false;
+      continue;
+    }
+    if (b.foe) {
+      // Boss 弹幕：只打玩家，命中即消失
+      const rr = p.r + b.r;
+      const fdx = p.x - b.x, fdy = p.y - b.y;
+      if (fdx * fdx + fdy * fdy <= rr * rr) {
+        b.active = false;
+        if (p.invuln <= 0) {
+          p.hp -= b.dmg;
+          p.flash = 0.15;
+          emit(w, 'hurt', p.x, p.y, b.dmg);
+          if (p.hp <= 0) { p.hp = 0; w.over = true; emit(w, 'dead', p.x, p.y); return; }
+        }
+      }
       continue;
     }
     for (const e of w.enemies) {

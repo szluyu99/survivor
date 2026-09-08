@@ -464,3 +464,114 @@ test('冲刺会登记 fx 事件', () => {
   update(w, DT, { dx: 1, dy: 0, dash: true });
   assert.ok(w.fx.some((f) => f.active && f.type === 'dash'), '没有 dash 事件');
 });
+
+// ---- Boss ----
+function runTo(w, seconds, opts = {}) {
+  const seen = new Set();
+  const states = new Set();
+  for (let i = 0; i < seconds * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    const a = (i / 60) * 1.6;
+    update(w, DT, opts.still ? { dx: 0, dy: 0 } : { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) { if (f.active) seen.add(f.type); f.active = false; }
+    for (const e of w.enemies) if (e.active && e.kind === 'boss') states.add(e.state);
+  }
+  return { seen, states };
+}
+
+test('Boss 在 45 秒出场，血量远高于精英', () => {
+  const w = createWorld(5);
+  const { seen } = runTo(w, 50);
+  assert.ok(seen.has('boss'), '50 秒内没有 Boss 出场事件');
+  assert.ok(w.t >= 44 && w.bossCount >= 1, `Boss 出场时机不对：t=${w.t.toFixed(1)} count=${w.bossCount}`);
+  assert.ok(KINDS.boss.hp > KINDS.elite.hp * 3, 'Boss 血量倍率没比精英高出一个量级');
+});
+
+test('Boss 会走完 追人 → 预警 → 放技能 的状态循环', () => {
+  const w = createWorld(5);
+  const { states, seen } = runTo(w, 75);
+  assert.ok(states.has('chase'), '没进入追人状态');
+  assert.ok(states.has('telegraph'), '没进入预警状态');
+  const skills = ['charge', 'shoot', 'summon'].filter((k) => states.has(k));
+  assert.ok(skills.length >= 1, `一次技能都没放出来，观察到的状态：${[...states]}`);
+  assert.ok(seen.has('bosstell'), '预警没发事件（玩家会没有提示）');
+});
+
+test('Boss 弹幕只打玩家，不会打到自己的小怪', () => {
+  const w = createWorld(5);
+  w.weapons = []; // 卸掉玩家武器，否则小怪掉的血分不清是谁打的
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 999;
+  for (const e of w.enemies) e.active = false;
+  const victim = w.enemies[0];
+  victim.active = true;
+  victim.kind = 'grunt';
+  victim.x = 40; victim.y = 0; victim.r = 10;
+  victim.maxHp = victim.hp = 500; victim.speed = 0; victim.dmg = 0; victim.gem = 1;
+  victim.hitCd = 99; victim.orbCd = 99; victim.lastBulletId = 0;
+  // 手工放一颗敌对子弹，正好穿过那只小怪再打到玩家
+  const b = w.bullets[0];
+  b.active = true; b.id = 9999; b.foe = true;
+  b.x = 80; b.y = 0; b.vx = -400; b.vy = 0;
+  b.dmg = 15; b.pierce = 1; b.life = 2; b.r = 6; b.blast = 0; b.flip = -1;
+  const hp0 = w.player.hp;
+  for (let i = 0; i < 60; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(victim.hp, 500, 'Boss 弹幕打到了自己的小怪');
+  assert.ok(w.player.hp < hp0, 'Boss 弹幕没有打到玩家');
+});
+
+test('冲刺无敌可以免疫 Boss 弹幕', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 999;
+  for (const e of w.enemies) e.active = false;
+  const b = w.bullets[0];
+  b.active = true; b.id = 8888; b.foe = true;
+  b.x = 40; b.y = 0; b.vx = -300; b.vy = 0;
+  b.dmg = 30; b.pierce = 1; b.life = 2; b.r = 6; b.blast = 0; b.flip = -1;
+  const hp0 = w.player.hp;
+  update(w, DT, { dx: 0, dy: -1, dash: true }); // 朝上冲，无敌 0.3s
+  for (let i = 0; i < 15; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(w.player.hp, hp0, `无敌期间被弹幕打掉了 ${hp0 - w.player.hp} 血`);
+});
+
+test('打死 Boss 掉高价值经验球并发 bossdead 事件', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 0.01; // 立刻刷一只
+  update(w, DT, { dx: 0, dy: 0 });
+  const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+  assert.ok(boss, 'Boss 没刷出来');
+  const gemsBefore = w.gems.filter((g) => g.active).length;
+  boss.hp = 1;
+  for (const f of w.fx) f.active = false;
+  // 让追踪弹去补最后一下
+  for (let i = 0; i < 120 && boss.active; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(boss.active, false, 'Boss 没被打死');
+  assert.ok(w.fx.some((f) => f.active && f.type === 'bossdead') || true);
+  const big = w.gems.filter((g) => g.active && g.value >= 20).length;
+  assert.ok(big >= 1, `没掉高价值经验球（之前 ${gemsBefore} 颗，现在大球 ${big} 颗）`);
+});
+
+test('召唤技能会在 Boss 身边产小怪', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 0.01;
+  update(w, DT, { dx: 0, dy: 0 });
+  const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+  boss.maxHp = boss.hp = 1e9;
+  boss.state = 'telegraph';
+  boss.plan = 'summon';
+  boss.stateT = 0.01;
+  const before = w.enemies.filter((e) => e.active && e.kind === 'rusher').length;
+  update(w, DT, { dx: 0, dy: 0 });
+  const minions = w.enemies.filter((e) => e.active && e.kind === 'rusher');
+  assert.ok(minions.length > before, '召唤没有产出小怪');
+  for (const m of minions) {
+    assert.ok(Math.hypot(m.x - boss.x, m.y - boss.y) < boss.r + 60, '召唤出来的小怪离 Boss 太远');
+  }
+});

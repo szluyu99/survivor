@@ -86,6 +86,18 @@ export const sfx = {
     tone({ freq: 180, to: 420, type: 'sawtooth', dur: 0.35, gain: 0.2 });
     noise({ dur: 0.4, gain: 0.12, hp: 500 });
   },
+  boss() {
+    // 低频轰鸣 + 上行，做"大家伙来了"的压迫感
+    tone({ freq: 90, to: 150, type: 'sawtooth', dur: 0.8, gain: 0.3 });
+    tone({ freq: 180, to: 120, type: 'square', dur: 0.6, gain: 0.16, delay: 0.15 });
+    noise({ dur: 0.6, gain: 0.12, hp: 200 });
+  },
+  bossTell() { if (throttle('bossTell', 200)) tone({ freq: 520, to: 700, type: 'square', dur: 0.2, gain: 0.14 }); },
+  bossShoot() { if (throttle('bossShoot', 90)) tone({ freq: 260, to: 130, type: 'sawtooth', dur: 0.16, gain: 0.16 }); },
+  bossDead() {
+    [440, 330, 220, 110].forEach((f, i) => tone({ freq: f, to: f * 0.6, type: 'square', dur: 0.3, gain: 0.22, delay: i * 0.11 }));
+    noise({ dur: 0.8, gain: 0.22, hp: 150 });
+  },
   dash() { noise({ dur: 0.18, gain: 0.14, hp: 1600 }); },
   blast() { if (throttle('blast', 60)) noise({ dur: 0.22, gain: 0.22, hp: 200 }); },
   chain() { if (throttle('chain', 60)) tone({ freq: 900, to: 1600, type: 'square', dur: 0.06, gain: 0.1 }); },
