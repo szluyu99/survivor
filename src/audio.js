@@ -86,6 +86,7 @@ export const sfx = {
     tone({ freq: 180, to: 420, type: 'sawtooth', dur: 0.35, gain: 0.2 });
     noise({ dur: 0.4, gain: 0.12, hp: 500 });
   },
+  dash() { noise({ dur: 0.18, gain: 0.14, hp: 1600 }); },
   blast() { if (throttle('blast', 60)) noise({ dur: 0.22, gain: 0.22, hp: 200 }); },
   chain() { if (throttle('chain', 60)) tone({ freq: 900, to: 1600, type: 'square', dur: 0.06, gain: 0.1 }); },
 };

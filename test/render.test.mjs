@@ -224,3 +224,26 @@ test('触摸时出现虚拟摇杆，拖动能驱动移动', () => {
   fire(handlers.canvas, 'pointerup', { pointerId: 9, pointerType: 'touch' });
   runFrames(3);
 });
+
+test('按 Shift 冲刺不炸，HUD 画出冲刺冷却', () => {
+  fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+  runFrames(5);
+  calls.length = 0;
+  fire(handlers.window, 'keydown', { code: 'ShiftLeft', preventDefault() {} });
+  runFrames(20);
+  fire(handlers.window, 'keyup', { code: 'ShiftLeft' });
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.some((t) => t.includes('冲刺')), `HUD 上没有冲刺信息：${texts.slice(0, 10)}`);
+  runFrames(60);
+});
+
+test('右键和触摸双击都能触发冲刺且不炸', () => {
+  fire(handlers.canvas, 'contextmenu', { preventDefault() {} });
+  runFrames(10);
+  fire(handlers.canvas, 'pointerdown', { pointerId: 3, pointerType: 'touch', clientX: 300, clientY: 300, timeStamp: 1000 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 3, pointerType: 'touch' });
+  fire(handlers.canvas, 'pointerdown', { pointerId: 3, pointerType: 'touch', clientX: 300, clientY: 300, timeStamp: 1150 });
+  runFrames(20);
+  fire(handlers.canvas, 'pointerup', { pointerId: 3, pointerType: 'touch' });
+  runFrames(10);
+});

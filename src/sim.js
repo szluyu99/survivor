@@ -48,6 +48,8 @@ export function createWorld(seed = 1) {
       speed: 200,
       level: 1, xp: 0, xpNext: 4,
       flash: 0,
+      // 冲刺：dashT 是剩余冲刺时间，invuln 是剩余无敌时间，faceX/Y 是站着不动时的冲刺朝向
+      dashT: 0, dashCd: 0, invuln: 0, dashX: 1, dashY: 0, faceX: 1, faceY: 0,
     },
     stats: { damageMul: 1, rateMul: 1, pickupRange: 90 },
     weapons: [{ id: 'bolt', level: 1, timer: 0 }],
@@ -314,16 +316,42 @@ function tickWave(w, dt) {
   }
 }
 
+// 冲刺参数：0.16 秒冲出去，期间 0.3 秒无敌（比冲刺本身长一点，穿怪才不会刚出来就被贴脸）
+export const DASH = { time: 0.16, speed: 780, invuln: 0.3, cd: 3 };
+
 export function update(w, dt, input) {
   if (w.over || w.paused) return;
   w.t += dt;
   const p = w.player;
+
+  if (p.dashCd > 0) p.dashCd -= dt;
+  if (p.invuln > 0) p.invuln -= dt;
 
   // 玩家移动
   let dx = input.dx, dy = input.dy;
   const len = Math.hypot(dx, dy);
   if (len > 0) {
     dx /= len; dy /= len;
+    p.faceX = dx; p.faceY = dy;
+  }
+
+  // 起步冲刺：优先用当前输入方向，站着不动就用最后一次朝向
+  if (input.dash && p.dashCd <= 0 && p.dashT <= 0) {
+    p.dashX = len > 0 ? dx : p.faceX;
+    p.dashY = len > 0 ? dy : p.faceY;
+    p.dashT = DASH.time;
+    p.invuln = DASH.invuln;
+    p.dashCd = DASH.cd;
+    emit(w, 'dash', p.x, p.y);
+  }
+
+  if (p.dashT > 0) {
+    // 冲刺期间无视输入，按固定速度走完
+    const step = Math.min(dt, p.dashT);
+    p.x += p.dashX * DASH.speed * step;
+    p.y += p.dashY * DASH.speed * step;
+    p.dashT -= dt;
+  } else if (len > 0) {
     p.x += dx * p.speed * dt;
     p.y += dy * p.speed * dt;
   }
@@ -364,6 +392,7 @@ export function update(w, dt, input) {
     if (e.orbCd > 0) e.orbCd -= dt;
     if (d < e.r + p.r && e.hitCd <= 0) {
       e.hitCd = 0.8;
+      if (p.invuln > 0) continue; // 冲刺无敌：撞上了也不掉血，但接触冷却照走
       p.hp -= e.dmg;
       p.flash = 0.15;
       emit(w, 'hurt', p.x, p.y, e.dmg);

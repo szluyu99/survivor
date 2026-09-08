@@ -1,5 +1,5 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, VIEW_W, VIEW_H, TRAITS } from './sim.js';
+import { createWorld, update, chooseUpgrade, VIEW_W, VIEW_H, TRAITS, DASH } from './sim.js';
 import { WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
@@ -71,6 +71,9 @@ function consumeFx(w) {
       fxState.shake = 14;
       sfx.dead();
       saveBest(w);
+    } else if (f.type === 'dash') {
+      burst(f.x, f.y, 12, P.playerRing, 150, 2.5);
+      sfx.dash();
     } else if (f.type === 'elite') {
       fxState.warn = 1.2;
       fxState.warnText = '精英出现';
@@ -159,7 +162,8 @@ window.addEventListener('resize', resize);
 
 let world = createWorld(Date.now() & 0xffff);
 const keys = new Set();
-const input = { dx: 0, dy: 0 };
+const input = { dx: 0, dy: 0, dash: false };
+let dashQueued = false; // 冲刺是边沿触发，按住不会连续冲
 let mutedHint = false;
 let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
@@ -184,6 +188,9 @@ addEventListener('keydown', (e) => {
   beginGame(); // 音频必须在用户手势里启动
   keys.add(e.code);
   if (e.code === 'KeyM') mutedHint = toggleMute();
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') && started && !world.over && !world.paused && !uiPaused) {
+    if (!e.repeat) dashQueued = true;
+  }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
   if (world.paused && world.choices) {
@@ -196,7 +203,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 
 // 切窗口时 keyup 会丢，回来后角色会一直朝一个方向跑，必须清空
-addEventListener('blur', () => { keys.clear(); pointer = null; stick.active = false; });
+addEventListener('blur', () => { keys.clear(); pointer = null; stick.active = false; dashQueued = false; });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { keys.clear(); pointer = null; stick.active = false; }
 });
@@ -205,6 +212,7 @@ document.addEventListener('visibilitychange', () => {
 let pointer = null;
 const stick = { active: false, ox: 0, oy: 0, x: 0, y: 0 };
 const STICK_R = 46;
+let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
   const wasStarted = started;
@@ -225,6 +233,10 @@ canvas.addEventListener('pointerdown', (e) => {
     restart();
     pointer = null;
   } else if (e.pointerType === 'touch') {
+    // 双击冲刺：手机上没有 Shift
+    const nowMs = e.timeStamp || 0;
+    if (nowMs - lastTouchDown < 320) dashQueued = true;
+    lastTouchDown = nowMs;
     stick.active = true;
     stick.ox = stick.x = pointer.x;
     stick.oy = stick.y = pointer.y;
@@ -236,6 +248,11 @@ canvas.addEventListener('pointermove', (e) => {
   if (stick.active) { stick.x = pointer.x; stick.y = pointer.y; }
 });
 canvas.addEventListener('pointerup', () => { pointer = null; stick.active = false; });
+// 右键冲刺，顺便屏蔽右键菜单
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (started && !world.over && !world.paused && !uiPaused) dashQueued = true;
+});
 canvas.addEventListener('pointercancel', () => { pointer = null; stick.active = false; });
 
 function viewPos(e) {
@@ -265,6 +282,8 @@ function readInput() {
   }
   input.dx = dx;
   input.dy = dy;
+  input.dash = dashQueued;
+  dashQueued = false;
   return input;
 }
 
@@ -359,13 +378,24 @@ function drawHud(w) {
   ctx.fillStyle = P.xp;
   ctx.fillRect(16, 34, 220 * Math.min(1, p.xp / p.xpNext), 8);
 
+  // 冲刺冷却条：满了就是亮色，冷却中是灰的
+  const ready = p.dashCd <= 0;
+  ctx.fillStyle = P.bar;
+  ctx.fillRect(16, 46, 220, 5);
+  ctx.fillStyle = ready ? P.player : P.faint;
+  ctx.fillRect(16, 46, 220 * (ready ? 1 : 1 - p.dashCd / DASH.cd), 5);
+  ctx.fillStyle = ready ? P.player : P.faint;
+  ctx.font = '11px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(ready ? '冲刺就绪（Shift / 空格 / 右键）' : `冲刺 ${p.dashCd.toFixed(1)}s`, 16, 66);
+
   ctx.fillStyle = P.dim;
   ctx.font = '14px ui-monospace, monospace';
   ctx.textAlign = 'left';
-  ctx.fillText(`Lv.${p.level}  击杀 ${w.kills}`, 16, 62);
+  ctx.fillText(`Lv.${p.level}  击杀 ${w.kills}`, 16, 86);
   ctx.fillStyle = P.dimmer;
   ctx.font = '13px ui-monospace, monospace';
-  ctx.fillText(w.weapons.map((i) => `${WEAPON_NAME[i.id]}${i.level}`).join('  '), 16, 82);
+  ctx.fillText(w.weapons.map((i) => `${WEAPON_NAME[i.id]}${i.level}`).join('  '), 16, 106);
   ctx.textAlign = 'right';
   const m = Math.floor(w.t / 60), s = Math.floor(w.t % 60);
   ctx.font = '22px ui-monospace, monospace';
@@ -563,6 +593,7 @@ function drawTitle() {
     'WASD / 方向键移动，手机直接按住屏幕拖动',
     '攻击是自动的，你只需要走位',
     '捡蓝色经验球升级，每次升级三选一',
+    'Shift / 空格 / 右键冲刺，短暂无敌可以穿怪（手机双击）',
   ];
   lines.forEach((t, i) => ctx.fillText(t, cx, 280 + i * 26));
 
@@ -675,6 +706,16 @@ function render(w) {
   ctx.ellipse(pcx, pcy + w.player.r * 0.9, w.player.r * 0.95, w.player.r * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
   drawEntity('grunt', pcx, pcy, w.player.r, w.player.flash > 0 ? P.hitFlash : P.player, 0, 2.5);
+  if (w.player.invuln > 0) {
+    // 无敌期间套一圈光环，让"我现在能穿怪"这件事看得见
+    ctx.strokeStyle = P.playerRing;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.35 + 0.45 * Math.min(1, w.player.invuln / 0.3);
+    ctx.beginPath();
+    ctx.arc(pcx, pcy, w.player.r + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   ctx.strokeStyle = P.playerRing;
   ctx.lineWidth = 2;
   ctx.beginPath();

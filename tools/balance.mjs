@@ -8,14 +8,16 @@ const SEEDS = [1, 5, 9, 13, 21];
 const circling = (i) => ({ dx: Math.cos((i / 60) * 1.6), dy: Math.sin((i / 60) * 1.6) });
 const still = () => ({ dx: 0, dy: 0 });
 
-function play({ seed, weapons, mover = circling, pick = () => 0, maxSeconds = 600 }) {
+function play({ seed, weapons, mover = circling, pick = () => 0, maxSeconds = 600, dash = false }) {
   const w = createWorld(seed);
   if (weapons) w.weapons = weapons.map((id) => ({ id, level: 1, timer: 0 }));
   let levels = 0;
   let peak = 0;
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
     if (w.paused) { levels++; chooseUpgrade(w, pick(i)); }
-    update(w, DT, mover(i));
+    const inp = mover(i);
+    // 有冷却就冲：模拟真人一有冲刺就用掉
+    update(w, DT, dash ? { ...inp, dash: w.player.dashCd <= 0 } : inp);
     for (const f of w.fx) f.active = false;
     let live = 0;
     for (const e of w.enemies) if (e.active) live++;
@@ -43,6 +45,15 @@ for (const [i, r] of runs.entries()) {
   console.log(`seed ${pad(SEEDS[i], 4)} ${pad(clock(r.t), 7)} ${pad(r.kills + '杀', 8)} ${pad('Lv.' + (r.levels + 1), 7)} 峰值${pad(r.peak + '怪', 7)} ${r.build}`);
 }
 console.log(`平均存活 ${clock(avg(runs.map((r) => r.t)))}  平均击杀 ${avg(runs.map((r) => r.kills)).toFixed(0)}  平均升级 ${avg(runs.map((r) => r.levels)).toFixed(1)} 次`);
+
+console.log('\n=== 冲刺对难度的影响（同 seed，其他条件一致）===');
+{
+  const pick = (i) => Math.floor(i / 97) % 3;
+  const off = SEEDS.map((seed) => play({ seed, pick }));
+  const on = SEEDS.map((seed) => play({ seed, pick, dash: true }));
+  console.log(pad('不冲刺', 10), `平均存活 ${clock(avg(off.map((r) => r.t)))}  平均击杀 ${avg(off.map((r) => r.kills)).toFixed(0)}`);
+  console.log(pad('一直冲刺', 10), `平均存活 ${clock(avg(on.map((r) => r.t)))}  平均击杀 ${avg(on.map((r) => r.kills)).toFixed(0)}`);
+}
 
 console.log('\n=== 各兵种首次出现 ===');
 const first = {};

@@ -398,3 +398,69 @@ test('info() 会跟着通用词条倍率变化', () => {
   const after = findWeapon('bolt').info(1, w).join();
   assert.notEqual(before, after, '加了倍率后面板数值没变，说明面板显示的是裸数值');
 });
+
+// ---- 冲刺 ----
+import { DASH } from '../src/sim.js';
+
+test('冲刺会把玩家推出比正常跑动更远的距离', () => {
+  const a = createWorld(2), b = createWorld(2);
+  const frames = Math.ceil(DASH.time * 60);
+  for (let i = 0; i < frames; i++) update(a, DT, { dx: 1, dy: 0, dash: i === 0 });
+  for (let i = 0; i < frames; i++) update(b, DT, { dx: 1, dy: 0, dash: false });
+  assert.ok(a.player.x > b.player.x * 2, `冲刺位移 ${a.player.x.toFixed(0)} 没明显超过正常跑动 ${b.player.x.toFixed(0)}`);
+});
+
+test('冲刺有冷却，按住不放也只冲一次', () => {
+  const w = createWorld(2);
+  for (let i = 0; i < 60; i++) update(w, DT, { dx: 1, dy: 0, dash: true });
+  const afterFirst = w.player.x;
+  assert.ok(w.player.dashCd > 0, '冲完之后没有进入冷却');
+  for (let i = 0; i < 60; i++) update(w, DT, { dx: 1, dy: 0, dash: true });
+  // 第二秒只有正常跑动的位移（约 200px），如果冷却失效会明显更多
+  const moved = w.player.x - afterFirst;
+  assert.ok(moved < 260, `冷却期间又冲了：这一秒走了 ${moved.toFixed(0)}px`);
+});
+
+test('冷却结束后可以再冲', () => {
+  const w = createWorld(2);
+  update(w, DT, { dx: 1, dy: 0, dash: true });
+  for (let i = 0; i < Math.ceil(DASH.cd * 60) + 5; i++) update(w, DT, { dx: 0, dy: 0, dash: false });
+  assert.ok(w.player.dashCd <= 0, '冷却没有走完');
+  const before = w.player.x;
+  for (let i = 0; i < Math.ceil(DASH.time * 60); i++) update(w, DT, { dx: 1, dy: 0, dash: i === 0 });
+  assert.ok(w.player.x - before > 80, '冷却结束后冲不动了');
+});
+
+test('冲刺期间无敌，撞上敌人不掉血', () => {
+  const w = createWorld(2);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  for (const e of w.enemies) e.active = false;
+  // 在玩家身上堆一圈怪，正常情况下会立刻掉血
+  for (let i = 0; i < 6; i++) {
+    const e = w.enemies[i];
+    e.active = true;
+    e.kind = 'grunt';
+    e.x = Math.cos(i) * 14; e.y = Math.sin(i) * 14; e.r = 10;
+    e.maxHp = e.hp = 1e9; e.speed = 0; e.dmg = 20; e.gem = 1;
+    e.hitCd = 0; e.orbCd = 0; e.lastBulletId = 0;
+  }
+  const hp0 = w.player.hp;
+  update(w, DT, { dx: 1, dy: 0, dash: true });
+  for (let i = 0; i < Math.ceil(DASH.invuln * 60) - 2; i++) update(w, DT, { dx: 1, dy: 0, dash: false });
+  assert.equal(w.player.hp, hp0, `无敌期间掉了 ${hp0 - w.player.hp} 血`);
+});
+
+test('站着不动也能朝最后一次移动方向冲刺', () => {
+  const w = createWorld(2);
+  for (let i = 0; i < 10; i++) update(w, DT, { dx: 0, dy: -1, dash: false }); // 先朝上走
+  const y0 = w.player.y;
+  for (let i = 0; i < Math.ceil(DASH.time * 60); i++) update(w, DT, { dx: 0, dy: 0, dash: i === 0 });
+  assert.ok(w.player.y < y0 - 80, `站着冲刺没往上走：${y0.toFixed(0)} → ${w.player.y.toFixed(0)}`);
+});
+
+test('冲刺会登记 fx 事件', () => {
+  const w = createWorld(2);
+  update(w, DT, { dx: 1, dy: 0, dash: true });
+  assert.ok(w.fx.some((f) => f.active && f.type === 'dash'), '没有 dash 事件');
+});
