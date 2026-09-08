@@ -29,6 +29,9 @@ jobs:
       - name: 跑测试
         run: npm test
       - uses: actions/configure-pages@v5
+        with:
+          # 仓库还没开 Pages 时，让 action 自己去开（否则报 Get Pages site failed / Not Found）
+          enablement: true
       - name: 打包（纯静态，直接传仓库根目录）
         uses: actions/upload-pages-artifact@v3
         with:
