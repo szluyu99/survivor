@@ -1,0 +1,12 @@
+{
+  "name": "survivor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "色块幸存者 —— 纯静态 Web 割草原型，零依赖零构建",
+  "scripts": {
+    "test": "node --test test/sim.test.mjs test/render.test.mjs",
+    "balance": "node tools/balance.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

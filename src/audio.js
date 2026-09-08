@@ -1,0 +1,91 @@
+// 音效全部用 Web Audio 现场合成，不加载任何音频文件（零资源体积）。
+// iOS Safari 必须在用户手势里 resume，见 unlock()。
+
+let ctx = null;
+let master = null;
+let muted = false;
+
+export function unlock() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.25;
+    master.connect(ctx.destination);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+}
+
+export function toggleMute() {
+  muted = !muted;
+  if (master) master.gain.value = muted ? 0 : 0.25;
+  return muted;
+}
+
+function tone({ freq = 440, to = freq, type = 'square', dur = 0.08, gain = 0.3, delay = 0 }) {
+  if (!ctx || muted) return;
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (to !== freq) osc.frequency.exponentialRampToValueAtTime(Math.max(1, to), t0 + dur);
+  g.gain.setValueAtTime(gain, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(master);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+// 白噪声爆一下，用来做击杀的"碎裂"感
+function noise({ dur = 0.12, gain = 0.25, hp = 800 }) {
+  if (!ctx || muted) return;
+  const n = Math.floor(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const f = ctx.createBiquadFilter();
+  f.type = 'highpass';
+  f.frequency.value = hp;
+  const g = ctx.createGain();
+  g.gain.value = gain;
+  src.connect(f).connect(g).connect(master);
+  src.start();
+}
+
+// 同一帧里同类音效叠太多会糊成噪音，做个节流
+const last = {};
+function throttle(key, ms) {
+  const now = ctx ? ctx.currentTime * 1000 : 0;
+  if (last[key] && now - last[key] < ms) return false;
+  last[key] = now;
+  return true;
+}
+
+export const sfx = {
+  hit() { if (throttle('hit', 45)) tone({ freq: 320, to: 180, type: 'triangle', dur: 0.05, gain: 0.12 }); },
+  kill() { if (throttle('kill', 40)) noise({ dur: 0.1, gain: 0.16, hp: 1200 }); },
+  hurt() { tone({ freq: 160, to: 60, type: 'sawtooth', dur: 0.22, gain: 0.3 }); },
+  levelup() {
+    [523, 659, 784].forEach((f, i) => tone({ freq: f, type: 'square', dur: 0.12, gain: 0.18, delay: i * 0.07 }));
+  },
+  dead() {
+    tone({ freq: 220, to: 40, type: 'sawtooth', dur: 0.9, gain: 0.35 });
+    noise({ dur: 0.5, gain: 0.2, hp: 300 });
+  },
+  // 精英预警：两声下行，跟升级的上行琶音区分开
+  elite() {
+    tone({ freq: 300, to: 200, type: 'square', dur: 0.18, gain: 0.22 });
+    tone({ freq: 240, to: 150, type: 'square', dur: 0.26, gain: 0.22, delay: 0.2 });
+  },
+  // 冲锋警报：上行 + 一层噪声，听起来"有东西涌过来"
+  surge() {
+    tone({ freq: 180, to: 420, type: 'sawtooth', dur: 0.35, gain: 0.2 });
+    noise({ dur: 0.4, gain: 0.12, hp: 500 });
+  },
+  blast() { if (throttle('blast', 60)) noise({ dur: 0.22, gain: 0.22, hp: 200 }); },
+  chain() { if (throttle('chain', 60)) tone({ freq: 900, to: 1600, type: 'square', dur: 0.06, gain: 0.1 }); },
+};
