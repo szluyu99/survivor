@@ -21,6 +21,9 @@ function play({ seed, weapons, startLevels = null, mover = circling, pick = () =
     // 有冷却就冲：模拟真人一有冲刺就用掉
     update(w, DT, dash ? { ...inp, dash: w.player.dashCd <= 0 } : inp);
     for (const f of w.fx) {
+      // 只有这一处需要记账：bossKills / firstBossKillAt 是 play() 的局部变量。
+      // 之前把这段整体复制到了另外四个循环里，那些地方没有这两个变量，
+      // 而且只在"真的有 Boss 被打死"时才会抛 ReferenceError，所以本地跑没炸、CI 炸了
       if (f.active && f.type === 'bossdead') { bossKills++; if (firstBossKillAt === null) firstBossKillAt = w.t; }
       f.active = false;
     }
@@ -189,10 +192,7 @@ const first = {};
   for (let i = 0; i < 120 * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) {
-      if (f.active && f.type === 'bossdead') { bossKills++; if (firstBossKillAt === null) firstBossKillAt = w.t; }
-      f.active = false;
-    }
+    for (const f of w.fx) f.active = false;
     for (const e of w.enemies) if (e.active && first[e.kind] === undefined) first[e.kind] = w.t;
   }
 }
@@ -209,10 +209,7 @@ for (const [name, dt] of [['30fps', 1 / 30], ['60fps', 1 / 60], ['144fps', 1 / 1
       if (w.paused) chooseUpgrade(w, 0);
       const a = w.t * 1.6;
       update(w, dt, { dx: Math.cos(a), dy: Math.sin(a) });
-      for (const f of w.fx) {
-      if (f.active && f.type === 'bossdead') { bossKills++; if (firstBossKillAt === null) firstBossKillAt = w.t; }
-      f.active = false;
-    }
+      for (const f of w.fx) f.active = false;
     }
     return w.t;
   });
@@ -225,10 +222,7 @@ console.log('\n=== 单帧逻辑耗时（峰值实体下）===');
   for (let i = 0; i < 70 * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) {
-      if (f.active && f.type === 'bossdead') { bossKills++; if (firstBossKillAt === null) firstBossKillAt = w.t; }
-      f.active = false;
-    }
+    for (const f of w.fx) f.active = false;
   }
   let live = 0;
   for (const e of w.enemies) if (e.active) live++;
@@ -237,10 +231,7 @@ console.log('\n=== 单帧逻辑耗时（峰值实体下）===');
   for (let i = 0; i < 600 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, circling(i));
-    for (const f of w.fx) {
-      if (f.active && f.type === 'bossdead') { bossKills++; if (firstBossKillAt === null) firstBossKillAt = w.t; }
-      f.active = false;
-    }
+    for (const f of w.fx) f.active = false;
     n++;
   }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6 / Math.max(1, n);
