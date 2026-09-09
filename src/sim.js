@@ -2,7 +2,7 @@
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
 import { findWeapon } from './weapons.js';
 import { rollChoices, rerollChoices, banishChoice, TRAITS, CURSES } from './upgrades.js';
-import { KINDS, tickEnemy, tickSpawns, splitOnDeath, makeEnemy } from './enemies.js';
+import { KINDS, tickEnemy, tickSpawns, splitOnDeath, bossFissionOnDeath, makeEnemy, BOSS_KINDS, findBossKind } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
@@ -27,6 +27,8 @@ export { PERKS, earnShards };
 export { TRAITS, CURSES };
 // 兵种表定义在 enemies.js，同样转出去
 export { KINDS };
+// Boss 原型表定义在 bosses.js，经 enemies.js 转出
+export { BOSS_KINDS, findBossKind };
 export { TERRAIN };
 export { SKILLS, MAX_SKILL_SLOTS };
 
@@ -115,7 +117,10 @@ function rollDmg(w, dmg) {
 // 四个伤害入口（子弹命中 / 区域伤害 / 爆炸 / 单体点伤）以前各写一遍暴击+记账+击杀，
 // 打断机制要在每处再加一次累计，太容易漏。统一收口到这里
 function damageEnemy(w, e, dmg0, src) {
-  const [dmg, crit] = rollDmg(w, dmg0);
+  const [rolled, crit] = rollDmg(w, dmg0);
+  // 守卫者：护卫还活着时减伤。标记在 tickBoss 里每帧算好，这里只读——
+  // Boss 一帧能被打十几次，不能在伤害入口里扫敌人池
+  const dmg = e.shielded ? rolled * findBossKind(e.boss).guard.damageTaken : rolled;
   const real = Math.min(dmg, e.hp);
   e.hp -= dmg;
   e.flash = crit ? 0.12 : 0.08;
@@ -203,7 +208,9 @@ function killEnemy(w, e) {
     w.player.hp = Math.min(w.player.maxHp, w.player.hp + w.stats.lifeOnKill);
   }
   if (kind === 'splitter') splitOnDeath(w, e, enemyCtx);
-  emit(w, kind === 'boss' ? 'bossdead' : 'kill', x, y, r);
+  // 裂变者死了会裂成两只小 Boss，这时不该报"BOSS 倒下"（它还没真的倒下）
+  const fissioned = kind === 'boss' && bossFissionOnDeath(w, e, enemyCtx);
+  emit(w, kind === 'boss' ? (fissioned ? 'kill' : 'bossdead') : 'kill', x, y, r);
   dropGem(w, x, y, gem);
 }
 

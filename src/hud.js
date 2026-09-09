@@ -12,6 +12,7 @@ import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards } from '
 import { currentZone, ZONE_SECONDS } from './zones.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
+import { findBossKind } from './bosses.js';
 
 const WEAPON_NAME = Object.fromEntries(ALL_WEAPONS.map((x) => [x.id, x.name]));
 
@@ -106,6 +107,12 @@ export function createHud(ctx, deps) {
       ctx.textAlign = 'center';
       ctx.fillStyle = P.warn;
       ctx.font = 'bold 12px sans-serif';
+      // Boss 原型名 + 减伤状态：不写出来的话"打不动"看起来像 bug
+      const arch = findBossKind(boss.boss);
+      ctx.fillText(
+        boss.shielded ? `${arch.name}（护卫在场，减伤）` : arch.name,
+        VIEW_W / 2, 12,
+      );
       // 预警期间显示打断进度：满了这一招就被打掉
     if (boss.state === 'telegraph') {
       const need = interruptNeed(boss);

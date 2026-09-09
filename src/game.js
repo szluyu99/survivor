@@ -1,5 +1,5 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone, findBossKind } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
@@ -471,10 +471,20 @@ function render(w) {
         }
         ctx.globalAlpha = 1;
       }
-      ctx.strokeStyle = e.rage ? P.bossRage : P.warn;
+      ctx.strokeStyle = e.rage ? P.bossRage : findBossKind(e.boss).ring;
       ctx.lineWidth = e.rage ? 3 : 2;
       shapePath('boss', ex, ey, e.r + 6, 0);
       ctx.stroke();
+      // 减伤中：再套一圈护卫色的虚圈，让"现在打不动"看得见
+      if (e.shielded) {
+        ctx.strokeStyle = P.calm;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(ex, ey, e.r + 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       if (e.rage) {
         // 狂暴多一圈，远远就能看出这只已经进二阶段了
         shapePath('boss', ex, ey, e.r + 13, Math.PI / 6);

@@ -15,6 +15,7 @@ import { HEROES } from './heroes.js';
 import { HERO_CARD, PERK_BTN } from './layout.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
+import { BOSS_KINDS } from './bosses.js';
 import { TERRAIN_TUNING } from './tuning.js';
 
 function checkWeapon(def, errors) {
@@ -176,6 +177,7 @@ export function validateContent() {
     for (const kind of z.burst || []) {
       if (!KINDS[kind]) errors.push(`${at}：冲锋潮兵种 ${kind} 不存在`);
     }
+    if (!BOSS_KINDS.some((b) => b.id === z.boss)) errors.push(`${at}：Boss 原型 ${z.boss} 不存在`);
   }
   if (Object.keys(ZONES[0].weights || {}).length || Object.keys(ZONES[0].terrain || {}).length) {
     errors.push('第一个区域必须是基准区域（不改权重也不改地形），平衡数据以它为锚点');
@@ -183,6 +185,35 @@ export function validateContent() {
   // 区域之间必须真的不一样，否则配置写了等于没写
   const fingerprints = ZONES.map((z) => JSON.stringify([z.weights, z.terrain, z.burst]));
   if (new Set(fingerprints).size !== fingerprints.length) errors.push('有两个区域的配置完全相同');
+
+  // Boss 原型
+  const bossIds = BOSS_KINDS.map((b) => b.id);
+  if (new Set(bossIds).size !== bossIds.length) errors.push('Boss 原型 id 有重复');
+  if (Object.keys(BOSS_KINDS[0].plans).length !== 3 || BOSS_KINDS[0].hpMul !== 1) {
+    errors.push('第一个 Boss 原型必须是基准原型（三招齐全、血量倍率 1），历史平衡数据以它为锚点');
+  }
+  for (const b of BOSS_KINDS) {
+    const at = `Boss 原型 ${b.id || '?'}`;
+    if (!b.id || !b.name) errors.push(`${at}：缺 id 或 name`);
+    if (!b.plans || typeof b.plans !== 'object') errors.push(`${at}：缺 plans`);
+    let sum = 0;
+    for (const [plan, v] of Object.entries(b.plans || {})) {
+      if (!['charge', 'shoot', 'summon'].includes(plan)) errors.push(`${at}：招式 ${plan} 状态机里不存在`);
+      if (!(v >= 0)) errors.push(`${at}：招式 ${plan} 权重不合法`);
+      sum += v;
+    }
+    if (!(sum > 0)) errors.push(`${at}：招式权重全是 0，它永远不会出招`);
+    if (!(b.hpMul > 0)) errors.push(`${at}：血量倍率不合法`);
+    if (!b.ring) errors.push(`${at}：缺描边色 ring`);
+    if (b.fission !== undefined && !(b.fission >= 2)) errors.push(`${at}：fission 至少要裂成 2 只`);
+    if (b.guard) {
+      if (!KINDS[b.guard.kind]) errors.push(`${at}：护卫兵种 ${b.guard.kind} 不存在`);
+      if (!(b.guard.radius > 0)) errors.push(`${at}：护卫判定半径不合法`);
+      if (!(b.guard.damageTaken > 0 && b.guard.damageTaken < 1)) {
+        errors.push(`${at}：减伤后的受伤倍率应该在 0~1 之间`);
+      }
+    }
+  }
 
   // 槽位数得放得下东西，否则玩法直接失效
   if (!(MAX_SLOTS >= 1)) errors.push('武器槽位数不合法');

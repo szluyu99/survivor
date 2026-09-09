@@ -11,15 +11,16 @@ import { createWorld, update, chooseUpgrade, reroll, banish, DEFAULT_HERO } from
 import { cardByKey } from './upgrades.js';
 
 // v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性）；
-// v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形，快照必须带上）
-export const REPLAY_VERSION = 4;
+// v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形）；
+// v5：加了 Boss 原型（boss/gen/shielded 决定行为和减伤）
+export const REPLAY_VERSION = 5;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
 
 const ENEMY_FIELDS = ['kind', 'x', 'y', 'r', 'hp', 'maxHp', 'speed', 'dmg', 'gem',
   'hitCd', 'orbCd', 'lastBulletId', 'flash', 'state', 'stateT', 'moveX', 'moveY',
-  'volley', 'plan', 'rage', 'stun', 'tellDmg'];
+  'volley', 'plan', 'rage', 'stun', 'tellDmg', 'boss', 'gen', 'shielded'];
 const BULLET_FIELDS = ['id', 'x', 'y', 'vx', 'vy', 'r', 'life', 'dmg', 'pierce',
   'blast', 'flip', 'foe', 'homing', 'src', 'color'];
 const GEM_FIELDS = ['x', 'y', 'r', 'value'];

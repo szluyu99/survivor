@@ -191,6 +191,15 @@ export function createFx({ onDeath } = {}) {
       fxState.warnColor = P.warn;
       sfx.bossDead();
     },
+    // 裂变：本体没了但战斗还没结束，提示要和"倒下"区分开
+    bossfission: (f) => {
+      burst(f.x, f.y, 40, P.enemy.splitter, 280, 4);
+      fxState.shake = Math.max(fxState.shake, 9);
+      fxState.warn = 1.5;
+      fxState.warnText = 'BOSS 裂变！';
+      fxState.warnColor = P.enemy.splitter;
+      sfx.bossRage();
+    },
     interrupt: (f) => {
       ring(f.x, f.y, f.amount * 3, P.interrupt);
       burst(f.x, f.y, 26, P.interrupt, 240, 3);

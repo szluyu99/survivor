@@ -12,7 +12,7 @@ export const FX_EVENTS = [
   // 敌人与波次
   'elite', 'surge', 'calm', 'split', 'shoot', 'summon',
   // Boss
-  'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt',
+  'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
   // 地图
   'chest', 'zone',
 ];

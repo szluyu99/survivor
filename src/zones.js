@@ -20,6 +20,7 @@ export const ZONES = [
     weights: {},
     terrain: {},
     burst: ['rusher', 'grunt'],
+    boss: 'brute',
     tint: null,
   },
   {
@@ -30,6 +31,7 @@ export const ZONES = [
     // 泥地为主、地形更密：走位空间被压缩，贴身武器占优
     terrain: { rockShare: 0.2, maxFillers: 34 },
     burst: ['rusher', 'splitter'],
+    boss: 'fission',
     tint: 'rgba(60,120,90,0.07)',
   },
   {
@@ -39,6 +41,7 @@ export const ZONES = [
     weights: { grunt: 0.7, rusher: 0.6, tank: 2.4, summoner: 2.6, shooter: 0.6 },
     terrain: { rockShare: 0.92, maxFillers: 30, chestCooldown: 20 },
     burst: ['rusher', 'tank'],
+    boss: 'warden',
     tint: 'rgba(120,70,140,0.07)',
   },
 ];
@@ -64,6 +67,11 @@ export function zoneTerrain(w, field) {
 // 冲锋潮用的两个兵种（主 + 备）。备用兵种在还没解锁时会退回杂兵
 export function zoneBurst(w) {
   return currentZone(w).burst || ['rusher', 'grunt'];
+}
+
+// 这个区域刷什么 Boss 原型
+export function zoneBoss(w) {
+  return currentZone(w).boss || 'brute';
 }
 
 // 推进区域。切换的那一帧返回新区域，让 sim 去登记横幅和音效

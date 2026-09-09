@@ -5,8 +5,9 @@
 // 冲锋潮和敌人成长用了两套时间档。数据其实都摆在报告里，但靠人逐行看不可靠。
 // 这里把那几类问题写成硬规则。
 
-import { createWorld, update, chooseUpgrade, HEROES } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, HEROES, BOSS_KINDS } from '../src/sim.js';
 import { PERKS, earnShards, heroCost } from '../src/meta.js';
+import { ZONES } from '../src/zones.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
@@ -255,6 +256,50 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
   check(buffAvg / baseAvg < 1.8, `满级永久强化把平均存活拉到 ${(buffAvg / baseAvg).toFixed(2)} 倍，局外加成盖过了局内成长`);
   check(shards > 0, '一局赚不到残片，局外进度永远动不了');
   check(totalCost / Math.max(1, shards) < 40, `全解锁要打 ${Math.ceil(totalCost / shards)} 局，太肝了`);
+}
+
+console.log('== 10. 每个 Boss 原型都要能打死，且不能变成消耗战 ==');
+{
+  // 把区域钉住来决定原型，给一套中等强度的 build，测打死本体（裂变者要连子体一起）要多久。
+  // 拦两类问题：某个原型的减伤/裂变把血量堆到打不动，或者反过来强度写崩了一秒就死
+  for (const z of ZONES) {
+    const arch = BOSS_KINDS.find((b) => b.id === z.boss);
+    const times = [];
+    for (const seed of SEEDS.slice(0, 3)) {
+      const w = createWorld(seed);
+      w.player.maxHp = w.player.hp = 1e9;   // 只测输出，不测生存
+      w.weapons = [{ id: 'bolt', level: 5, timer: 0 }, { id: 'chain', level: 3, timer: 0 }];
+      w.spawnTimer = 1e9;
+      w.eliteTimer = 1e9;
+      w.bossTimer = 0.1;
+      let seen = 0;
+      let deadAt = null;
+      for (let i = 0; i < 150 * 60; i++) {
+        if (w.paused) chooseUpgrade(w, 0);
+        w.zoneIndex = ZONES.indexOf(z);
+        w.zoneT = 0;
+        w.t = Math.max(w.t, 60);            // 保证 Boss 过了解锁时间
+        const a = (i / 60) * 1.6;
+        update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+        for (const f of w.fx) {
+          if (f.active && f.type === 'boss') seen++;
+          if (f.active && f.type === 'bossdead' && deadAt === null) deadAt = w.t;
+          f.active = false;
+        }
+        if (seen > 0) w.bossTimer = 1e9;    // 只打第一只
+        if (deadAt !== null) break;
+      }
+      times.push(deadAt);
+    }
+    const killed = times.filter((t) => t !== null);
+    const avg = killed.length ? avgOf(killed) : null;
+    console.log(`  ${z.name} 的 ${arch.name}：打死 ${killed.length}/${times.length}，平均 ${avg ? avg.toFixed(0) + 's' : '打不死'}`);
+    check(killed.length === times.length, `${arch.name} 有 ${times.length - killed.length} 局在 150 秒内没打死，可能是减伤或裂变堆得太厚`);
+    if (avg !== null) {
+      check(avg > 5, `${arch.name} 平均 ${avg.toFixed(1)}s 就死了，Boss 战没有存在感`);
+      check(avg < 130, `${arch.name} 平均要打 ${avg.toFixed(0)}s，变成消耗战了`);
+    }
+  }
 }
 
 console.log('');

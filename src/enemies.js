@@ -3,7 +3,10 @@
 // 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
 import { VIEW_W, VIEW_H } from './view.js';
 import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
-import { zoneWeight, zoneBurst } from './zones.js';
+import { zoneWeight, zoneBurst, zoneBoss } from './zones.js';
+import { BOSS_KINDS, findBossKind, rollPlan, DEFAULT_BOSS } from './bosses.js';
+
+export { BOSS_KINDS, findBossKind };
 
 // 敌人对象的形状。只有 Boss 会用到后面那几个状态机字段
 export function makeEnemy() {
@@ -11,6 +14,8 @@ export function makeEnemy() {
     active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0,
     speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
     state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0, tellDmg: 0,
+    // 只有 Boss 用：原型 id、第几代（裂变出来的是 1，不再裂）、护卫是否还活着（减伤用）
+    boss: DEFAULT_BOSS, gen: 0, shielded: 0,
   };
 }
 
@@ -74,6 +79,16 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   e.rage = 0;
   e.stun = 0;
   e.tellDmg = 0;
+  e.gen = 0;
+  e.shielded = 0;
+  // Boss 原型由区域决定：荒野蛮兽、沼泽裂变者、巢穴守卫者
+  e.boss = DEFAULT_BOSS;
+  if (id === 'boss') {
+    const arch = findBossKind(zoneBoss(w));
+    e.boss = arch.id;
+    e.maxHp *= arch.hpMul;
+    e.hp = e.maxHp;
+  }
   return e;
 }
 
@@ -85,9 +100,21 @@ export function interruptNeed(e) {
 }
 
 function tickBoss(w, e, dt, ctx) {
+  const arch = findBossKind(e.boss);
   const p = targetOf(w);
   const toP = Math.atan2(p.y - e.y, p.x - e.x);
   e.stateT -= dt;
+
+  // 守卫者：护卫还活着时自己减伤。每帧算一次，伤害入口只读这个标记，
+  // 不然每次命中都要扫一遍敌人池（Boss 一帧能被打十几次）
+  if (arch.guard) {
+    let guards = 0;
+    for (const o of w.enemies) {
+      if (!o.active || o === e || o.kind !== arch.guard.kind) continue;
+      if (Math.hypot(o.x - e.x, o.y - e.y) <= arch.guard.radius) guards++;
+    }
+    e.shielded = guards > 0 ? 1 : 0;
+  }
 
   // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
   if (!e.rage && e.hp <= e.maxHp * 0.5) {
@@ -107,8 +134,7 @@ function tickBoss(w, e, dt, ctx) {
     e.x += Math.cos(toP) * e.speed * dt;
     e.y += Math.sin(toP) * e.speed * dt;
     if (e.stateT <= 0) {
-      const roll = w.rng();
-      e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
+      e.plan = rollPlan(w.rng, e.boss);
       e.state = 'telegraph';
       e.stateT = e.rage ? BOSS.telegraph * BOSS.rageTelegraph : BOSS.telegraph;
       e.tellDmg = 0;
@@ -136,9 +162,11 @@ function tickBoss(w, e, dt, ctx) {
       e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? volleys * BOSS.volleyGap : 0.5;
       e.volley = 0;
       if (e.plan === 'summon') {
+        // 守卫者召唤的是护卫（活着就给自己减伤），其他原型召唤冲锋兵
+        const minionKind = arch.guard ? arch.guard.kind : 'rusher';
         for (let i = 0; i < minions; i++) {
           const a = (i / minions) * Math.PI * 2;
-          const m = spawnEnemy(w, ctx, 'rusher', a);
+          const m = spawnEnemy(w, ctx, minionKind, a);
           // 召唤出来的贴着 Boss 放，而不是从视野外走进来
           if (m) { m.x = e.x + Math.cos(a) * (e.r + 26); m.y = e.y + Math.sin(a) * (e.r + 26); }
         }
@@ -286,6 +314,37 @@ export function splitOnDeath(w, e, ctx) {
     m.r = Math.max(6, pr * 0.6);
     m.speed = pspd * 1.25;
   }
+}
+
+// 裂变者死亡：裂成两只小 Boss（裂出来的不再裂）。
+// 和分裂怪一样要先抄父体数据：alloc 会优先复用刚释放的槽位，子体很可能就是父体这个对象
+export function bossFissionOnDeath(w, e, ctx) {
+  const arch = findBossKind(e.boss);
+  if (!arch.fission || e.gen > 0) return false;
+  const px = e.x, py = e.y, pr = e.r, php = e.maxHp, pspd = e.speed, pdmg = e.dmg, pgem = e.gem;
+  const pboss = e.boss;
+  const n = arch.fission;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const m = spawnEnemy(w, ctx, 'boss');
+    if (!m) continue;
+    // 原型要继承父体，不能让 spawnEnemy 按当前区域重新决定：
+    // 裂变者可能是在别的区域被打死的（横跨区域边界的 Boss 战）
+    m.boss = pboss;
+    m.x = px + Math.cos(a) * (pr + 30);
+    m.y = py + Math.sin(a) * (pr + 30);
+    m.gen = 1;
+    m.maxHp = m.hp = Math.max(20, php * 0.42);
+    m.r = Math.max(14, pr * 0.62);
+    m.speed = pspd * 1.15;
+    m.dmg = pdmg * 0.8;
+    m.gem = Math.max(1, Math.round(pgem * 0.5));
+    m.rage = 0;         // 子体重新走一遍狂暴，否则一出生就是二阶段
+    m.state = 'chase';
+    m.stateT = BOSS.think;
+  }
+  ctx.emit(w, 'bossfission', px, py, pr);
+  return true;
 }
 
 // 每帧的刷怪：波次节奏 + 常规刷怪 + 精英/Boss 定时

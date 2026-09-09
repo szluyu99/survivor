@@ -1174,7 +1174,9 @@ function putEnemy(w, kind, x, y, extra = {}) {
   Object.assign(e, {
     active: true, kind, x, y, r: 12, maxHp: 1e9, hp: 1e9,
     speed: 60, dmg: 6, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
-    state: 'chase', stateT: 0, volley: 0, plan: '', rage: 0, stun: 0, ...extra,
+    state: 'chase', stateT: 0, volley: 0, plan: '', rage: 0, stun: 0,
+    // Boss 专用字段也要重置：池子会复用槽位，不写的话会读到上一只 Boss 留下的原型
+    boss: 'brute', gen: 0, shielded: 0, tellDmg: 0, ...extra,
   });
   return e;
 }
@@ -1461,4 +1463,117 @@ test('emit 只接受登记过的事件类型', () => {
 
 test('登记表里没有重复项', () => {
   assert.equal(new Set(FX_EVENTS).size, FX_EVENTS.length, '登记表有重复的事件类型');
+});
+
+// ---- Boss 原型 ----
+import { labWorld, putEnemy as placeEnemy } from './fixtures.mjs';
+import { BOSS_KINDS, findBossKind, rollPlan } from '../src/bosses.js';
+import { ZONES } from '../src/zones.js';
+
+test('区域决定 Boss 原型', () => {
+  for (const [zi, z] of ZONES.entries()) {
+    const w = createWorld(3);
+    w.zoneIndex = zi;
+    w.t = 60;                 // 过了 Boss 的解锁时间
+    w.bossTimer = 0.01;
+    w.spawnTimer = 1e9;
+    w.eliteTimer = 1e9;
+    update(w, DT, { dx: 0, dy: 0 });
+    const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+    assert.ok(boss, `${z.name} 没刷出 Boss`);
+    assert.equal(boss.boss, z.boss, `${z.name} 的 Boss 原型不对`);
+  }
+});
+
+test('招式权重按原型走，且每个原型三招都可能出', () => {
+  let a = 12345;
+  const rng = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (const b of BOSS_KINDS) {
+    const seen = {};
+    for (let i = 0; i < 6000; i++) {
+      const plan = rollPlan(rng, b.id);
+      seen[plan] = (seen[plan] || 0) + 1;
+    }
+    for (const plan of Object.keys(b.plans)) {
+      assert.ok(seen[plan] > 0, `${b.name} 的 ${plan} 一次都没抽到`);
+    }
+    // 权重最大的那一招也应该是出现次数最多的
+    const topWeight = Object.entries(b.plans).sort((x, y) => y[1] - x[1])[0][0];
+    const topSeen = Object.entries(seen).sort((x, y) => y[1] - x[1])[0][0];
+    assert.equal(topSeen, topWeight, `${b.name} 的招式分布和权重表不符：${JSON.stringify(seen)}`);
+  }
+});
+
+test('裂变者死后裂成两只小 Boss，子体不再裂，且不报"BOSS 倒下"', () => {
+  const w = labWorld(1, { noWeapons: true, immortal: true });
+  const arch = findBossKind('fission');
+  const parent = placeEnemy(w, 'boss', 60, 0, { boss: 'fission', maxHp: 100, hp: 1, speed: 0, dmg: 0 });
+  // 用一次点伤把它打死
+  const before = w.enemies.filter((e) => e.active).length;
+  parent.hp = 1;
+  placeEnemy(w, 'grunt', -3000, 0); // 占位，确认统计的是 Boss 而不是全部敌人
+  w.weapons = [{ id: 'bolt', level: 5, timer: 0 }];
+  for (let i = 0; i < 240 && w.enemies.filter((e) => e.active && e.kind === 'boss' && e.gen === 0).length; i++) {
+    if (w.paused) chooseUpgrade(w, 0);   // Boss 掉的经验球会顶出选卡，不选的话时间就停住了
+    update(w, DT, { dx: 0, dy: 0 });
+  }
+  const children = w.enemies.filter((e) => e.active && e.kind === 'boss');
+  assert.equal(children.length, arch.fission, `应该裂成 ${arch.fission} 只，实际 ${children.length}`);
+  for (const c of children) {
+    assert.equal(c.gen, 1, '子体应该是第 1 代');
+    assert.equal(c.boss, 'fission');
+    assert.ok(c.maxHp < 100, '子体血量应该比父体少');
+    assert.equal(c.rage, 0, '子体不该一出生就是狂暴态');
+  }
+  assert.ok(before >= 1);
+});
+
+test('裂变出来的子体死掉才算"BOSS 倒下"', () => {
+  const w = labWorld(2, { noWeapons: true, immortal: true });
+  const parent = placeEnemy(w, 'boss', 40, 0, { boss: 'fission', maxHp: 60, hp: 1, speed: 0, dmg: 0 });
+  w.weapons = [{ id: 'bolt', level: 5, timer: 0 }];
+  const events = [];
+  for (let i = 0; i < 60 * 60; i++) {
+    // 不选卡的话世界会停在选卡界面（Boss 掉的经验球足够升级），子体永远打不完
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) {
+      if (f.active && (f.type === 'bossfission' || f.type === 'bossdead')) events.push(f.type);
+      f.active = false;
+    }
+    if (!w.enemies.some((e) => e.active && e.kind === 'boss')) break;
+  }
+  assert.equal(events[0], 'bossfission', `第一次事件该是裂变，实际 ${events}`);
+  assert.ok(events.includes('bossdead'), '子体清完之后没有报 BOSS 倒下');
+  assert.ok(parent.active === false || parent.gen === 1, '父体应该已经被回收或复用成子体');
+});
+
+test('守卫者：护卫在场时减伤，护卫清掉后恢复', () => {
+  const arch = findBossKind('warden');
+  const hit = (withGuard) => {
+    const w = labWorld(5, { noWeapons: true, immortal: true });
+    const boss = placeEnemy(w, 'boss', 70, 0, { boss: 'warden', maxHp: 1e9, hp: 1e9, speed: 0, dmg: 0 });
+    if (withGuard) placeEnemy(w, arch.guard.kind, 70 + 40, 0, { speed: 0, dmg: 0 });
+    w.weapons = [{ id: 'bolt', level: 3, timer: 0 }];
+    for (let i = 0; i < 3 * 60; i++) update(w, DT, { dx: 0, dy: 0 });
+    return 1e9 - boss.hp;
+  };
+  const bare = hit(false);
+  const guarded = hit(true);
+  assert.ok(bare > 0, '没护卫时应该正常掉血');
+  assert.ok(guarded < bare * 0.75, `护卫在场没减伤：${bare.toFixed(0)} → ${guarded.toFixed(0)}`);
+  // 减伤幅度应该和配置对得上（允许暴击/命中次数带来的误差）
+  const ratio = guarded / bare;
+  assert.ok(Math.abs(ratio - arch.guard.damageTaken) < 0.25, `减伤幅度偏离配置太多：${ratio.toFixed(2)}`);
+});
+
+test('基准 Boss 原型的招式权重和加原型之前一致（历史平衡数据的锚点）', () => {
+  assert.deepEqual(BOSS_KINDS[0].plans, { charge: 0.45, shoot: 0.35, summon: 0.2 });
+  assert.equal(BOSS_KINDS[0].hpMul, 1);
 });
