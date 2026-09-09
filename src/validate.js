@@ -12,7 +12,8 @@ import { TERRAIN } from './terrain.js';
 import { TRAITS, CURSES } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
-import { HERO_CARD } from './layout.js';
+import { HERO_CARD, PERK_BTN } from './layout.js';
+import { PERKS, heroCost } from './meta.js';
 
 function checkWeapon(def, errors) {
   const at = `武器 ${def.id}`;
@@ -120,6 +121,34 @@ export function validateContent() {
     if (!h.id || !h.name || !h.desc || !h.hint) errors.push(`${at}：缺 id/name/desc/hint`);
     if (typeof h.apply !== 'function') errors.push(`${at}：缺 apply()`);
     if (!WEAPONS.some((d) => d.id === h.weapon)) errors.push(`${at}：起手武器 ${h.weapon} 不是基础武器`);
+  }
+
+  // 局外进度：价格表和永久强化
+  if (heroCost(HEROES[0].id) !== 0) errors.push('第一个角色必须免费，否则新玩家没得玩');
+  for (const h of HEROES) {
+    if (!(heroCost(h.id) >= 0)) errors.push(`角色 ${h.id}：解锁价不合法`);
+  }
+  if (PERKS.length < PERK_BTN.count) {
+    errors.push(`永久强化只有 ${PERKS.length} 项，首屏按 ${PERK_BTN.count} 个按钮布局，会画出空按钮`);
+  }
+  const perkIds = PERKS.map((p) => p.id);
+  if (new Set(perkIds).size !== perkIds.length) errors.push('永久强化 id 有重复');
+  for (const p of PERKS) {
+    const at = `永久强化 ${p.id || '?'}`;
+    if (!p.id || !p.name) errors.push(`${at}：缺 id 或 name`);
+    if (!(p.maxLevel >= 1)) errors.push(`${at}：maxLevel 不合法`);
+    if (!Array.isArray(p.cost) || p.cost.length !== p.maxLevel) {
+      errors.push(`${at}：cost 条数（${p.cost && p.cost.length}）应等于 maxLevel（${p.maxLevel}）`);
+    }
+    for (const c of p.cost || []) if (!(c > 0)) errors.push(`${at}：价格必须为正数`);
+    if (typeof p.apply !== 'function') errors.push(`${at}：缺 apply()`);
+    if (typeof p.desc !== 'function') errors.push(`${at}：缺 desc()`);
+    for (let lv = 1; lv <= (p.maxLevel || 0); lv++) {
+      const line = typeof p.desc === 'function' ? p.desc(lv) : '';
+      if (!line || line.includes('undefined') || line.includes('NaN')) {
+        errors.push(`${at} Lv.${lv}：文案有问题「${line}」`);
+      }
+    }
   }
 
   // 槽位数得放得下东西，否则玩法直接失效

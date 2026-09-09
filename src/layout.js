@@ -50,7 +50,7 @@ const inReplayBtn = (x, y) => x >= REPLAY_BTN.x && x <= REPLAY_BTN.x + REPLAY_BT
   && y >= REPLAY_BTN.y && y <= REPLAY_BTN.y + REPLAY_BTN.h;
 
 // 首屏的角色卡：点哪张就用哪个角色开局
-const HERO_CARD = { w: 210, h: 132, y: 196, gap: 12, count: 4 };
+const HERO_CARD = { w: 210, h: 132, y: 158, gap: 12, count: 4 };
 function heroCardX(i) {
   const total = HERO_CARD.count * HERO_CARD.w + (HERO_CARD.count - 1) * HERO_CARD.gap;
   return (VIEW_W - total) / 2 + i * (HERO_CARD.w + HERO_CARD.gap);
@@ -63,8 +63,22 @@ function heroCardHit(x, y) {
   return -1;
 }
 
+// 首屏的永久强化按钮：点一下买一级
+const PERK_BTN = { w: 190, h: 46, y: 322, gap: 14, count: 3 };
+function perkBtnX(i) {
+  const total = PERK_BTN.count * PERK_BTN.w + (PERK_BTN.count - 1) * PERK_BTN.gap;
+  return (VIEW_W - total) / 2 + i * (PERK_BTN.w + PERK_BTN.gap);
+}
+function perkBtnHit(x, y) {
+  if (y < PERK_BTN.y || y > PERK_BTN.y + PERK_BTN.h) return -1;
+  for (let i = 0; i < PERK_BTN.count; i++) {
+    if (x >= perkBtnX(i) && x <= perkBtnX(i) + PERK_BTN.w) return i;
+  }
+  return -1;
+}
+
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
-  HERO_CARD, heroCardX, heroCardHit,
+  HERO_CARD, heroCardX, heroCardHit, PERK_BTN, perkBtnX, perkBtnHit,
 };

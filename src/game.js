@@ -5,9 +5,10 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer } from './replay.js';
+import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS } from './meta.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
@@ -65,6 +66,7 @@ const hud = createHud(ctx, {
   getMuted: () => mutedHint,
   getPaused: () => uiPaused,
   getHero: () => heroId,
+  getMeta: () => meta,
   getReplayReady: () => !!lastReplay,
 });
 const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, WEAPON_NAME, clock } = hud;
@@ -94,7 +96,32 @@ function setHero(id) {
   try { localStorage.setItem(HERO_KEY, heroId); } catch { /* 无痕模式会抛，忽略 */ }
 }
 
-let world = createWorld(newSeed(), heroId);
+// ---- 局外进度：残片、角色解锁、永久强化 ----
+const META_KEY = 'survivor.meta';
+let meta = loadMeta();
+function loadMeta() {
+  try { return normalizeMeta(JSON.parse(localStorage.getItem(META_KEY))); } catch { return defaultMeta(); }
+}
+function saveMeta(next) {
+  meta = next;
+  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch { /* 无痕模式会抛，忽略 */ }
+}
+// 结算：死亡那一刻把这局的残片记到账上
+function awardShards(w) {
+  const got = earnShards(w);
+  if (got > 0) saveMeta({ ...meta, shards: meta.shards + got });
+}
+// 首屏点角色卡：没解锁就先花残片买下来（买完不直接开局，避免"手一抖花掉又开了一局"）
+function pickOrUnlockHero(id) {
+  if (isUnlocked(meta, id)) { setHero(id); return true; }
+  const next = unlockHero(meta, id);
+  if (next) { saveMeta(next); setHero(id); }
+  return false;
+}
+// 没解锁的角色不能带进对局：存档被清掉或手改过时兜一层
+const activeHero = () => (isUnlocked(meta, heroId) ? heroId : DEFAULT_HERO);
+
+let world = createWorld(newSeed(), activeHero(), meta.perks);
 globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
@@ -105,7 +132,7 @@ let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
 
 // ---- 录像：这一局的每帧输入都记下来，死了就能回放 ----
-let recorder = createRecorder(world.seed, world.hero);
+let recorder = createRecorder(world.seed, world.hero, world.perks);
 let lastReplay = null;    // 上一局的录像，死亡后生成
 let player = null;        // 非 null 表示正在看回放
 // 选卡/重抽/排除排队到下一个逻辑步再执行。
@@ -139,20 +166,20 @@ function exitReplay() {
 function beginGame() {
   unlock();
   if (!started) {
-    // 首屏可能换过角色，开局前把世界按当前角色重建
-    if (world.hero !== heroId) restart();
+    // 首屏可能换过角色、买过永久强化，开局前按当前存档重建世界
+    restart();
     started = true;
     last = performance.now();
   }
 }
 
 function restart() {
-  world = createWorld(newSeed(), heroId);
+  world = createWorld(newSeed(), activeHero(), meta.perks);
   globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;
   fx.reset();
-  recorder = createRecorder(world.seed, world.hero);
+  recorder = createRecorder(world.seed, world.hero, world.perks);
   lastReplay = null;
   player = null;
   queuedActions.length = 0;
@@ -165,11 +192,19 @@ addEventListener('keydown', (e) => {
     unlock(); // 音频必须在用户手势里启动，这一步不代表开局
     keys.add(e.code);
     const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
-    if (hi >= 0 && hi < HERO_CARD.count) { setHero(HEROES[hi].id); beginGame(); return; }
+    if (hi >= 0 && hi < HERO_CARD.count) {
+      // 没解锁的按一下是"花残片买下来"，买完停在首屏，再按一次才开局
+      if (pickOrUnlockHero(HEROES[hi].id)) beginGame();
+      return;
+    }
     if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
       const cur = HEROES.findIndex((h) => h.id === heroId);
       const n = Math.min(HEROES.length, HERO_CARD.count);
-      setHero(HEROES[(cur + (e.code === 'ArrowRight' ? 1 : n - 1) + n) % n].id);
+      // 只在已解锁的角色之间切换
+      for (let step = 1; step <= n; step++) {
+        const next = HEROES[(cur + (e.code === 'ArrowRight' ? step : n - step) + n) % n];
+        if (isUnlocked(meta, next.id)) { setHero(next.id); break; }
+      }
       e.preventDefault();
       return;
     }
@@ -221,14 +256,20 @@ const STICK_R = 46;
 let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
-  // 首屏只有点在角色卡上才开局：点空白处只解锁音频，什么都不发生
+  // 首屏只有点在角色卡或永久强化按钮上才有反应：点空白处只解锁音频
   if (!started) {
     unlock();
     const at = viewPos(e);
+    const pi = perkBtnHit(at.x, at.y);
+    if (pi >= 0 && pi < PERK_BTN.count) {
+      const next = buyPerk(meta, PERKS[pi].id);
+      if (next) saveMeta(next);
+      pointer = null;
+      return;
+    }
     const hi = heroCardHit(at.x, at.y);
     if (hi >= 0 && hi < HEROES.length) {
-      setHero(HEROES[hi].id);
-      beginGame();
+      if (pickOrUnlockHero(HEROES[hi].id)) beginGame();
     }
     pointer = null;
     return;
@@ -671,10 +712,11 @@ function frame(now) {
             if (action) applyAction(action);
             update(world, STEP, inp);
             consumeFx(world);
-            // 死亡的那一帧收尾录像
+            // 死亡的那一帧收尾录像，并把这局赚到的残片结算入账
             if (world.over && !lastReplay) {
               lastReplay = recorder.toJSON(world);
               globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能不能重演这一局
+              awardShards(world);
             }
             acc -= STEP;
             steps++;

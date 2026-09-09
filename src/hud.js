@@ -6,8 +6,9 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX } from './layout.js';
 import { HEROES } from './heroes.js';
+import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards } from './meta.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
 
@@ -23,13 +24,15 @@ const TAKEN_NAME = {
 
 const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
-// deps: { shapes, fxState, getBest, getMuted, getPaused, getEnemyColor }
+// deps: { shapes, fxState, getBest, getMuted, getPaused, getHero, getMeta, getReplayReady }
 export function createHud(ctx, deps) {
   const { shapes, fxState } = deps;
   const { circle, shapePath, drawEntity, drawGrid, drawVignette } = shapes;
   const best = () => deps.getBest();
   const uiPaused = () => deps.getPaused();
   const mutedHint = () => deps.getMuted();
+  // 局外进度：hud 不持有它，和其他状态一样由 game.js 传进来
+  const meta = () => (deps.getMeta ? deps.getMeta() : defaultMeta());
 
   function drawHud(w) {
     const p = w.player;
@@ -398,6 +401,10 @@ export function createHud(ctx, deps) {
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText(isNew ? '新纪录！' : `最好 ${clock(best().t)} / ${best().kills} 杀`, VIEW_W / 2, 104);
     }
+    // 本局赚到的残片：结算时才结账，所以这里直接按公式显示
+    ctx.fillStyle = P.calm;
+    ctx.font = '14px ui-monospace, monospace';
+    ctx.fillText(`本局 +${earnShards(w)} 残片　共 ${meta().shards} 片`, VIEW_W / 2, 124);
 
     const L = w.log;
     // 左栏：哪把武器在干活
@@ -504,13 +511,13 @@ export function createHud(ctx, deps) {
 
     ctx.fillStyle = P.dim;
     ctx.font = '13px sans-serif';
-    ctx.fillText('移动 = WASD / 方向键 / 按住屏幕　攻击是自动的，你只需要走位', cx, 140);
-    ctx.fillText('捡经验球升级三选一　Shift / 空格 / 右键冲刺（手机双击）　Q / E 放技能', cx, 160);
+    ctx.fillText('移动 = WASD / 方向键 / 按住屏幕　攻击是自动的，你只需要走位　Q / E 放技能', cx, 136);
 
     ctx.fillStyle = P.accent;
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('选择角色', cx, 186);
+    ctx.fillText(`选择角色　　残片 ${meta().shards}`, cx, 152);
     drawHeroCards();
+    drawPerks();
 
     // 图例：把各兵种的形状先亮一遍
     const legend = [
@@ -521,19 +528,47 @@ export function createHud(ctx, deps) {
     const startX = cx - (legend.length - 1) * 78 / 2;
     legend.forEach(([kind, name], i) => {
       const x = startX + i * 78;
-      drawEntity(kind, x, 366, 12, P.enemy[kind], -Math.PI / 2);
+      drawEntity(kind, x, 396, 12, P.enemy[kind], -Math.PI / 2);
       ctx.fillStyle = P.dimmer;
       ctx.font = '12px sans-serif';
-      ctx.fillText(name, x, 392);
+      ctx.fillText(name, x, 420);
     });
 
     ctx.fillStyle = P.warn;
     ctx.font = 'bold 17px sans-serif';
-    ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 428);
+    ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 452);
     ctx.fillStyle = P.faint;
     ctx.font = '12px sans-serif';
-    ctx.fillText('← → 换选中，回车用选中的角色开始　只有这几个操作会开局，不怕误触', cx, 452);
-    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 472);
+    ctx.fillText('← → 换选中，回车开始　只有这几个操作会开局，不怕误触　残片靠每局存活时长和击杀获得', cx, 474);
+    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 494);
+  }
+
+  // 永久强化：点一下买一级。幅度很小，作用是给残片一个去处
+  function drawPerks() {
+    const m = meta();
+    PERKS.slice(0, PERK_BTN.count).forEach((p, i) => {
+      const x = perkBtnX(i), y = PERK_BTN.y;
+      const lv = m.perks[p.id] || 0;
+      const cost = perkCost(p, lv);
+      const afford = cost !== null && m.shards >= cost;
+      ctx.fillStyle = P.card;
+      ctx.fillRect(x, y, PERK_BTN.w, PERK_BTN.h);
+      ctx.strokeStyle = afford ? P.calm : P.cardLine;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, PERK_BTN.w, PERK_BTN.h);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = lv > 0 ? P.calm : P.text;
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(`${p.name} ${lv}/${p.maxLevel}`, x + 10, y + 19);
+      ctx.fillStyle = P.dim;
+      ctx.font = '11px sans-serif';
+      ctx.fillText(lv > 0 ? p.desc(lv) : p.desc(1) + '（未拥有）', x + 10, y + 36);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = cost === null ? P.dimmer : (afford ? P.warn : P.faint);
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.fillText(cost === null ? '已满级' : `${cost} 片`, x + PERK_BTN.w - 10, y + 28);
+      ctx.textAlign = 'center';
+    });
   }
 
   // 角色卡：选中的那张描高亮边。第一次玩默认停在基准角色上
@@ -542,9 +577,13 @@ export function createHud(ctx, deps) {
     HEROES.slice(0, HERO_CARD.count).forEach((h, i) => {
       const x = heroCardX(i), y = HERO_CARD.y;
       const on = h.id === picked;
+      const m = meta();
+      const owned = isUnlocked(m, h.id);
+      const cost = heroCost(h.id);
+      const afford = m.shards >= cost;
       ctx.fillStyle = P.card;
       ctx.fillRect(x, y, HERO_CARD.w, HERO_CARD.h);
-      ctx.strokeStyle = on ? P.warn : P.cardLine;
+      ctx.strokeStyle = on ? P.warn : (owned ? P.cardLine : (afford ? P.calm : P.fainter));
       ctx.lineWidth = on ? 2 : 1;
       ctx.strokeRect(x, y, HERO_CARD.w, HERO_CARD.h);
 
@@ -553,18 +592,25 @@ export function createHud(ctx, deps) {
       ctx.font = '11px ui-monospace, monospace';
       ctx.fillText(String(i + 1), x + 10, y + 20);
       ctx.textAlign = 'center';
-      ctx.fillStyle = on ? P.warn : P.text;
+      ctx.fillStyle = on ? P.warn : (owned ? P.text : P.dimmer);
       ctx.font = 'bold 19px sans-serif';
       ctx.fillText(h.name, x + HERO_CARD.w / 2, y + 30);
-      ctx.fillStyle = P.accent;
+      ctx.fillStyle = owned ? P.accent : P.faint;
       ctx.font = '12px sans-serif';
       ctx.fillText(`起手：${WEAPON_NAME[h.weapon] || h.weapon}`, x + HERO_CARD.w / 2, y + 54);
-      ctx.fillStyle = P.dim;
+      ctx.fillStyle = owned ? P.dim : P.faint;
       ctx.font = '12px sans-serif';
       wrapText(h.desc, x + HERO_CARD.w / 2, y + 78, HERO_CARD.w - 24, 16);
-      ctx.fillStyle = P.faint;
-      ctx.font = '11px sans-serif';
-      ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 12);
+      // 没解锁的卡把"提示"换成价格：点它就是买下来
+      if (owned) {
+        ctx.fillStyle = P.faint;
+        ctx.font = '11px sans-serif';
+        ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 12);
+      } else {
+        ctx.fillStyle = afford ? P.calm : P.faint;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(afford ? `点此解锁　${cost} 片` : `未解锁　需要 ${cost} 片`, x + HERO_CARD.w / 2, y + HERO_CARD.h - 12);
+      }
     });
   }
 

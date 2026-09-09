@@ -6,6 +6,7 @@
 // 这里把那几类问题写成硬规则。
 
 import { createWorld, update, chooseUpgrade, HEROES } from '../src/sim.js';
+import { PERKS, earnShards, heroCost } from '../src/meta.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
@@ -18,6 +19,8 @@ const notes = [];
 function check(ok, message) {
   if (!ok) failures.push(message);
 }
+
+const avgOf = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 // ---- DPS 台架：关刷怪、钉住靶子，测单位时间打出的伤害 ----
 function dpsAt(ids, levels, dist, seconds = 12) {
@@ -83,8 +86,8 @@ function crowdDps(ids, levels, seconds = 12) {
 }
 
 // ---- 跑一整局 ----
-function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3, hero } = {}) {
-  const w = createWorld(seed, hero);
+function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3, hero, perks } = {}) {
+  const w = createWorld(seed, hero, perks);
   const firstSeen = {};
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, pick(i));
@@ -233,6 +236,25 @@ console.log('== 8. 每个角色都能玩，且没有明显的陷阱角色 ==');
   const worst = Math.min(...heroAvg.map(([, a]) => a));
   console.log(`  最强/最弱角色平均值之比 ${(best / worst).toFixed(2)}（放宽到 3 倍，机器人对起手武器有偏好）`);
   check(best / worst < 3, `最强角色平均 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
+}
+
+console.log('== 9. 永久强化不能把难度曲线抹平 ==');
+{
+  // 老存档（永久强化全满）相对新存档的优势要有限。
+  // 这条是为了防止以后往 PERKS 里加东西时手一滑：局外加成一旦超过局内成长，
+  // 新玩家和老玩家玩的就不是同一个游戏了
+  const maxed = {};
+  for (const p of PERKS) maxed[p.id] = p.maxLevel;
+  const baseAvg = avgOf(SEEDS.map((seed) => play(seed).w.t));
+  const buffAvg = avgOf(SEEDS.map((seed) => play(seed, { perks: maxed }).w.t));
+  const shards = avgOf(SEEDS.map((seed) => earnShards(play(seed).w)));
+  const totalCost = HEROES.reduce((a, h) => a + heroCost(h.id), 0)
+    + PERKS.reduce((a, p) => a + p.cost.reduce((x, y) => x + y, 0), 0);
+  console.log(`  无强化 ${baseAvg.toFixed(0)}s → 满级强化 ${buffAvg.toFixed(0)}s（${(buffAvg / baseAvg).toFixed(2)} 倍）`);
+  console.log(`  平均每局 ${shards.toFixed(0)} 残片，全解锁需要 ${totalCost} 片，约 ${Math.ceil(totalCost / Math.max(1, shards))} 局`);
+  check(buffAvg / baseAvg < 1.8, `满级永久强化把平均存活拉到 ${(buffAvg / baseAvg).toFixed(2)} 倍，局外加成盖过了局内成长`);
+  check(shards > 0, '一局赚不到残片，局外进度永远动不了');
+  check(totalCost / Math.max(1, shards) < 40, `全解锁要打 ${Math.ceil(totalCost / shards)} 局，太肝了`);
 }
 
 console.log('');

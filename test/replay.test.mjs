@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, update, chooseUpgrade } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, DEFAULT_HERO } from '../src/sim.js';
 import {
   snapshot, restore, createRecorder, playback, verify, quantizeInput, REPLAY_VERSION,
 } from '../src/replay.js';
@@ -137,6 +137,28 @@ test('角色会跟着快照和录像一起走（否则重演的是另一个角�
   const replay = rec.toJSON(w3);
   assert.equal(replay.hero, 'warden');
   assert.equal(fingerprint(playback(replay)), fingerprint(w3));
+});
+
+test('永久强化会跟着快照和录像走（否则重演的是另一套初始属性）', () => {
+  const perks = { vigor: 2, edge: 1 };
+  const w = run(createWorld(9, DEFAULT_HERO, perks), 0, 600);
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+  assert.deepEqual(snap.perks, perks);
+  assert.equal(fingerprint(restore(snap)), fingerprint(w));
+
+  const rec = createRecorder(9, DEFAULT_HERO, perks);
+  const w2 = createWorld(9, DEFAULT_HERO, perks);
+  for (let i = 0; i < 600; i++) {
+    if (w2.paused && w2.choices) chooseUpgrade(w2, 0);
+    update(w2, DT, rec.record(circling(i)));
+    for (const f of w2.fx) f.active = false;
+  }
+  const replay = rec.toJSON(w2);
+  assert.deepEqual(replay.perks, perks);
+  assert.equal(fingerprint(playback(replay)), fingerprint(w2));
+  // 反证：同一串输入、同一个 seed，不带强化会跑出不一样的一局
+  const noPerks = { ...replay, perks: null };
+  assert.notEqual(fingerprint(playback(noPerks)), fingerprint(w2));
 });
 
 test('record 返回量化后的输入（不用它就会漂）', () => {

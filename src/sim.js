@@ -12,9 +12,12 @@ import { mulberry32, pool, alloc } from './pool.js';
 import { isFxEvent } from './fx-events.js';
 import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
 import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
+import { applyPerks, PERKS, earnShards } from './meta.js';
 
 // 角色表定义在 heroes.js，这里转出去
 export { HEROES, findHero, DEFAULT_HERO };
+// 局外进度（残片 / 永久强化）定义在 meta.js，同样转出去
+export { PERKS, earnShards };
 
 // 词条与诅咒的定义在 upgrades.js，这里转出去，外部（UI/测试）不用关心分了几个文件
 export { TRAITS, CURSES };
@@ -32,11 +35,12 @@ const MAX_ORBS = 8;
 const MAX_FX = 64;
 const MAX_TERRAIN = 40;
 
-export function createWorld(seed = 1, heroId = DEFAULT_HERO) {
+export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null) {
   const hero = findHero(heroId);
   const w = {
     seed,                 // 记下来：快照和回放都要靠它复现同一局
     hero: hero.id,        // 同理：角色决定起始武器和属性，不记下来就重演不出同一局
+    perks,                // 永久强化同理，它改的是初始属性
     rng: mulberry32(seed),
     t: 0,
     over: false,
@@ -90,6 +94,8 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO) {
   };
   // 角色修正在世界建好之后一次性生效，和词条走同一条路径（改 w.player / w.stats）
   hero.apply(w);
+  // 永久强化排在角色之后：它是"存档带来的加成"，叠在这一局的起点上
+  applyPerks(w, perks);
   return w;
 }
 

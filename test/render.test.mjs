@@ -66,6 +66,7 @@ globalThis.localStorage = {
 await import('../src/game.js');
 const { HEROES } = await import('../src/heroes.js');
 const { ALL_WEAPONS } = await import('../src/weapons.js');
+const { PERKS } = await import('../src/meta.js');
 
 function runFrames(n, startMs = 0, stepMs = 16.7) {
   for (let i = 0; i < n; i++) {
@@ -91,8 +92,12 @@ test('开始前是首屏，操作说明、角色卡和形状图例都在', () =>
   assert.ok(texts.some((t) => t.includes('攻击是自动的')), '没说明攻击是自动的');
   assert.ok(texts.some((t) => t.includes('开始')), '没有开始提示');
   assert.ok(texts.includes('冲锋兵'), '形状图例没画');
-  assert.ok(texts.includes('选择角色'), '角色选择区没画');
+  assert.ok(texts.some((t) => t.includes('选择角色')), '角色选择区没画');
+  assert.ok(texts.some((t) => t.includes('残片')), '没显示残片余额');
   for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
+  // 新存档只有基准角色，其余三张卡要标价格
+  assert.ok(texts.filter((t) => t.includes('需要') && t.includes('片')).length >= 3, '没解锁的角色卡没标价');
+  for (const p of PERKS) assert.ok(texts.some((t) => t.includes(p.name)), `永久强化「${p.name}」没画`);
 });
 
 test('首屏不会误触：按无关的键、点空白处都不开局', () => {
@@ -107,7 +112,19 @@ test('首屏不会误触：按无关的键、点空白处都不开局', () => {
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.includes('选择角色'), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
+  assert.ok(texts.some((t) => t.includes('选择角色')), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
+});
+
+test('残片不够时点没解锁的角色卡：不开局、也不扣残片', () => {
+  const before = JSON.stringify(store.get('survivor.meta') || null);
+  // 第二张卡（游侠）在新存档里是锁着的
+  fire(handlers.canvas, 'pointerdown', { pointerId: 11, clientX: 480 - 100, clientY: 200 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 11 });
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.some((t) => t.includes('选择角色')), '锁着的角色卡不该开局');
+  assert.equal(JSON.stringify(store.get('survivor.meta') || null), before, '残片被扣了');
 });
 
 test('首屏方向键能换选中的角色', () => {
@@ -115,16 +132,16 @@ test('首屏方向键能换选中的角色', () => {
   calls.length = 0;
   runFrames(2);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.includes('选择角色'), '方向键不该直接开局');
+  assert.ok(texts.some((t) => t.includes('选择角色')), '方向键不该直接开局');
 });
 
 test('首屏按数字键选角色，开局用的就是那个角色', () => {
-  // 按 2 = 第二张角色卡（游侠，穿透枪开局）
-  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  // 按 1 = 基准角色（新存档里唯一已解锁的）
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(5);
   const w = globalThis.__survivorWorld;
-  assert.equal(w.hero, HEROES[1].id, '选的角色没生效');
-  assert.equal(w.weapons[0].id, HEROES[1].weapon, '起手武器不是该角色的');
+  assert.equal(w.hero, HEROES[0].id, '选的角色没生效');
+  assert.equal(w.weapons[0].id, HEROES[0].weapon, '起手武器不是该角色的');
 });
 
 test('连续跑 600 帧不崩，且每帧都在画东西', () => {
@@ -412,7 +429,7 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
       const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
       if (texts.includes('阵亡')) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
       else if (texts.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
-      else if (texts.includes('选择角色')) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
+      else if (texts.some((x) => x.includes('选择角色'))) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
       else return;
     }
   };
@@ -462,7 +479,7 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
     runFrames(1, 2.9e6 + i * 17, 0);
     const t = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
     if (t.includes('阵亡')) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
-    else if (t.includes('选择角色')) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
+    else if (t.some((x) => x.includes('选择角色'))) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
     else if (t.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
     else break;
   }
