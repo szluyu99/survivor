@@ -8,7 +8,7 @@ export function makeEnemy() {
   return {
     active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0,
     speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
-    state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0,
+    state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0, tellDmg: 0,
   };
 }
 
@@ -69,6 +69,7 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   e.plan = '';
   e.rage = 0;
   e.stun = 0;
+  e.tellDmg = 0;
   return e;
 }
 
@@ -77,7 +78,15 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
 const BOSS = {
   think: 2.5, telegraph: 0.8, charge: 0.62, chargeMul: 3.4,
   volleys: 3, volleyGap: 0.26, shots: 10, shotSpeed: 190, minions: 4,
+  // 打断：预警期间打掉这个比例的最大生命就能中止这一招，Boss 进入硬直
+  interruptFrac: 0.08,
+  stagger: 1.6,
 };
+
+// 预警期间打断需要的伤害量。狂暴后要求更高，否则二阶段会被无脑打断
+export function interruptNeed(e) {
+  return e.maxHp * BOSS.interruptFrac * (e.rage ? 1.6 : 1);
+}
 
 function tickBoss(w, e, dt, ctx) {
   const p = targetOf(w);
@@ -106,6 +115,7 @@ function tickBoss(w, e, dt, ctx) {
       e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
       e.state = 'telegraph';
       e.stateT = e.rage ? BOSS.telegraph * 0.75 : BOSS.telegraph;
+      e.tellDmg = 0;
       e.moveX = Math.cos(toP);
       e.moveY = Math.sin(toP);
       ctx.emit(w, 'bosstell', e.x, e.y, e.r);
@@ -114,6 +124,15 @@ function tickBoss(w, e, dt, ctx) {
   }
 
   if (e.state === 'telegraph') {
+    // 打断：预警窗口里打够伤害，这一招就没了，Boss 还要硬直一会儿。
+    // 这是把 Boss 战从"背招躲招"变成"抢窗口输出"的关键
+    if (e.tellDmg >= interruptNeed(e)) {
+      e.state = 'stagger';
+      e.stateT = BOSS.stagger;
+      e.plan = '';
+      ctx.emit(w, 'interrupt', e.x, e.y, e.r);
+      return;
+    }
     // 站住不动，只在冲撞前锁定方向（其他技能不需要方向）
     if (e.plan === 'charge') { e.moveX = Math.cos(toP); e.moveY = Math.sin(toP); }
     if (e.stateT <= 0) {
@@ -130,6 +149,12 @@ function tickBoss(w, e, dt, ctx) {
         ctx.emit(w, 'bosssummon', e.x, e.y, e.r);
       }
     }
+    return;
+  }
+
+  if (e.state === 'stagger') {
+    // 硬直：站着挨打
+    if (e.stateT <= 0) { e.state = 'chase'; e.stateT = think; }
     return;
   }
 

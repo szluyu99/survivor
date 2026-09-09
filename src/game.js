@@ -1,11 +1,11 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit } from './layout.js';
 import { createHud } from './hud.js';
 
 
@@ -54,6 +54,7 @@ const hud = createHud(ctx, {
 const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, WEAPON_NAME, clock } = hud;
 
 let world = createWorld(Date.now() & 0xffff);
+globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
 let dashQueued = false;   // 冲刺是边沿触发，按住不会连续冲
@@ -69,6 +70,7 @@ function beginGame() {
 
 function restart() {
   world = createWorld(Date.now() & 0xffff);
+  globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;
   fx.reset();
@@ -90,7 +92,9 @@ addEventListener('keydown', (e) => {
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
   if (world.paused && world.choices) {
     const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
-    if (i >= 0) chooseUpgrade(world, i);
+    // Shift + 数字 = 排除这张卡，单按数字 = 选它
+    if (i >= 0) (e.shiftKey ? banish : chooseUpgrade)(world, i);
+    if (e.code === 'KeyR') reroll(world);
   }
   if (world.over && e.code === 'Space') restart();
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
@@ -128,6 +132,9 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (uiPaused) { uiPaused = false; pointer = null; return; }
   if (world.paused && world.choices) {
+    const bi = banishHit(pointer.x, pointer.y);
+    if (bi >= 0 && world.banishes > 0) { banish(world, bi); pointer = null; return; }
+    if (inRerollBtn(pointer.x, pointer.y)) { reroll(world); pointer = null; return; }
     const i = cardHit(pointer.x, pointer.y);
     if (i >= 0) { chooseUpgrade(world, i); pointer = null; }
   } else if (world.over) {

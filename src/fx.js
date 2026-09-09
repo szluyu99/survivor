@@ -100,7 +100,16 @@ export function createFx({ onDeath } = {}) {
       } else if (f.type === 'bosssummon') {
         burst(f.x, f.y, 16, P.enemy.rusher, 200, 3);
         sfx.bossShoot();
-      } else if (f.type === 'bossrage') {
+      } else if (f.type === 'interrupt') {
+      ring(f.x, f.y, f.amount * 3, P.interrupt);
+      burst(f.x, f.y, 26, P.interrupt, 240, 3);
+      fxState.shake = Math.max(fxState.shake, 7);
+      fxState.flash = 0.2;
+      fxState.warn = 1.1;
+      fxState.warnText = '打断！';
+      fxState.warnColor = P.interrupt;
+      sfx.interrupt();
+    } else if (f.type === 'bossrage') {
         burst(f.x, f.y, 26, P.bossRage, 240, 4);
         fxState.shake = Math.max(fxState.shake, 9);
         fxState.flash = 0.22;

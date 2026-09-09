@@ -1,7 +1,7 @@
 // 纯逻辑层：不碰 DOM，方便在 node 里跑测试。
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
 import { findWeapon } from './weapons.js';
-import { rollChoices, TRAITS, CURSES } from './upgrades.js';
+import { rollChoices, rerollChoices, banishChoice, TRAITS, CURSES } from './upgrades.js';
 import { KINDS, tickEnemy, tickSpawns, splitOnDeath, makeEnemy } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
@@ -69,6 +69,10 @@ export function createWorld(seed = 1) {
     choices: null,
     evolved: [],
     chests: 0,
+    // 选卡时的两个交互：重抽和排除。排除掉的卡这一局不再出现
+    rerolls: 2,
+    banishes: 1,
+    banned: [],
     skills: [],            // 手动释放的技能，最多 MAX_SKILL_SLOTS 个
     slowT: 0, slowMul: 1,  // 时缓：全场敌人减速
     decoy: { active: false, x: 0, y: 0, t: 0 }, // 诱饵：敌人改追它
@@ -81,6 +85,21 @@ export function createWorld(seed = 1) {
 function rollDmg(w, dmg) {
   if (w.stats.critChance > 0 && w.rng() < w.stats.critChance) return [dmg * w.stats.critMul, true];
   return [dmg, false];
+}
+
+// 四个伤害入口（子弹命中 / 区域伤害 / 爆炸 / 单体点伤）以前各写一遍暴击+记账+击杀，
+// 打断机制要在每处再加一次累计，太容易漏。统一收口到这里
+function damageEnemy(w, e, dmg0, src) {
+  const [dmg, crit] = rollDmg(w, dmg0);
+  const real = Math.min(dmg, e.hp);
+  e.hp -= dmg;
+  e.flash = crit ? 0.12 : 0.08;
+  noteDamage(w, src, real);
+  // Boss 预警期间受到的伤害要单独累计：够了就打断这一招
+  if (e.kind === 'boss' && e.state === 'telegraph') e.tellDmg += real;
+  emit(w, crit ? 'crit' : 'hit', e.x, e.y, dmg);
+  if (e.hp <= 0) killEnemy(w, e);
+  return real;
 }
 
 function noteDamage(w, src, amount) {
@@ -113,6 +132,10 @@ function emit(w, type, x, y, amount = 0) {
 }
 
 // 通用词条：不绑定具体武器
+// 重抽 / 排除：转出给渲染层用，逻辑都在 upgrades.js
+export function reroll(w) { return rerollChoices(w); }
+export function banish(w, index) { return banishChoice(w, index); }
+
 export function chooseUpgrade(w, index) {
   if (!w.choices || !w.choices[index]) return;
   w.choices[index].apply(w);
@@ -208,27 +231,11 @@ const api = {
     for (const e of w.enemies) {
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
-      if (dx * dx + dy * dy <= rr * rr) {
-        const [dmg, crit] = rollDmg(w, dmg0);
-        const real = Math.min(dmg, e.hp);
-        e.hp -= dmg;
-        if (crit) emit(w, 'crit', e.x, e.y, dmg);
-        e.flash = 0.1;
-        noteDamage(w, src, real);
-        emit(w, 'hit', e.x, e.y, dmg);
-        if (e.hp <= 0) killEnemy(w, e);
-      }
+      if (dx * dx + dy * dy <= rr * rr) damageEnemy(w, e, dmg0, src);
     }
   },
   hurtOne(w, e, dmg0, src = '') {
-    const [dmg, crit] = rollDmg(w, dmg0);
-    const real = Math.min(dmg, e.hp);
-    e.hp -= dmg;
-    if (crit) emit(w, 'crit', e.x, e.y, dmg);
-    e.flash = 0.08;
-    noteDamage(w, src, real);
-    emit(w, 'hit', e.x, e.y, dmg);
-    if (e.hp <= 0) killEnemy(w, e);
+    damageEnemy(w, e, dmg0, src);
   },
   chainFx(w, x1, y1, x2, y2) {
     const f = alloc(w.fx);
@@ -472,18 +479,12 @@ export function update(w, dt, input) {
           b.active = false;
           break;
         }
-        const [bdmg, bcrit] = rollDmg(w, b.dmg);
-        const real = Math.min(bdmg, e.hp);
-        e.hp -= bdmg;
-        e.flash = 0.08;
         e.lastBulletId = b.id;
-        noteDamage(w, b.src, real);
-        emit(w, bcrit ? 'crit' : 'hit', e.x, e.y, bdmg);
-        // 击退：沿子弹方向推一小段，让命中有"接触感"
+        // 击退要在伤害之前算：伤害可能直接把它打死，之后再读 e 就是别的对象了
         const bl = Math.hypot(b.vx, b.vy) || 1;
         e.x += (b.vx / bl) * 7;
         e.y += (b.vy / bl) * 7;
-        if (e.hp <= 0) killEnemy(w, e);
+        damageEnemy(w, e, b.dmg, b.src);
         if (--b.pierce <= 0) { b.active = false; break; }
       }
     }

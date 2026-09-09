@@ -6,8 +6,9 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn } from './layout.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
+import { interruptNeed } from './enemies.js';
 
 const WEAPON_NAME = Object.fromEntries(ALL_WEAPONS.map((x) => [x.id, x.name]));
 
@@ -96,7 +97,25 @@ export function createHud(ctx, deps) {
       ctx.textAlign = 'center';
       ctx.fillStyle = P.warn;
       ctx.font = 'bold 12px sans-serif';
-      const tag = boss.rage ? 'BOSS 狂暴' : 'BOSS';
+      // 预警期间显示打断进度：满了这一招就被打掉
+    if (boss.state === 'telegraph') {
+      const need = interruptNeed(boss);
+      const ratio = Math.min(1, boss.tellDmg / need);
+      ctx.fillStyle = P.bar;
+      ctx.fillRect(bx, 28, bw, 5);
+      ctx.fillStyle = P.interrupt;
+      ctx.fillRect(bx, 28, bw * ratio, 5);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = P.interrupt;
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText(`打断 ${Math.round(ratio * 100)}%`, bx, 44);
+    } else if (boss.state === 'stagger') {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = P.interrupt;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('硬直中，随便打', bx, 44);
+    }
+    const tag = boss.rage ? 'BOSS 狂暴' : 'BOSS';
       const label = boss.state === 'telegraph'
         ? `${tag}：准备${boss.plan === 'charge' ? '冲撞' : boss.plan === 'shoot' ? '弹幕' : '召唤'}`
         : tag;
@@ -292,14 +311,14 @@ export function createHud(ctx, deps) {
       ctx.fillRect(x, CARD_Y, CARD_W, CARD_H);
       ctx.strokeStyle = P.cardLine;
       ctx.strokeRect(x, CARD_Y, CARD_W, CARD_H);
-      if (u.evo || u.curse) {
-        ctx.strokeStyle = u.evo ? P.evo : P.danger;
+      if (u.evo || u.curse || u.skill) {
+        ctx.strokeStyle = u.evo ? P.evo : u.curse ? P.danger : P.skillReady;
         ctx.lineWidth = 2;
         ctx.strokeRect(x - 2, CARD_Y - 2, CARD_W + 4, CARD_H + 4);
         ctx.lineWidth = 1;
       }
-      ctx.fillStyle = u.evo ? P.evo : u.curse ? P.danger : P.warn;
-      ctx.font = (u.evo || u.curse) ? 'bold 22px sans-serif' : 'bold 26px sans-serif';
+      ctx.fillStyle = u.evo ? P.evo : u.curse ? P.danger : u.skill ? P.skillReady : P.warn;
+      ctx.font = (u.evo || u.curse || u.skill) ? 'bold 20px sans-serif' : 'bold 26px sans-serif';
       ctx.fillText(u.name, x + CARD_W / 2, CARD_Y + 62);
       ctx.fillStyle = P.dim;
       ctx.font = '14px sans-serif';
@@ -308,15 +327,37 @@ export function createHud(ctx, deps) {
       ctx.fillStyle = P.faint;
       ctx.font = '13px ui-monospace, monospace';
       ctx.fillText(`[${i + 1}]`, x + CARD_W / 2, CARD_Y + CARD_H - 16);
-    });
-  }
 
-  const TAKEN_NAME = {
-    grunt: '杂兵接触', rusher: '冲锋兵', tank: '肉盾', elite: '精英',
-    boss: 'Boss 接触/冲撞', bossBullet: 'Boss 弹幕',
-    shooter: '射手接触', shooterBullet: '射手子弹',
-    splitter: '分裂怪', summoner: '召唤者',
-  };
+      // 排除按钮：还有次数才画
+      if (w.banishes > 0) {
+        const b = banishBtn(i);
+        ctx.fillStyle = P.card;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = P.danger;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = P.danger;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('×', b.x + b.w / 2, b.y + 16);
+      }
+    });
+
+    // 重抽按钮
+    const canReroll = w.rerolls > 0;
+    ctx.fillStyle = P.card;
+    ctx.fillRect(REROLL_BTN.x, REROLL_BTN.y, REROLL_BTN.w, REROLL_BTN.h);
+    ctx.strokeStyle = canReroll ? P.accent : P.btnLine;
+    ctx.lineWidth = canReroll ? 2 : 1;
+    ctx.strokeRect(REROLL_BTN.x, REROLL_BTN.y, REROLL_BTN.w, REROLL_BTN.h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = canReroll ? P.text : P.faint;
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`重抽 R（${w.rerolls}）`, REROLL_BTN.x + REROLL_BTN.w / 2, REROLL_BTN.y + 20);
+    ctx.fillStyle = P.faint;
+    ctx.font = '11px sans-serif';
+    ctx.fillText(w.banishes > 0 ? `点 × 排除这张卡（剩 ${w.banishes} 次，本局不再出现）` : '排除次数已用完',
+      VIEW_W / 2, REROLL_BTN.y + REROLL_BTN.h + 18);
+  }
 
   // 横条：名字 + 条 + 占比，左右两栏共用
   function statBars(rows, x, y, w0, total, color) {

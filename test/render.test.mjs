@@ -337,3 +337,49 @@ test('Q/E 和右下角按钮都能放技能，HUD 画出技能槽', () => {
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('Q') && texts.includes('E'), `HUD 上没画技能槽键位：${texts.slice(0, 16)}`);
 });
+
+test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', () => {
+  // 前面的测试可能把状态留在阵亡/暂停，先恢复到正常游戏中，否则永远等不到升级
+  for (let i = 0; i < 6; i++) {
+    calls.length = 0;
+    runFrames(1, 2.9e6 + i * 17, 0);
+    const t = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    if (t.includes('阵亡') || t.some((x) => x.includes('按任意键'))) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+    else if (t.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+    else break;
+  }
+  // 一直玩到弹出选卡界面。必须移动：站着不动经验球飘不过来，永远升不了级
+  let opened = false;
+  const dirs = ['KeyD', 'KeyS', 'KeyA', 'KeyW'];
+  let held = null;
+  for (let i = 0; i < 300 * 60 && !opened; i++) {
+    if (i % 120 === 0) {
+      if (held) fire(handlers.window, 'keyup', { code: held });
+      held = dirs[(i / 120) % dirs.length];
+      fire(handlers.window, 'keydown', { code: held, preventDefault() {} });
+    }
+    runFrames(1, 3e6 + i * 16.7, 0);
+    const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    if (texts.some((t) => t.includes('重抽 R'))) opened = true;
+    else calls.length = 0;
+  }
+  if (held) fire(handlers.window, 'keyup', { code: held });
+  assert.ok(opened, '一直没等到选卡界面（或者重抽按钮没画）');
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('×'), '没画排除按钮');
+  assert.ok(texts.some((t) => t.includes('排除')), '没画排除说明');
+
+  // 点重抽按钮（底部中间）
+  fire(handlers.canvas, 'pointerdown', { pointerId: 31, clientX: 480, clientY: 359 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 31 });
+  runFrames(2);
+  // 键盘重抽
+  fire(handlers.window, 'keydown', { code: 'KeyR', preventDefault() {} });
+  runFrames(2);
+  // Shift + 1 排除
+  fire(handlers.window, 'keydown', { code: 'Digit1', shiftKey: true, preventDefault() {} });
+  runFrames(2);
+  // 最后正常选一张，回到游戏
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+  runFrames(5);
+});

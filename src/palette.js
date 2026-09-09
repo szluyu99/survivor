@@ -28,7 +28,8 @@ export const P = {
   hitFlash: '#ffffff',
   foeBullet: '#ff5d7a',   // Boss 弹幕，必须和己方投射物一眼分开
   bossTell: '#ffcf5c',    // 预警圈
-  bossRage: '#ff2e63',    // 狂暴后的 Boss 描边
+  bossRage: '#ff2e63',
+  interrupt: '#9df0ff',   // 打断成功的提示与进度条    // 狂暴后的 Boss 描边
   evo: '#9df5c8',         // 进化卡的强调色
 
   // 己方投射物

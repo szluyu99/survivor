@@ -1303,3 +1303,138 @@ test('冷却结束后可以再放', () => {
   update(w, DT, { dx: 0, dy: 0, skill: 0 });
   assert.ok(w.fx.some((f) => f.active && f.type === 'magnet'), '冷却结束后放不出来');
 });
+
+// ---- Boss 打断 ----
+import { reroll, banish } from '../src/sim.js';
+import { interruptNeed } from '../src/enemies.js';
+
+function bossAtTelegraph(seed, plan = 'charge') {
+  const w = createWorld(seed);
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.terrainTimer = 1e9;
+  for (const t of w.terrain) t.active = false;
+  w.bossTimer = 0.01;
+  update(w, DT, { dx: 0, dy: 0 });
+  const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+  boss.state = 'telegraph';
+  boss.plan = plan;
+  boss.stateT = 0.8;
+  boss.tellDmg = 0;
+  return { w, boss };
+}
+
+test('预警期间打够伤害就能打断，Boss 进入硬直', () => {
+  const { w, boss } = bossAtTelegraph(5);
+  boss.tellDmg = interruptNeed(boss);
+  for (const f of w.fx) f.active = false;
+  update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(boss.state, 'stagger', `没进硬直，当前状态 ${boss.state}`);
+  assert.ok(w.fx.some((f) => f.active && f.type === 'interrupt'), '没有登记 interrupt 事件');
+});
+
+test('伤害不够就打断不了，技能照常放出来', () => {
+  const { w, boss } = bossAtTelegraph(5, 'shoot');
+  boss.tellDmg = interruptNeed(boss) * 0.9; // 差一点
+  for (const b of w.bullets) b.active = false;
+  for (let i = 0; i < 120; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.bullets.some((b) => b.active && b.foe), '没打断却也没放出弹幕');
+});
+
+test('硬直期间 Boss 不动也不出招', () => {
+  const { w, boss } = bossAtTelegraph(5);
+  w.weapons = []; // 卸掉武器，避免击退把"不动"测糊
+  boss.tellDmg = interruptNeed(boss);
+  update(w, DT, { dx: 0, dy: 0 });
+  assert.equal(boss.state, 'stagger');
+  const pos = { x: boss.x, y: boss.y };
+  for (const b of w.bullets) b.active = false;
+  for (let i = 0; i < 60; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(Math.hypot(boss.x - pos.x, boss.y - pos.y) < 1, '硬直期间还在移动');
+  assert.ok(!w.bullets.some((b) => b.active && b.foe), '硬直期间还在放弹幕');
+});
+
+test('真实战斗里打断确实会发生（贴脸打 Boss 的打法）', () => {
+  let tells = 0, interrupts = 0;
+  for (const seed of [1, 5, 9]) {
+    const w = createWorld(seed);
+    for (let i = 0; i < 300 * 60 && !w.over; i++) {
+      if (w.paused) chooseUpgrade(w, Math.floor(i / 97) % 3);
+      const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+      let dx, dy;
+      if (boss && (boss.state === 'telegraph' || boss.state === 'stagger')) {
+        dx = boss.x - w.player.x; dy = boss.y - w.player.y;
+        const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      } else {
+        const a = (i / 60) * 1.6;
+        dx = Math.cos(a); dy = Math.sin(a);
+      }
+      update(w, DT, { dx, dy, dash: w.player.dashCd <= 0 });
+      for (const f of w.fx) {
+        if (f.active && f.type === 'bosstell') tells++;
+        if (f.active && f.type === 'interrupt') interrupts++;
+        f.active = false;
+      }
+    }
+  }
+  assert.ok(tells > 0, '这几局没见到 Boss 预警');
+  assert.ok(interrupts > 0, `${tells} 次预警一次都没打断成功，阈值可能太高`);
+});
+
+// ---- 重抽 / 排除 ----
+function untilChoices(w, maxSeconds = 300) {
+  for (let i = 0; i < maxSeconds * 60 && !w.paused && !w.over; i++) {
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+  }
+  return w.choices;
+}
+
+test('重抽换掉三张卡并消耗次数，用完就不能再重抽', () => {
+  const w = createWorld(3);
+  untilChoices(w);
+  const before = w.choices.map((c) => c.name).join(',');
+  const n0 = w.rerolls;
+  assert.ok(n0 > 0, '开局应该有重抽次数');
+  assert.equal(reroll(w), true);
+  assert.equal(w.rerolls, n0 - 1);
+  assert.equal(w.choices.length, 3);
+  const after = w.choices.map((c) => c.name).join(',');
+  assert.notEqual(before, after, '重抽后三张卡完全没变');
+  while (w.rerolls > 0) reroll(w);
+  assert.equal(reroll(w), false, '次数用完还能重抽');
+});
+
+test('排除会把卡从这一局的池子里永久去掉', () => {
+  const w = createWorld(3);
+  untilChoices(w);
+  const target = w.choices[0];
+  assert.ok(target.key, '卡片没有稳定的 key，没法排除');
+  assert.equal(banish(w, 0), true);
+  assert.ok(w.banned.includes(target.key));
+  assert.equal(w.banishes, 0);
+  assert.ok(!w.choices.some((c) => c.key === target.key), '排除后这张卡还在当前三张里');
+  // 后面几十次升级都不该再见到它
+  for (let round = 0; round < 25; round++) {
+    chooseUpgrade(w, 0);
+    if (!untilChoices(w)) break;
+    assert.ok(!w.choices.some((c) => c.key === target.key), `被排除的卡在第 ${round + 1} 轮又出现了`);
+  }
+});
+
+test('排除只换掉被排除那一张，另外两张保持不变', () => {
+  const w = createWorld(9);
+  untilChoices(w);
+  const keep = [w.choices[1].key, w.choices[2].key];
+  banish(w, 0);
+  const now = w.choices.map((c) => c.key);
+  for (const k of keep) assert.ok(now.includes(k), `保留的卡 ${k} 也被换掉了`);
+});
+
+test('排除次数用完后不再生效', () => {
+  const w = createWorld(9);
+  untilChoices(w);
+  banish(w, 0);
+  assert.equal(w.banishes, 0);
+  assert.equal(banish(w, 0), false, '次数用完还能排除');
+});

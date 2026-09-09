@@ -63,20 +63,20 @@ export function rollChoices(w) {
     if (inst.level < def.maxLevel) {
       // 武器升级放两份：卡池扩到 ~25 项之后，核心成长曲线被稀释得太狠——
       // 实测一局 8 次升级下来武器常常还停在 1-2 级，平均存活从 118s 掉到 73s
-      const card = { name: `${def.name} Lv.${inst.level + 1}`, desc: def.desc[inst.level], apply: (x) => upgradeWeapon(x, def.id) };
+      const card = { key: `weapon:${def.id}`, name: `${def.name} Lv.${inst.level + 1}`, desc: def.desc[inst.level], apply: (x) => upgradeWeapon(x, def.id) };
       bag.push(card, card);
     }
   }
   if (w.weapons.length < MAX_SLOTS) {
     for (const def of WEAPONS) {
       if (w.weapons.some((x) => x.id === def.id)) continue;
-      bag.push({ name: `新武器 · ${def.name}`, desc: def.desc[0], apply: (x) => upgradeWeapon(x, def.id) });
+      bag.push({ key: `weapon:${def.id}`, name: `新武器 · ${def.name}`, desc: def.desc[0], apply: (x) => upgradeWeapon(x, def.id) });
     }
   }
   for (const evo of findEvolution(w)) {
     const def = findWeapon(evo.id);
     const parts = evo.from.map((id) => findWeapon(id).name).join(' + ');
-    const card = { name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
+    const card = { key: `evo:${evo.id}`, name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
     // 放六份：卡池已经涨到 ~25 项（9 词条 + 3 诅咒 + 4 技能 + 武器升级/新武器），
     // 份数不跟着涨就会经常整局抽不到，而进化本该是一局里的高光时刻
     bag.push(card, card, card, card);
@@ -86,6 +86,7 @@ export function rollChoices(w) {
     const def = findSkill(inst.id);
     if (inst.level < def.maxLevel) {
       bag.push({
+        key: `skill:${def.id}`,
         name: `技能 · ${def.name} Lv.${inst.level + 1}`,
         desc: def.desc[inst.level],
         skill: true,
@@ -97,6 +98,7 @@ export function rollChoices(w) {
     for (const def of SKILLS) {
       if (w.skills.some((x) => x.id === def.id)) continue;
       bag.push({
+        key: `skill:${def.id}`,
         name: `技能 · ${def.name}`,
         desc: def.desc[0],
         skill: true,
@@ -104,15 +106,39 @@ export function rollChoices(w) {
       });
     }
   }
-  for (const t of TRAITS) bag.push({ name: t.name, desc: t.desc, apply: t.apply });
-  for (const c of CURSES) bag.push({ name: `诅咒 · ${c.name}`, desc: c.desc, curse: true, apply: c.apply });
+  for (const t of TRAITS) bag.push({ key: `trait:${t.id}`, name: t.name, desc: t.desc, apply: t.apply });
+  for (const c of CURSES) bag.push({ key: `curse:${c.id}`, name: `诅咒 · ${c.name}`, desc: c.desc, curse: true, apply: c.apply });
 
+  // 被"排除"掉的卡这一局不再出现
+  const usable = w.banned && w.banned.length ? bag.filter((c) => !w.banned.includes(c.key)) : bag;
   const out = [];
-  while (out.length < 3 && bag.length) {
-    const card = bag.splice(Math.floor(w.rng() * bag.length), 1)[0];
+  while (out.length < 3 && usable.length) {
+    const card = usable.splice(Math.floor(w.rng() * usable.length), 1)[0];
     if (out.includes(card)) continue; // 多份权重的卡（进化/武器升级）别抽出两张一样的
     out.push(card);
   }
   return out;
 }
 
+
+// 重抽：花掉一次次数，重新发三张
+export function rerollChoices(w) {
+  if (!w.choices || w.rerolls <= 0) return false;
+  w.rerolls--;
+  w.choices = rollChoices(w);
+  return true;
+}
+
+// 排除：把这张卡从这一局的卡池里永久去掉，并立刻补一张新的
+export function banishChoice(w, index) {
+  if (!w.choices || w.banishes <= 0) return false;
+  const card = w.choices[index];
+  if (!card || !card.key) return false;
+  w.banned.push(card.key);
+  w.banishes--;
+  // 补位：重新抽三张，但保留另外两张原样，避免"排除"变成变相重抽
+  const keep = w.choices.filter((_, i) => i !== index);
+  const fresh = rollChoices(w).filter((c) => !keep.some((k) => k.key === c.key));
+  w.choices = [...keep, fresh[0]].filter(Boolean);
+  return true;
+}

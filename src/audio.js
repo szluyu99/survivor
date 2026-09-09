@@ -94,6 +94,12 @@ export const sfx = {
   },
   bossTell() { if (throttle('bossTell', 200)) tone({ freq: 520, to: 700, type: 'square', dur: 0.2, gain: 0.14 }); },
   bossShoot() { if (throttle('bossShoot', 90)) tone({ freq: 260, to: 130, type: 'sawtooth', dur: 0.16, gain: 0.16 }); },
+  interrupt() {
+    // 清脆的两声上行 + 短噪声，"打断成功"要听起来很爽
+    tone({ freq: 660, to: 1320, type: 'square', dur: 0.12, gain: 0.22 });
+    tone({ freq: 990, to: 1760, type: 'square', dur: 0.14, gain: 0.16, delay: 0.08 });
+    noise({ dur: 0.18, gain: 0.16, hp: 900 });
+  },
   bossRage() {
     // 不谐和的双音，听起来"要出事了"
     tone({ freq: 140, to: 320, type: 'sawtooth', dur: 0.5, gain: 0.28 });

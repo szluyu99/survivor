@@ -27,4 +27,24 @@ function skillBtnHit(x, y) {
   return -1;
 }
 
-export { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit };
+// 选卡界面：底部的重抽按钮，以及每张卡右上角的排除按钮
+const REROLL_BTN = { x: VIEW_W / 2 - 70, y: CARD_Y + CARD_H + 22, w: 140, h: 30 };
+const inRerollBtn = (x, y) => x >= REROLL_BTN.x && x <= REROLL_BTN.x + REROLL_BTN.w
+  && y >= REROLL_BTN.y && y <= REROLL_BTN.y + REROLL_BTN.h;
+
+const BANISH_SIZE = 22;
+function banishBtn(i) {
+  return { x: cardX(i) + CARD_W - BANISH_SIZE - 4, y: CARD_Y + 4, w: BANISH_SIZE, h: BANISH_SIZE };
+}
+function banishHit(x, y) {
+  for (let i = 0; i < 3; i++) {
+    const b = banishBtn(i);
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+  }
+  return -1;
+}
+
+export {
+  CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
+  REROLL_BTN, inRerollBtn, banishBtn, banishHit,
+};
