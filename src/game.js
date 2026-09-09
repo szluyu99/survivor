@@ -5,9 +5,9 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN, inDiffBtn, inHelpBtn } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN, inDiffBtn, inHelpBtn, inExitBtn, inResumeBtn, inDiscardBtn } from './layout.js';
 import { createHud } from './hud.js';
-import { createRecorder, createPlayer } from './replay.js';
+import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
 
@@ -70,6 +70,7 @@ const hud = createHud(ctx, {
   getMeta: () => meta,
   getDifficulty: () => difficulty,
   getHelpOpen: () => helpOpen,
+  getSave: () => saveInfo,
   getReplayReady: () => !!lastReplay,
 });
 const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, drawWinPanel, WEAPON_NAME, clock } = hud;
@@ -163,6 +164,90 @@ let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里
 let recorder = createRecorder(world.seed, world.hero, world.perks, world.difficulty);
 let lastReplay = null;    // 上一局的录像，死亡后生成
 let player = null;        // 非 null 表示正在看回放
+let recording = true;     // 读档继续的局不录：录像是"从第一帧开始的完整输入流"，接不上
+let settled = false;      // 这一局的死亡结算（残片/清档/收尾录像）只做一次。
+                          // 以前靠 lastReplay 是否为空判断，读档局不录像就失效了
+
+// ---- 存档：中断后接着打。世界快照本身已经是纯 JSON（见 replay.js），这里只管存取 ----
+// 只有一个档位，写档时机是"返回主界面"。阵亡和重开都会清档——
+// 不清的话可以"死了再读档"反复刷通关，局外进度就没意义了
+const SAVE_KEY = 'survivor.save';
+let saveInfo = readSaveInfo();   // 首屏要显示的摘要，null 表示没有存档
+
+function readSaveInfo() {
+  let raw;
+  try { raw = localStorage.getItem(SAVE_KEY); } catch { return null; }
+  if (!raw) return null;
+  try {
+    // 直接恢复一遍来验证：版本不匹配或字段坏掉的旧档在这里就会抛，
+    // 丢掉它总比让首屏卡在一个读不出来的存档上好
+    const w = restore(JSON.parse(raw));
+    return {
+      t: w.t,
+      zone: currentZone(w).name,
+      heroName: findHero(w.hero).name,
+      diffName: findDifficulty(w.difficulty).name,
+    };
+  } catch {
+    // 这里只能删 key，不能调 clearSave()：readSaveInfo 是在 saveInfo 的初始化表达式里
+    // 被调用的，此时 saveInfo 还在 TDZ 里，赋值会直接抛 ReferenceError（渲染烟测抓到过）
+    dropSaveKey();
+    return null;
+  }
+}
+
+function writeSave(w) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot(w))); } catch { /* 容量/无痕模式，忽略 */ }
+  saveInfo = readSaveInfo();
+}
+
+function dropSaveKey() {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* 忽略 */ }
+}
+
+function clearSave() {
+  dropSaveKey();
+  saveInfo = null;
+}
+
+// 读档继续。这一局不再录像，所以阵亡后也没有回放可看——先这么取舍
+function resumeSave() {
+  let w;
+  try { w = restore(JSON.parse(localStorage.getItem(SAVE_KEY))); } catch { clearSave(); return false; }
+  world = w;
+  globalThis.__survivorWorld = world;
+  recording = false;
+  settled = false;
+  lastReplay = null;
+  player = null;
+  winPanel = false;
+  uiPaused = false;
+  queuedActions.length = 0;
+  acc = 0;
+  fx.reset();
+  clearSave();            // 读出来就消档，免得同一个档反复读
+  started = true;
+  last = performance.now();
+  unlock();
+  return true;
+}
+
+// 返回主界面：先把这一局存下来再回首屏。不存档的话没人敢按这个按钮
+function exitToTitle() {
+  if (!world.over) writeSave(world);
+  started = false;
+  uiPaused = false;
+  helpOpen = false;
+  winPanel = false;
+  player = null;
+  keys.clear();
+  pointer = null;
+  stick.active = false;
+  dashQueued = false;
+  skillQueued = null;
+  acc = 0;
+  fx.reset();
+}
 // 选卡/重抽/排除排队到下一个逻辑步再执行。
 // 不这么做的话，操作在事件回调里立刻生效，而录像只能记到"下一帧"，
 // 回放时施加的时机就和当时错开一帧，整局从那里开始漂
@@ -208,11 +293,24 @@ function restart() {
   acc = 0;
   fx.reset();
   recorder = createRecorder(world.seed, world.hero, world.perks, world.difficulty);
+  recording = true;
+  settled = false;
   lastReplay = null;
+  clearSave();          // 重开就意味着放弃上一局的存档
   player = null;
   winPanel = false;
   queuedActions.length = 0;
 }
+
+// 只给渲染层测试用的观察口：UI 层的状态没有别的办法从外面看（游戏本身不读它）
+globalThis.__survivorUi = {
+  get started() { return started; },
+  get uiPaused() { return uiPaused; },
+  get winPanel() { return winPanel; },
+  get helpOpen() { return helpOpen; },
+  get hasSave() { return !!saveInfo; },
+  get recording() { return recording; },
+};
 
 addEventListener('keydown', (e) => {
   // 首屏只认"明确的开局意图"：1–4 选角色开局，方向键换选中，回车用选中的角色开局。
@@ -227,6 +325,8 @@ addEventListener('keydown', (e) => {
     }
     if (e.code === 'KeyH') { helpOpen = true; return; }
     if (e.code === 'KeyD') { cycleDifficulty(); return; }
+    // C 继续上一局。读档失败（版本不匹配/坏档）就当没这个档，留在首屏
+    if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
     const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
     if (hi >= 0 && hi < HERO_CARD.count) {
       // 没解锁的按一下是"花残片买下来"，买完停在首屏，再按一次才开局
@@ -271,6 +371,8 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyQ') skillQueued = 0;
     if (e.code === 'KeyE') skillQueued = 1;
   }
+  // 暂停面板里的 Q = 返回主界面（自动存档）。Q 在局内是技能槽 0，所以只在暂停时接管
+  if (uiPaused && e.code === 'KeyQ') { exitToTitle(); return; }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
   if (world.paused && world.choices) {
@@ -305,6 +407,8 @@ canvas.addEventListener('pointerdown', (e) => {
     if (helpOpen) { helpOpen = false; pointer = null; return; }
     if (inHelpBtn(at.x, at.y)) { helpOpen = true; pointer = null; return; }
     if (inDiffBtn(at.x, at.y)) { cycleDifficulty(); pointer = null; return; }
+    if (saveInfo && inDiscardBtn(at.x, at.y)) { clearSave(); pointer = null; return; }
+    if (saveInfo && inResumeBtn(at.x, at.y)) { resumeSave(); pointer = null; return; }
     const pi = perkBtnHit(at.x, at.y);
     if (pi >= 0 && pi < PERK_BTN.count) {
       const next = buyPerk(meta, PERKS[pi].id);
@@ -337,7 +441,13 @@ canvas.addEventListener('pointerdown', (e) => {
     pointer = null;
     return;
   }
-  if (uiPaused) { uiPaused = false; pointer = null; return; }
+  if (uiPaused) {
+    // 返回主界面的判定要排在"点面板任意处继续"之前，否则永远点不到
+    if (inExitBtn(pointer.x, pointer.y)) { exitToTitle(); pointer = null; return; }
+    uiPaused = false;
+    pointer = null;
+    return;
+  }
   if (world.paused && world.choices) {
     const bi = banishHit(pointer.x, pointer.y);
     if (bi >= 0 && world.banishes > 0) { queueAction('banish', bi); pointer = null; return; }
@@ -772,16 +882,21 @@ function frame(now) {
           while (acc >= STEP && steps < MAX_CATCHUP) {
             // 选卡类操作排队到这里执行，保证"录像里的时机"和"当时的时机"完全一致
             const action = queuedActions.shift() || null;
-            // 死后画面还在跑，但不再往录像里加帧
-            const inp = world.over ? readInput() : recorder.record(readInput(), action);
+            // 死后画面还在跑，但不再往录像里加帧；读档继续的局全程不录
+            const inp = (world.over || !recording) ? readInput() : recorder.record(readInput(), action);
             if (action) applyAction(action);
             update(world, STEP, inp);
             consumeFx(world);
-            // 死亡的那一帧收尾录像，并把这局赚到的残片结算入账
-            if (world.over && !lastReplay) {
-              lastReplay = recorder.toJSON(world);
-              globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能不能重演这一局
+            // 死亡的那一帧：收尾录像、结算残片、清掉存档
+            // （不清的话可以"死了再读档"反复刷通关）
+            if (world.over && !settled) {
+              settled = true;
+              if (recording) {
+                lastReplay = recorder.toJSON(world);
+                globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能重演这一局
+              }
               awardShards(world);
+              clearSave();
             }
             acc -= STEP;
             steps++;

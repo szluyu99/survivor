@@ -86,9 +86,23 @@ const HELP_BTN = { x: VIEW_W / 2 + 30, y: 410, w: 120, h: 32 };
 const inHelpBtn = (x, y) => x >= HELP_BTN.x && x <= HELP_BTN.x + HELP_BTN.w
   && y >= HELP_BTN.y && y <= HELP_BTN.y + HELP_BTN.h;
 
+// 暂停面板里的「返回主界面」（退出时会自动存档）
+const EXIT_BTN = { x: VIEW_W / 2 - 90, y: VIEW_H - 52, w: 180, h: 30 };
+const inExitBtn = (x, y) => x >= EXIT_BTN.x && x <= EXIT_BTN.x + EXIT_BTN.w
+  && y >= EXIT_BTN.y && y <= EXIT_BTN.y + EXIT_BTN.h;
+
+// 首屏的「继续上一局」和「放弃存档」
+const RESUME_BTN = { x: VIEW_W / 2 - 250, y: 132, w: 400, h: 34 };
+const inResumeBtn = (x, y) => x >= RESUME_BTN.x && x <= RESUME_BTN.x + RESUME_BTN.w
+  && y >= RESUME_BTN.y && y <= RESUME_BTN.y + RESUME_BTN.h;
+const DISCARD_BTN = { x: VIEW_W / 2 + 160, y: 132, w: 90, h: 34 };
+const inDiscardBtn = (x, y) => x >= DISCARD_BTN.x && x <= DISCARD_BTN.x + DISCARD_BTN.w
+  && y >= DISCARD_BTN.y && y <= DISCARD_BTN.y + DISCARD_BTN.h;
+
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
   HERO_CARD, heroCardX, heroCardHit, PERK_BTN, perkBtnX, perkBtnHit,
   DIFF_BTN, inDiffBtn, HELP_BTN, inHelpBtn,
+  EXIT_BTN, inExitBtn, RESUME_BTN, inResumeBtn, DISCARD_BTN, inDiscardBtn,
 };

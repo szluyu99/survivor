@@ -6,7 +6,7 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX, DIFF_BTN, HELP_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX, DIFF_BTN, HELP_BTN, EXIT_BTN, RESUME_BTN, DISCARD_BTN } from './layout.js';
 import { HEROES } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
@@ -201,6 +201,17 @@ export function createHud(ctx, deps) {
     ctx.font = '13px sans-serif';
     ctx.fillText('ESC / P 继续　M 静音', VIEW_W / 2, 74);
 
+    // 返回主界面：退出时会把这一局存下来，所以敢按
+    ctx.fillStyle = P.card;
+    ctx.fillRect(EXIT_BTN.x, EXIT_BTN.y, EXIT_BTN.w, EXIT_BTN.h);
+    ctx.strokeStyle = P.cardLine;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(EXIT_BTN.x, EXIT_BTN.y, EXIT_BTN.w, EXIT_BTN.h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('Q 返回主界面（自动存档）', EXIT_BTN.x + EXIT_BTN.w / 2, EXIT_BTN.y + 20);
+
     // 左栏：装备
     ctx.textAlign = 'left';
     let y = 116;
@@ -292,13 +303,16 @@ export function createHud(ctx, deps) {
     ctx.fillText('战况', rx, y);
     let live = 0;
     for (const e of w.enemies) if (e.active) live++;
+    const bestRun = best();   // best 是个取值函数，直接判真永远成立——没有记录时会 best().t 崩掉
     const stat = [
       ['存活', clock(w.t)],
       ['击杀', String(w.kills)],
       ['场上敌人', String(live)],
       ['当前阶段', w.phase === 'surge' ? '冲锋期' : w.phase === 'calm' ? '喘息期' : '常规'],
       ['下一只精英', `${Math.max(0, w.eliteTimer).toFixed(0)}s`],
-      ['最好成绩', best ? `${clock(best().t)} / ${best().kills} 杀` : '暂无'],
+      ['最好成绩', bestRun ? `${clock(bestRun.t)} / ${bestRun.kills} 杀` : '暂无'],
+      ['区域', `${currentZone(w).name}（${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s 后切换）`],
+      ['难度', findDifficulty(w.difficulty).name],
     ];
     ctx.font = '13px ui-monospace, monospace';
     for (const [k, v] of stat) {
@@ -584,6 +598,7 @@ export function createHud(ctx, deps) {
       ? `　已通关：${meta().beaten.map((id) => findDifficulty(id).name).join('、')}`
       : '';
     ctx.fillText(`选择角色　　残片 ${meta().shards}${beaten}`, cx, 166);
+    drawResumeRow();
     drawHeroCards();
     drawPerks();
     drawTitleButtons();
@@ -596,6 +611,33 @@ export function createHud(ctx, deps) {
     ctx.fillText('← → 换选中　回车开始　D 换难度　H 看操作说明　只有这几个操作会开局', cx, 486);
     if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 506);
     if (deps.getHelpOpen && deps.getHelpOpen()) drawHelp();
+  }
+
+  // 「继续上一局」：只有存在存档时才画。信息取自存档本身，不用另存一份摘要
+  function drawResumeRow() {
+    const s = deps.getSave ? deps.getSave() : null;
+    if (!s) return;
+    ctx.fillStyle = P.card;
+    ctx.fillRect(RESUME_BTN.x, RESUME_BTN.y, RESUME_BTN.w, RESUME_BTN.h);
+    ctx.strokeStyle = P.calm;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(RESUME_BTN.x, RESUME_BTN.y, RESUME_BTN.w, RESUME_BTN.h);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = P.calm;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(
+      `C 继续上一局：${s.zone} ${clock(s.t)} · ${s.heroName} · ${s.diffName}`,
+      RESUME_BTN.x + 12, RESUME_BTN.y + 22,
+    );
+    ctx.fillStyle = P.card;
+    ctx.fillRect(DISCARD_BTN.x, DISCARD_BTN.y, DISCARD_BTN.w, DISCARD_BTN.h);
+    ctx.strokeStyle = P.cardLine;
+    ctx.strokeRect(DISCARD_BTN.x, DISCARD_BTN.y, DISCARD_BTN.w, DISCARD_BTN.h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('放弃', DISCARD_BTN.x + DISCARD_BTN.w / 2, DISCARD_BTN.y + 22);
+    ctx.textAlign = 'center';
   }
 
   // 难度 / 帮助两个按钮。说明和图例收进帮助浮层，首屏才放得下难度选择

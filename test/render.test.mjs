@@ -55,13 +55,20 @@ globalThis.document = {
   getElementById: () => canvas,
   addEventListener: record(handlers.document),
 };
+// 固定随机种子：game.js 默认用 Date.now() 造种子，每次跑测试都是不同的一局，
+// 于是"能不能活过 20 秒""什么时候死"都会变，依赖对局结果的用例就会时红时绿。
+// 加上 ?seed= 之后整份渲染烟测都是确定性的
+globalThis.location = { search: '?seed=4242' };
 globalThis.addEventListener = record(handlers.window);
 globalThis.requestAnimationFrame = (cb) => { rafCb = cb; return 1; };
 globalThis.performance = { now: () => 0 };
 globalThis.localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),
   setItem: (k, v) => store.set(k, v),
+  removeItem: (k) => store.delete(k),
 };
+// 预置一个版本对不上的坏存档：首屏必须静默丢掉它，而不是卡在读不出来的档上
+store.set('survivor.save', JSON.stringify({ version: -1, seed: 1 }));
 
 await import('../src/game.js');
 const { HEROES } = await import('../src/heroes.js');
@@ -84,6 +91,16 @@ function runFrames(n, startMs = 0, stepMs = 16.7) {
 test('game.js 能正常 import 并起主循环', () => {
   assert.ok(rafCb, '没有注册 requestAnimationFrame');
   assert.ok(calls.length > 0, '第一帧之前就该有 resize 的 setTransform');
+});
+
+test('坏存档被静默丢掉：首屏不该出现"继续上一局"', () => {
+  // 顶部预置了一个 version: -1 的存档
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.some((t) => t.includes('选择角色')), '首屏没画出来');
+  assert.ok(!texts.some((t) => t.includes('继续上一局')), '版本不匹配的存档不该被当成可读档');
+  assert.equal(store.has('survivor.save'), false, '坏存档没被清掉');
 });
 
 test('开始前是首屏：目标、角色卡、强化、难度都在', () => {
@@ -442,6 +459,98 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
     w.player.maxHp = realMaxHp;
     w.player.hp = Math.min(w.player.hp, realMaxHp);
   }
+});
+
+function texts() {
+  return calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+}
+
+// 确保当前是"活着的一局"。前面的用例可能把人玩死了（阵亡状态下 ESC 不生效），
+// 空格在阵亡界面才是重开
+function ensureAlive(ms) {
+  if (globalThis.__survivorWorld.over) {
+    fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+    runFrames(3, ms, 0);
+  }
+  return !globalThis.__survivorWorld.over;
+}
+
+// 打开暂停面板。选卡界面弹着时 ESC 不生效（world.paused 优先），所以先把卡选掉再试。
+// 状态从 __survivorUi 读，比从画面文字上猜可靠
+function openPause(ms) {
+  const ui = globalThis.__survivorUi;
+  for (let i = 0; i < 12 && !ui.uiPaused; i++) {
+    fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(2, ms + i * 60, 0);
+    fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+    runFrames(2, ms + i * 60 + 30, 0);
+  }
+  calls.length = 0;
+  runFrames(2, ms + 900, 0);
+  return ui.uiPaused;
+}
+
+test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () => {
+  assert.ok(ensureAlive(4.19e6), '重开失败，测不了');
+  const w = globalThis.__survivorWorld;
+  // 先玩一会儿攒出可识别的进度。中途把血补满：这条用例测的是存档，
+  // 不该因为"这一局运气不好 15 秒就死了"而变红
+  for (let i = 0; i < 60 * 15; i++) {
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    if (i % 30 === 0) w.player.hp = w.player.maxHp;
+    runFrames(1, 4.2e6 + i * 16.7, 0);
+  }
+  assert.ok(w.t > 5, '没跑起来');
+
+  // 暂停 → 面板里要有返回主界面的入口 → 按 Q 退出
+  const ui = globalThis.__survivorUi;
+  assert.ok(openPause(4.3e6), `打不开暂停面板：ui=${JSON.stringify({ started: ui.started, uiPaused: ui.uiPaused, winPanel: ui.winPanel, helpOpen: ui.helpOpen })} world=${JSON.stringify({ paused: w.paused, over: w.over, choices: !!w.choices })} 画面=${texts().slice(0, 8)}`);
+  assert.ok(texts().some((t) => t.includes('返回主界面')), `暂停面板没有返回主界面的入口：${texts().slice(0, 10)}`);
+  // 进度要在暂停之后取：openPause 自己也会推进几帧世界
+  const tAtExit = w.t;
+  const killsAtExit = w.kills;
+  fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  assert.ok(texts().some((t) => t.includes('选择角色')), `按 Q 没回到首屏：${texts().slice(0, 12)}`);
+  assert.ok(texts().some((t) => t.includes('继续上一局')), '首屏没显示存档');
+  assert.ok(store.has('survivor.save'), '退出时没写档');
+
+  // C 读档继续：时间和击杀数应该接着退出时的进度，而不是从 0 开始
+  fire(handlers.window, 'keydown', { code: 'KeyC', preventDefault() {} });
+  runFrames(3);
+  const w2 = globalThis.__survivorWorld;
+  assert.ok(Math.abs(w2.t - tAtExit) < 1, `读档后时间没接上：退出时 ${tAtExit.toFixed(1)}s，读档后 ${w2.t.toFixed(1)}s`);
+  assert.equal(w2.kills, killsAtExit, '读档后击杀数没接上');
+  assert.equal(store.has('survivor.save'), false, '读出来之后应该消档，避免反复读同一个档');
+  calls.length = 0;
+  runFrames(3);
+  assert.ok(!texts().some((t) => t.includes('选择角色')), '读档后应该在局内，而不是首屏');
+});
+
+test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
+  assert.ok(ensureAlive(4.49e6), '重开失败，测不了');
+  const w = globalThis.__survivorWorld;
+  w.player.hp = w.player.maxHp;   // 同上：先保证活着，死是后面故意让它死
+  // 先退出到主界面写一个档，再读回来把人玩死
+  assert.ok(openPause(4.5e6), '打不开暂停面板');
+  fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
+  runFrames(2);
+  assert.ok(store.has('survivor.save'), '前提不成立：没写出存档');
+  fire(handlers.window, 'keydown', { code: 'KeyC', preventDefault() {} });
+  runFrames(2);
+  const w2 = globalThis.__survivorWorld;
+  w2.player.hp = 1;
+  for (let i = 0; i < 60 * 60 && !w2.over; i++) {
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1, 4.6e6 + i * 16.7, 0);
+  }
+  assert.ok(w2.over, '没死成');
+  assert.equal(store.has('survivor.save'), false, '阵亡后存档还在');
+  // 死后重开，把状态交还给后面的用例
+  fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+  runFrames(3);
+  assert.equal(w === w || true, true);
 });
 
 test('通关时弹通关面板，回车继续无尽', () => {
