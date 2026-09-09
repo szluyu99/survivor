@@ -1,6 +1,6 @@
 // 平衡回归报告：改完数值跑 `npm run balance`，一眼看出哪把武器废了、局长有没有跑偏。
 // 之前每次调数值都手写一次性的 node -e 脚本，这里固化下来。
-import { createWorld, update, chooseUpgrade, KINDS } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, KINDS, HEROES } from '../src/sim.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 
 const DT = 1 / 60;
@@ -8,8 +8,8 @@ const SEEDS = [1, 5, 9, 13, 21];
 const circling = (i) => ({ dx: Math.cos((i / 60) * 1.6), dy: Math.sin((i / 60) * 1.6) });
 const still = () => ({ dx: 0, dy: 0 });
 
-function play({ seed, weapons, startLevels = null, mover = circling, pick = () => 0, maxSeconds = 600, dash = false }) {
-  const w = createWorld(seed);
+function play({ seed, weapons, startLevels = null, mover = circling, pick = () => 0, maxSeconds = 600, dash = false, hero }) {
+  const w = createWorld(seed, hero);
   if (weapons) w.weapons = weapons.map((id, i) => ({ id, level: startLevels ? startLevels[i] : 1, timer: 0 }));
   let levels = 0;
   let peak = 0;
@@ -89,6 +89,16 @@ for (const [i, r] of runs.entries()) {
   console.log(`seed ${pad(SEEDS[i], 4)} ${pad(clock(r.t), 7)} ${pad(r.kills + '杀', 8)} ${pad('Lv.' + (r.levels + 1), 7)} 峰值${pad(r.peak + '怪', 7)} Boss ${r.bosses}遇/${r.bossKills}杀  ${r.build}`);
 }
 console.log(`平均存活 ${clock(avg(runs.map((r) => r.t)))}  平均击杀 ${avg(runs.map((r) => r.kills)).toFixed(0)}  平均升级 ${avg(runs.map((r) => r.levels)).toFixed(1)} 次  平均遭遇 Boss ${avg(runs.map((r) => r.bosses)).toFixed(1)} 只`);
+
+console.log('\n=== 各角色整局表现（三张卡轮换选）===');
+// 机器人绕圈走 + 固定顺序选卡，对"自动追踪"的起手武器天然友好，
+// 所以这里的绝对数字不能直接当"角色强弱"看，只能看有没有哪个角色明显玩不下去。
+// 真实取舍还得自己上手：机器人不会主动站进光环射程，也不会用穿透枪对着一队怪打。
+for (const h of HEROES) {
+  const rs = SEEDS.map((seed) => play({ seed, hero: h.id, pick: (i) => Math.floor(i / 97) % 3 }));
+  console.log(`${pad(h.name, 6)} ${rs.map((r) => pad(clock(r.t), 6)).join(' ')}  平均 ${pad(clock(avg(rs.map((r) => r.t))), 7)}`
+    + ` 平均击杀 ${pad(avg(rs.map((r) => r.kills)).toFixed(0), 6)} 典型 build ${rs[0].build}`);
+}
 
 console.log('\n=== 进化是否值得换（打死第一只 Boss 的耗时，素材双持 Lv.3 vs 进化 Lv.1）===');
 // 不用固定靶台架做这个对比：台架会高估回旋镖这类能反复穿过同一目标的武器。

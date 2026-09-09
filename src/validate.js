@@ -11,6 +11,8 @@ import { KINDS } from './enemies.js';
 import { TERRAIN } from './terrain.js';
 import { TRAITS, CURSES } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
+import { HEROES } from './heroes.js';
+import { HERO_CARD } from './layout.js';
 
 function checkWeapon(def, errors) {
   const at = `武器 ${def.id}`;
@@ -106,6 +108,19 @@ export function validateContent() {
   }
 
   if (new Set(FX_EVENTS).size !== FX_EVENTS.length) errors.push('fx 事件登记表有重复项');
+
+  // 角色：起手武器必须真实存在，首屏能放下的卡位有限
+  const heroIds = HEROES.map((h) => h.id);
+  if (new Set(heroIds).size !== heroIds.length) errors.push('角色 id 有重复');
+  if (HEROES.length < HERO_CARD.count) {
+    errors.push(`角色只有 ${HEROES.length} 个，首屏按 ${HERO_CARD.count} 张卡布局，会画出空卡`);
+  }
+  for (const h of HEROES) {
+    const at = `角色 ${h.id || '?'}`;
+    if (!h.id || !h.name || !h.desc || !h.hint) errors.push(`${at}：缺 id/name/desc/hint`);
+    if (typeof h.apply !== 'function') errors.push(`${at}：缺 apply()`);
+    if (!WEAPONS.some((d) => d.id === h.weapon)) errors.push(`${at}：起手武器 ${h.weapon} 不是基础武器`);
+  }
 
   // 槽位数得放得下东西，否则玩法直接失效
   if (!(MAX_SLOTS >= 1)) errors.push('武器槽位数不合法');

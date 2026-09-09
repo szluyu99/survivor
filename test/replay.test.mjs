@@ -117,6 +117,28 @@ test('录像重放能还原整局：时间、击杀、等级都对上', () => {
   assert.equal(fingerprint(playback(replay)), fingerprint(w));
 });
 
+test('角色会跟着快照和录像一起走（否则重演的是另一个角色）', () => {
+  const w = run(createWorld(5, 'warden'), 0, 600);
+  assert.equal(w.hero, 'warden');
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+  assert.equal(snap.hero, 'warden');
+  const w2 = restore(snap);
+  assert.equal(w2.hero, 'warden');
+  assert.equal(fingerprint(w2), fingerprint(w));
+
+  // 录像同理：只记 seed 的话，换角色重放会跑出完全不同的一局
+  const rec = createRecorder(5, 'warden');
+  const w3 = createWorld(5, 'warden');
+  for (let i = 0; i < 600; i++) {
+    if (w3.paused && w3.choices) chooseUpgrade(w3, 0);
+    update(w3, DT, rec.record(circling(i)));
+    for (const f of w3.fx) f.active = false;
+  }
+  const replay = rec.toJSON(w3);
+  assert.equal(replay.hero, 'warden');
+  assert.equal(fingerprint(playback(replay)), fingerprint(w3));
+});
+
 test('record 返回量化后的输入（不用它就会漂）', () => {
   const rec = createRecorder(1);
   const q = rec.record({ dx: 0.123456, dy: -0.987654 });

@@ -49,7 +49,22 @@ const REPLAY_BTN = { x: VIEW_W / 2 - 176, y: 502, w: 150, h: 28 };
 const inReplayBtn = (x, y) => x >= REPLAY_BTN.x && x <= REPLAY_BTN.x + REPLAY_BTN.w
   && y >= REPLAY_BTN.y && y <= REPLAY_BTN.y + REPLAY_BTN.h;
 
+// 首屏的角色卡：点哪张就用哪个角色开局
+const HERO_CARD = { w: 210, h: 132, y: 196, gap: 12, count: 4 };
+function heroCardX(i) {
+  const total = HERO_CARD.count * HERO_CARD.w + (HERO_CARD.count - 1) * HERO_CARD.gap;
+  return (VIEW_W - total) / 2 + i * (HERO_CARD.w + HERO_CARD.gap);
+}
+function heroCardHit(x, y) {
+  if (y < HERO_CARD.y || y > HERO_CARD.y + HERO_CARD.h) return -1;
+  for (let i = 0; i < HERO_CARD.count; i++) {
+    if (x >= heroCardX(i) && x <= heroCardX(i) + HERO_CARD.w) return i;
+  }
+  return -1;
+}
+
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
+  HERO_CARD, heroCardX, heroCardHit,
 };

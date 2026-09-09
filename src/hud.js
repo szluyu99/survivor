@@ -6,7 +6,8 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX } from './layout.js';
+import { HEROES } from './heroes.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
 
@@ -489,30 +490,29 @@ export function createHud(ctx, deps) {
     drawVignette();
 
     const cx = VIEW_W / 2;
-    drawEntity('grunt', cx, 150, 26, P.player, 0, 2.5);
+    drawEntity('grunt', cx, 58, 20, P.player, 0, 2.5);
     ctx.strokeStyle = P.playerRing;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(cx, 150, 13, 0, Math.PI * 2);
+    ctx.arc(cx, 58, 10, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.textAlign = 'center';
     ctx.fillStyle = P.text;
-    ctx.font = 'bold 38px sans-serif';
-    ctx.fillText('色块幸存者', cx, 232);
+    ctx.font = 'bold 32px sans-serif';
+    ctx.fillText('色块幸存者', cx, 112);
 
     ctx.fillStyle = P.dim;
-    ctx.font = '15px sans-serif';
-    const lines = [
-      'WASD / 方向键移动，手机直接按住屏幕拖动',
-      '攻击是自动的，你只需要走位',
-      '捡蓝色经验球升级，每次升级三选一',
-      'Shift / 空格 / 右键冲刺，短暂无敌可以穿怪（手机双击）',
-    'Q / E 放主动技能（升级时可以学，手机点右下角按钮）',
-    ];
-    lines.forEach((t, i) => ctx.fillText(t, cx, 280 + i * 26));
+    ctx.font = '13px sans-serif';
+    ctx.fillText('移动 = WASD / 方向键 / 按住屏幕　攻击是自动的，你只需要走位', cx, 140);
+    ctx.fillText('捡经验球升级三选一　Shift / 空格 / 右键冲刺（手机双击）　Q / E 放技能', cx, 160);
 
-    // 图例：把四种敌人的形状先亮一遍
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('选择角色', cx, 186);
+    drawHeroCards();
+
+    // 图例：把各兵种的形状先亮一遍
     const legend = [
       ['grunt', '杂兵'], ['rusher', '冲锋兵'], ['tank', '肉盾'],
       ['shooter', '射手'], ['splitter', '分裂'], ['summoner', '召唤'],
@@ -521,19 +521,68 @@ export function createHud(ctx, deps) {
     const startX = cx - (legend.length - 1) * 78 / 2;
     legend.forEach(([kind, name], i) => {
       const x = startX + i * 78;
-      drawEntity(kind, x, 392, 13, P.enemy[kind], -Math.PI / 2);
+      drawEntity(kind, x, 366, 12, P.enemy[kind], -Math.PI / 2);
       ctx.fillStyle = P.dimmer;
       ctx.font = '12px sans-serif';
-      ctx.fillText(name, x, 420);
+      ctx.fillText(name, x, 392);
     });
 
     ctx.fillStyle = P.warn;
-    ctx.font = 'bold 18px sans-serif';
-    ctx.fillText('按任意键 / 点击屏幕开始', cx, 476);
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 428);
     ctx.fillStyle = P.faint;
     ctx.font = '12px sans-serif';
-    ctx.fillText('ESC 暂停看详细属性　M 静音', cx, 502);
-    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 522);
+    ctx.fillText('按空格用上次选的角色　ESC 暂停看详细属性　M 静音', cx, 452);
+    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 472);
+  }
+
+  // 角色卡：选中的那张描高亮边。第一次玩默认停在基准角色上
+  function drawHeroCards() {
+    const picked = deps.getHero ? deps.getHero() : HEROES[0].id;
+    HEROES.slice(0, HERO_CARD.count).forEach((h, i) => {
+      const x = heroCardX(i), y = HERO_CARD.y;
+      const on = h.id === picked;
+      ctx.fillStyle = P.card;
+      ctx.fillRect(x, y, HERO_CARD.w, HERO_CARD.h);
+      ctx.strokeStyle = on ? P.warn : P.cardLine;
+      ctx.lineWidth = on ? 2 : 1;
+      ctx.strokeRect(x, y, HERO_CARD.w, HERO_CARD.h);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = P.dimmer;
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(String(i + 1), x + 10, y + 20);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = on ? P.warn : P.text;
+      ctx.font = 'bold 19px sans-serif';
+      ctx.fillText(h.name, x + HERO_CARD.w / 2, y + 30);
+      ctx.fillStyle = P.accent;
+      ctx.font = '12px sans-serif';
+      ctx.fillText(`起手：${WEAPON_NAME[h.weapon] || h.weapon}`, x + HERO_CARD.w / 2, y + 54);
+      ctx.fillStyle = P.dim;
+      ctx.font = '12px sans-serif';
+      wrapText(h.desc, x + HERO_CARD.w / 2, y + 78, HERO_CARD.w - 24, 16);
+      ctx.fillStyle = P.faint;
+      ctx.font = '11px sans-serif';
+      ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 12);
+    });
+  }
+
+  // 简易折行：卡片宽度固定，角色描述比词条长，硬画会溢出到隔壁卡上
+  function wrapText(text, cx2, y, maxW, lineH) {
+    let line = '';
+    let ly = y;
+    for (const ch of text) {
+      const test = line + ch;
+      if (ctx.measureText && ctx.measureText(test).width > maxW && line) {
+        ctx.fillText(line, cx2, ly);
+        line = ch;
+        ly += lineH;
+      } else {
+        line = test;
+      }
+    }
+    if (line) ctx.fillText(line, cx2, ly);
   }
 
   return { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, statBars, WEAPON_NAME, clock };

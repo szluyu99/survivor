@@ -64,6 +64,8 @@ globalThis.localStorage = {
 };
 
 await import('../src/game.js');
+const { HEROES } = await import('../src/heroes.js');
+const { ALL_WEAPONS } = await import('../src/weapons.js');
 
 function runFrames(n, startMs = 0, stepMs = 16.7) {
   for (let i = 0; i < n; i++) {
@@ -81,7 +83,7 @@ test('game.js 能正常 import 并起主循环', () => {
   assert.ok(calls.length > 0, '第一帧之前就该有 resize 的 setTransform');
 });
 
-test('开始前是首屏，操作说明和形状图例都在', () => {
+test('开始前是首屏，操作说明、角色卡和形状图例都在', () => {
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -89,6 +91,17 @@ test('开始前是首屏，操作说明和形状图例都在', () => {
   assert.ok(texts.some((t) => t.includes('攻击是自动的')), '没说明攻击是自动的');
   assert.ok(texts.some((t) => t.includes('开始')), '没有开始提示');
   assert.ok(texts.includes('冲锋兵'), '形状图例没画');
+  assert.ok(texts.includes('选择角色'), '角色选择区没画');
+  for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
+});
+
+test('首屏按数字键选角色，开局用的就是那个角色', () => {
+  // 按 2 = 第二张角色卡（游侠，穿透枪开局）
+  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  runFrames(5);
+  const w = globalThis.__survivorWorld;
+  assert.equal(w.hero, HEROES[1].id, '选的角色没生效');
+  assert.equal(w.weapons[0].id, HEROES[1].weapon, '起手武器不是该角色的');
 });
 
 test('连续跑 600 帧不崩，且每帧都在画东西', () => {
@@ -241,26 +254,44 @@ test('密集场面下绘制调用不随敌人数量线性增长（同色实体�
   const realMaxHp = w.player.maxHp;
   w.player.hp = w.player.maxHp = 1e9; // 不许死，否则取不到密集场面的样本
   const live = () => w.enemies.filter((e) => e.active).length;
-  const dirs = ['KeyD', 'KeyS', 'KeyA', 'KeyW'];
-  for (let i = 0; i < 60 * 90 && live() < 120; i++) {
-    if (i % 180 === 0) fire(handlers.window, 'keydown', { code: dirs[(i / 180) % 4], preventDefault() {} });
-    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
-    runFrames(1, 600000 + i * 16.7, 0);
+  // 直接往池子里摆怪，而不是等它自然刷出来：
+  // 密集场面出现在第几秒取决于角色和运气，等它是不稳定的（换了起手武器就等不到）。
+  // 只摆"靠形状+颜色区分"的常规兵种：射手的开枪预警圈是刻意的逐只效果，不参与批量
+  const kinds = ['grunt', 'rusher', 'tank', 'splitter'];
+  let placed = 0;
+  for (const e of w.enemies) {
+    if (placed >= 200) break;
+    if (e.active) continue;
+    e.active = true;
+    e.kind = kinds[placed % kinds.length];
+    e.x = w.player.x + ((placed * 37) % 900) - 450;
+    e.y = w.player.y + ((placed * 53) % 500) - 250;
+    e.r = 10;
+    e.maxHp = e.hp = 1e9; // 别在采样期间被打死，样本就不密集了
+    e.speed = 0;
+    e.dmg = 0;
+    e.gem = 1;
+    e.hitCd = 1e9;
+    placed++;
   }
   const enemies = live();
-  assert.ok(enemies >= 120, `样本不够密集，只有 ${enemies} 只怪`);
-
-  calls.length = 0;
-  const FRAMES = 60;
-  runFrames(FRAMES, 900000);
-  const strokes = calls.filter(([m]) => m === 'stroke').length / FRAMES;
-  const fills = calls.filter(([m]) => m === 'fill').length / FRAMES;
-  // 分组数 = 出现的兵种数 + 受击闪白 + 少量装饰，和敌人数量无关
-  assert.ok(strokes < 60, `每帧 ${strokes.toFixed(0)} 次 stroke（${enemies} 只怪），批量绘制退化了`);
-  assert.ok(fills < 80, `每帧 ${fills.toFixed(0)} 次 fill（${enemies} 只怪），批量绘制退化了`);
-  // 把血量还回去，否则后面测死亡结算的用例永远死不了
-  w.player.maxHp = realMaxHp;
-  w.player.hp = Math.min(w.player.hp, realMaxHp);
+  try {
+    assert.ok(enemies >= 150, `样本不够密集，只有 ${enemies} 只怪`);
+    calls.length = 0;
+    const FRAMES = 60;
+    runFrames(FRAMES, 900000);
+    const strokes = calls.filter(([m]) => m === 'stroke').length / FRAMES;
+    const fills = calls.filter(([m]) => m === 'fill').length / FRAMES;
+    // 分组数 = 出现的兵种数 + 受击闪白 + 少量装饰 + 每块地形一次，和敌人数量无关。
+    // 阈值留得宽（地形本身就占 ~27 次），但退化成逐只画会是 230+ 次，照样拦得住
+    assert.ok(strokes < 100, `每帧 ${strokes.toFixed(0)} 次 stroke（${enemies} 只怪），批量绘制退化了`);
+    assert.ok(fills < 100, `每帧 ${fills.toFixed(0)} 次 fill（${enemies} 只怪），批量绘制退化了`);
+  } finally {
+    // 收尾一定要跑：摆进去的怪和无敌血量留着的话，后面测死亡结算的用例永远死不了
+    for (const e of w.enemies) if (e.maxHp === 1e9) e.active = false;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
 });
 
 test('色板里没有重复色值（撞色会让人分不清语义）', async () => {
@@ -334,7 +365,9 @@ test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
   assert.ok(texts.includes('伤害来源'), '没画伤害来源');
   assert.ok(texts.includes('承受伤害'), '没画承受伤害');
   assert.ok(texts.includes('每 15 秒击杀'), '没画击杀柱图');
-  assert.ok(texts.some((t) => t.includes('追踪弹')), `伤害来源里没有武器名：${texts.slice(0, 20)}`);
+  // 具体是哪把武器取决于这一局的角色和抽卡，所以只要求"有某把武器的名字"
+  const anyWeapon = ALL_WEAPONS.some((def) => texts.some((t) => t.includes(def.name)));
+  assert.ok(anyWeapon, `伤害来源里没有任何武器名：${texts.slice(0, 20)}`);
   assert.ok(texts.some((t) => /%/.test(t)), '没画占比数字');
 });
 

@@ -7,10 +7,10 @@
 //    这既是"分享同一局"的基础，也是我们最缺的回归工具——改完数值重放同一段输入，
 //    直接看行为差异，而不是靠平均值猜。
 
-import { createWorld, update, chooseUpgrade, reroll, banish } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, DEFAULT_HERO } from './sim.js';
 import { cardByKey } from './upgrades.js';
 
-export const REPLAY_VERSION = 1;
+export const REPLAY_VERSION = 2;   // v2：加了角色（seed 之外还要记 hero 才能重演同一局）
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -48,6 +48,7 @@ export function snapshot(w) {
   return {
     version: REPLAY_VERSION,
     seed: w.seed,
+    hero: w.hero,
     rngState: w.rng.getState(),
     t: w.t,
     over: w.over,
@@ -94,7 +95,7 @@ export function restore(snap) {
   if (snap.version !== REPLAY_VERSION) {
     throw new Error(`存档版本不匹配：文件是 ${snap.version}，当前是 ${REPLAY_VERSION}`);
   }
-  const w = createWorld(snap.seed);
+  const w = createWorld(snap.seed, snap.hero);
   w.rng.setState(snap.rngState);
   Object.assign(w, {
     t: snap.t, over: snap.over, paused: snap.paused, kills: snap.kills,
@@ -151,7 +152,7 @@ function encodeStep(q, action) {
   ];
 }
 
-export function createRecorder(seed) {
+export function createRecorder(seed, hero = DEFAULT_HERO) {
   const steps = [];   // [count, encodedStep] 的行程编码
   let last = null;
 
@@ -173,6 +174,7 @@ export function createRecorder(seed) {
     return {
       version: REPLAY_VERSION,
       seed,
+      hero,
       steps: steps.map((s) => [s.count, ...s.enc]),
       // 记下结果，回放时用来自检
       summary: w ? { t: w.t, kills: w.kills, level: w.player.level, over: w.over } : null,
@@ -188,7 +190,7 @@ export function createPlayer(replay) {
   if (replay.version !== REPLAY_VERSION) {
     throw new Error(`录像版本不匹配：文件是 ${replay.version}，当前是 ${REPLAY_VERSION}`);
   }
-  const w = createWorld(replay.seed);
+  const w = createWorld(replay.seed, replay.hero);
   const total = replay.steps.reduce((a, s) => a + s[0], 0);
   let seg = 0;      // 当前在第几段
   let left = replay.steps.length ? replay.steps[0][0] : 0; // 这段还剩几帧

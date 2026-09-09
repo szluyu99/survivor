@@ -1,22 +1,22 @@
 // 录像工具：录一局机器人对局存成 JSON，之后可以重放核对。
 //
 // 用法：
-//   node tools/replay.mjs record [seed] [seconds] [out.json]
+//   node tools/replay.mjs record [seed] [seconds] [out.json] [hero]
 //   node tools/replay.mjs verify run.json
 //
 // 不给 out.json 就打到 stdout。注意走 npm 的时候必须给文件名：
 // npm 自己会往 stdout 打一行 banner，重定向出来的 JSON 是坏的
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createWorld, update, chooseUpgrade } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, DEFAULT_HERO } from '../src/sim.js';
 import { createRecorder, verify, REPLAY_VERSION } from '../src/replay.js';
 
 const DT = 1 / 60;
 const circling = (i) => ({ dx: Math.cos((i / 60) * 1.6), dy: Math.sin((i / 60) * 1.6) });
 
 // 录一局：绕圈走、有冲刺就冲、选卡永远选第一张。和 balance.mjs 的机器人同一套策略
-export function record(seed = 1, seconds = 120) {
-  const w = createWorld(seed);
-  const rec = createRecorder(seed);
+export function record(seed = 1, seconds = 120, hero = DEFAULT_HERO) {
+  const w = createWorld(seed, hero);
+  const rec = createRecorder(seed, w.hero);
   for (let i = 0; i < seconds * 60 && !w.over; i++) {
     const action = w.paused && w.choices ? { type: 'pick', index: 0 } : null;
     const input = rec.record({ ...circling(i), dash: w.player.dashCd <= 0 }, action);
@@ -27,13 +27,13 @@ export function record(seed = 1, seconds = 120) {
   return { replay: rec.toJSON(w), world: w };
 }
 
-const [cmd, a, b, out] = process.argv.slice(2);
+const [cmd, a, b, out, heroArg] = process.argv.slice(2);
 
 if (cmd === 'record') {
-  const { replay, world } = record(Number(a) || 1, Number(b) || 120);
+  const { replay, world } = record(Number(a) || 1, Number(b) || 120, heroArg);
   const json = JSON.stringify(replay);
   process.stderr.write(
-    `录制完成：seed=${replay.seed} 时长=${world.t.toFixed(1)}s 击杀=${world.kills} `
+    `录制完成：seed=${replay.seed} 角色=${replay.hero} 时长=${world.t.toFixed(1)}s 击杀=${world.kills} `
     + `等级=${world.player.level} 压缩后步数段=${replay.steps.length}\n`,
   );
   if (out) { writeFileSync(out, json); process.stderr.write(`已写入 ${out}\n`); } else console.log(json);
@@ -51,7 +51,7 @@ if (cmd === 'record') {
     process.exit(1);
   }
 } else {
-  console.error('用法：node tools/replay.mjs record [seed] [seconds] [out.json]');
+  console.error('用法：node tools/replay.mjs record [seed] [seconds] [out.json] [hero]');
   console.error('      node tools/replay.mjs verify run.json');
   process.exit(2);
 }

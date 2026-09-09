@@ -1,11 +1,11 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer } from './replay.js';
 
@@ -64,6 +64,7 @@ const hud = createHud(ctx, {
   getBest: () => best,
   getMuted: () => mutedHint,
   getPaused: () => uiPaused,
+  getHero: () => heroId,
   getReplayReady: () => !!lastReplay,
 });
 const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, WEAPON_NAME, clock } = hud;
@@ -79,7 +80,21 @@ function urlSeed() {
 const FIXED_SEED = urlSeed();
 const newSeed = () => (FIXED_SEED === null ? Date.now() & 0xffff : FIXED_SEED);
 
-let world = createWorld(newSeed());
+// 角色：首屏选，记在 localStorage 里，下次默认还是它。
+// URL 带 ?hero=ranger 时以 URL 为准——和 ?seed= 搭配才能完整复现同一局
+const HERO_KEY = 'survivor.hero';
+let heroId = loadHero();
+function loadHero() {
+  const raw = globalThis.location ? new URLSearchParams(globalThis.location.search).get('hero') : null;
+  if (raw) return findHero(raw).id;
+  try { return findHero(localStorage.getItem(HERO_KEY)).id; } catch { return DEFAULT_HERO; }
+}
+function setHero(id) {
+  heroId = findHero(id).id;
+  try { localStorage.setItem(HERO_KEY, heroId); } catch { /* 无痕模式会抛，忽略 */ }
+}
+
+let world = createWorld(newSeed(), heroId);
 globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
@@ -90,7 +105,7 @@ let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
 
 // ---- 录像：这一局的每帧输入都记下来，死了就能回放 ----
-let recorder = createRecorder(world.seed);
+let recorder = createRecorder(world.seed, world.hero);
 let lastReplay = null;    // 上一局的录像，死亡后生成
 let player = null;        // 非 null 表示正在看回放
 // 选卡/重抽/排除排队到下一个逻辑步再执行。
@@ -123,22 +138,32 @@ function exitReplay() {
 
 function beginGame() {
   unlock();
-  if (!started) { started = true; last = performance.now(); }
+  if (!started) {
+    // 首屏可能换过角色，开局前把世界按当前角色重建
+    if (world.hero !== heroId) restart();
+    started = true;
+    last = performance.now();
+  }
 }
 
 function restart() {
-  world = createWorld(newSeed());
+  world = createWorld(newSeed(), heroId);
   globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;
   fx.reset();
-  recorder = createRecorder(world.seed);
+  recorder = createRecorder(world.seed, world.hero);
   lastReplay = null;
   player = null;
   queuedActions.length = 0;
 }
 
 addEventListener('keydown', (e) => {
+  // 首屏：1–4 直接选角色并开局，其他键用上次选的角色
+  if (!started) {
+    const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+    if (hi >= 0 && hi < HERO_CARD.count) setHero(HEROES[hi].id);
+  }
   beginGame(); // 音频必须在用户手势里启动
   keys.add(e.code);
   if (e.code === 'KeyM') mutedHint = toggleMute();
@@ -185,6 +210,12 @@ let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
   const wasStarted = started;
+  // 首屏点角色卡：选中它再开局（beginGame 会按新角色重建世界）
+  if (!wasStarted) {
+    const at = viewPos(e);
+    const hi = heroCardHit(at.x, at.y);
+    if (hi >= 0 && hi < HEROES.length) setHero(HEROES[hi].id);
+  }
   beginGame();
   canvas.setPointerCapture(e.pointerId);
   pointer = viewPos(e);

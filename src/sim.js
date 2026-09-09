@@ -11,6 +11,10 @@ export { VIEW_W, VIEW_H };
 import { mulberry32, pool, alloc } from './pool.js';
 import { isFxEvent } from './fx-events.js';
 import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
+import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
+
+// 角色表定义在 heroes.js，这里转出去
+export { HEROES, findHero, DEFAULT_HERO };
 
 // 词条与诅咒的定义在 upgrades.js，这里转出去，外部（UI/测试）不用关心分了几个文件
 export { TRAITS, CURSES };
@@ -28,9 +32,11 @@ const MAX_ORBS = 8;
 const MAX_FX = 64;
 const MAX_TERRAIN = 40;
 
-export function createWorld(seed = 1) {
-  return {
+export function createWorld(seed = 1, heroId = DEFAULT_HERO) {
+  const hero = findHero(heroId);
+  const w = {
     seed,                 // 记下来：快照和回放都要靠它复现同一局
+    hero: hero.id,        // 同理：角色决定起始武器和属性，不记下来就重演不出同一局
     rng: mulberry32(seed),
     t: 0,
     over: false,
@@ -51,7 +57,7 @@ export function createWorld(seed = 1) {
       critChance: 0, critMul: 2, lifeOnKill: 0, xpMul: 1, gemBlast: 0,
       enemyHpMul: 1, enemySpeedMul: 1, // 诅咒卡用
     },
-    weapons: [{ id: 'bolt', level: 1, timer: 0 }],
+    weapons: [{ id: hero.weapon, level: 1, timer: 0 }],
     enemies: pool(MAX_ENEMIES, makeEnemy),
     bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
@@ -82,6 +88,9 @@ export function createWorld(seed = 1) {
     // 局内统计：给死亡结算面板用，同时也是我们唯一可靠的"真实 DPS"数据来源
     log: { damageBy: {}, takenBy: {}, killsPer15s: [], dealt: 0, taken: 0 },
   };
+  // 角色修正在世界建好之后一次性生效，和词条走同一条路径（改 w.player / w.stats）
+  hero.apply(w);
+  return w;
 }
 
 // 暴击在这里统一掷点，返回 [实际伤害, 是否暴击]

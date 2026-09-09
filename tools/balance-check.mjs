@@ -5,7 +5,7 @@
 // 冲锋潮和敌人成长用了两套时间档。数据其实都摆在报告里，但靠人逐行看不可靠。
 // 这里把那几类问题写成硬规则。
 
-import { createWorld, update, chooseUpgrade } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, HEROES } from '../src/sim.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
@@ -83,8 +83,8 @@ function crowdDps(ids, levels, seconds = 12) {
 }
 
 // ---- 跑一整局 ----
-function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3 } = {}) {
-  const w = createWorld(seed);
+function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3, hero } = {}) {
+  const w = createWorld(seed, hero);
   const firstSeen = {};
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, pick(i));
@@ -213,6 +213,26 @@ console.log('== 7. 单帧逻辑耗时 ==');
   const ms = Number(process.hrtime.bigint() - t0) / 1e6 / Math.max(1, n);
   console.log(`  存活 ${live} 怪时单帧 ${ms.toFixed(3)}ms（预算 16.7ms）`);
   check(ms < 2, `单帧逻辑 ${ms.toFixed(2)}ms，超过 2ms 的警戒线`);
+}
+
+console.log('== 8. 每个角色都能玩，且没有明显的陷阱角色 ==');
+{
+  // 注意机器人偏差：它绕圈走、按固定顺序选卡，对"自动追踪"的起手武器最友好，
+  // 所以各角色的绝对数字没法直接比。这条只拦两件事：
+  // 某个角色根本活不下去（起手武器打不到东西 / 属性写错），或者强到把难度曲线抹平。
+  const heroAvg = [];
+  for (const h of HEROES) {
+    const ts = SEEDS.map((seed) => play(seed, { hero: h.id }).w.t);
+    const a = ts.reduce((x, y) => x + y, 0) / ts.length;
+    heroAvg.push([h, a]);
+    console.log(`  ${h.name.padEnd(4)} ${ts.map((t) => `${t.toFixed(0)}s`.padStart(5)).join(' ')}  平均 ${a.toFixed(0)}s`);
+    check(a > 30, `角色「${h.name}」平均只活 ${a.toFixed(0)}s，起手武器或属性修正有问题`);
+    check(a < 300, `角色「${h.name}」平均活 ${a.toFixed(0)}s，强到把难度曲线抹平了`);
+  }
+  const best = Math.max(...heroAvg.map(([, a]) => a));
+  const worst = Math.min(...heroAvg.map(([, a]) => a));
+  console.log(`  最强/最弱角色平均值之比 ${(best / worst).toFixed(2)}（放宽到 3 倍，机器人对起手武器有偏好）`);
+  check(best / worst < 3, `最强角色平均 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
 }
 
 console.log('');
