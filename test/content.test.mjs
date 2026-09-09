@@ -6,7 +6,7 @@ import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, findWeapon } from '../sr
 import { SKILLS, findSkill } from '../src/skills.js';
 import { PLAYER, DASH, XP, SPAWN, WAVE, SPAWN_TIMERS, BOSS, TERRAIN_TUNING, CARDS } from '../src/tuning.js';
 import { labWorld, putEnemy, putTerrain, run, movers, countActive } from './fixtures.mjs';
-import { createWorld, HEROES, findHero, DEFAULT_HERO } from '../src/sim.js';
+import { createWorld, HEROES, findHero, DEFAULT_HERO, ZONES, ZONE_SECONDS, currentZone, update, chooseUpgrade } from '../src/sim.js';
 
 test('所有内容表都通过校验', () => {
   const errors = validateContent();
@@ -95,6 +95,92 @@ test('给不存在的角色 id 会退回基准角色，而不是崩', () => {
   const w = createWorld(1, 'nope');
   assert.equal(w.hero, DEFAULT_HERO);
   assert.equal(findHero('nope').id, DEFAULT_HERO);
+});
+
+test('区域按时间推进、循环，并在切换那一帧登记 zone 事件', () => {
+  const w = createWorld(1);
+  w.player.maxHp = w.player.hp = 1e9;
+  assert.equal(w.zoneIndex, 0);
+  let switches = 0;
+  // 跑满两轮区域，记录切换次数
+  for (let i = 0; i < ZONES.length * 2 * ZONE_SECONDS * 60; i++) {
+    // 不选卡的话世界会一直停在选卡界面，时间根本不走（第一版就这么写，切换次数是 0）
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, 1 / 60, { dx: 1, dy: 0 });
+    for (const f of w.fx) {
+      if (f.active && f.type === 'zone') switches++;
+      f.active = false;
+    }
+  }
+  assert.equal(switches, ZONES.length * 2 - 1, `切换次数不对：${switches}`);
+  // 走完一轮要循环回第一个区域
+  assert.equal(currentZone({ zoneIndex: ZONES.length }).id, ZONES[0].id);
+});
+
+test('区域权重真的改变刷怪构成', () => {
+  // 把两个区域各钉住一段时间，比较射手占比。
+  // 冲锋潮是强制兵种，会盖住普通刷怪的配比，所以这里只统计普通刷怪的窗口
+  const share = (zoneIndex) => {
+    const counts = {};
+    for (const seed of [1, 5, 9]) {
+      const w = createWorld(seed);
+      w.player.maxHp = w.player.hp = 1e9;
+      w.t = 120;              // 所有兵种都过了解锁时间
+      w.bossTimer = 1e9;
+      w.eliteTimer = 1e9;
+      const seen = new Set();
+      for (let i = 0; i < 40 * 60; i++) {
+        if (w.paused) chooseUpgrade(w, 0);
+        w.zoneIndex = zoneIndex;  // 钉在这个区域里，不让它推进
+        w.zoneT = 0;
+        update(w, 1 / 60, { dx: Math.cos(i / 500), dy: Math.sin(i / 500) });
+        for (const f of w.fx) f.active = false;
+        for (const e of w.enemies) {
+          if (!e.active) continue;
+          const key = `${e.kind}#${e.x.toFixed(2)}#${e.y.toFixed(2)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          counts[e.kind] = (counts[e.kind] || 0) + 1;
+        }
+      }
+    }
+    const sum = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    return (kind) => (counts[kind] || 0) / sum;
+  };
+  const wild = share(0);
+  const marsh = share(1);
+  const lair = share(2);
+  assert.ok(marsh('shooter') > wild('shooter') * 1.5, `沼泽的射手没变多：${wild('shooter')} → ${marsh('shooter')}`);
+  assert.ok(lair('tank') > wild('tank') * 1.3, `巢穴的肉盾没变多：${wild('tank')} → ${lair('tank')}`);
+});
+
+test('区域能覆盖地形参数（沼泽泥地为主、巢穴岩块为主）', () => {
+  const mudShare = (zoneIndex) => {
+    let rock = 0, mud = 0;
+    for (const seed of [1, 5]) {
+      const w = createWorld(seed);
+      w.player.maxHp = w.player.hp = 1e9;
+      for (const t of w.terrain) t.active = false;
+      for (let i = 0; i < 60 * 60; i++) {
+        if (w.paused) chooseUpgrade(w, 0);
+        w.zoneIndex = zoneIndex;
+        w.zoneT = 0;
+        // 必须一直赶路：原地绕小圈的话旧地形走不出回收距离，量到的全是上一个区域留下的
+        update(w, 1 / 60, { dx: Math.cos(i / 900), dy: Math.sin(i / 900) });
+        for (const f of w.fx) f.active = false;
+      }
+      for (const t of w.terrain) {
+        if (!t.active) continue;
+        if (t.kind === 'rock') rock++;
+        else if (t.kind === 'mud') mud++;
+      }
+    }
+    return mud / Math.max(1, rock + mud);
+  };
+  const marsh = mudShare(1);
+  const lair = mudShare(2);
+  assert.ok(marsh > 0.5, `沼泽应该以泥地为主，实际泥地占 ${(marsh * 100).toFixed(0)}%`);
+  assert.ok(lair < 0.3, `巢穴应该以岩块为主，实际泥地占 ${(lair * 100).toFixed(0)}%`);
 });
 
 test('公共夹具能造出干净的实验场', () => {

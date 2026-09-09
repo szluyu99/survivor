@@ -1,5 +1,5 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
@@ -629,6 +629,12 @@ function render(w) {
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  // 区域色调：一层很淡的覆盖色，让"换了地方"在余光里也感觉得到
+  const tint = currentZone(w).tint;
+  if (tint) {
+    ctx.fillStyle = tint;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
   if (w.slowT > 0) {
     ctx.fillStyle = P.slowTint;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);

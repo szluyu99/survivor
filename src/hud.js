@@ -9,6 +9,7 @@ import { DASH } from './sim.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX } from './layout.js';
 import { HEROES } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards } from './meta.js';
+import { currentZone, ZONE_SECONDS } from './zones.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
 
@@ -68,18 +69,22 @@ export function createHud(ctx, deps) {
     ctx.font = '22px ui-monospace, monospace';
     ctx.fillStyle = P.text;
     ctx.fillText(`${m}:${String(s).padStart(2, '0')}`, VIEW_W - 16, 34);
+    // 当前区域 + 还剩多久换：换区域会改兵种配比，值得让人提前知道
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = P.accent;
+    ctx.fillText(`${currentZone(w).name}　${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`, VIEW_W - 16, 52);
     ctx.font = '12px ui-monospace, monospace';
     ctx.fillStyle = P.faint;
-    if (best()) ctx.fillText(`最好 ${clock(best().t)}`, VIEW_W - 16, 54);
-    ctx.fillText(mutedHint() ? 'M 静音中' : 'M 静音', VIEW_W - 16, 72);
+    if (best()) ctx.fillText(`最好 ${clock(best().t)}`, VIEW_W - 16, 70);
+    ctx.fillText(mutedHint() ? 'M 静音中' : 'M 静音', VIEW_W - 16, 88);
     if (w.phase !== 'normal') {
       ctx.font = 'bold 13px sans-serif';
       ctx.fillStyle = w.phase === 'surge' ? P.danger : P.calm;
-      ctx.fillText(w.phase === 'surge' ? '冲锋期' : '喘息期', VIEW_W - 16, 92);
+      ctx.fillText(w.phase === 'surge' ? '冲锋期' : '喘息期', VIEW_W - 16, 106);
     }
     ctx.font = '12px ui-monospace, monospace';
     ctx.fillStyle = P.faint;
-    ctx.fillText(`下一只精英 ${Math.max(0, w.eliteTimer).toFixed(0)}s`, VIEW_W - 16, 112);
+    ctx.fillText(`下一只精英 ${Math.max(0, w.eliteTimer).toFixed(0)}s`, VIEW_W - 16, 126);
     // 顶部 Boss 血条：场上有 Boss 就显示，多只取血最多的那只
     let boss = null;
     for (const e of w.enemies) if (e.active && e.kind === 'boss' && (!boss || e.hp > boss.hp)) boss = e;

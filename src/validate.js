@@ -14,6 +14,8 @@ import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
 import { HERO_CARD, PERK_BTN } from './layout.js';
 import { PERKS, heroCost } from './meta.js';
+import { ZONES, ZONE_SECONDS } from './zones.js';
+import { TERRAIN_TUNING } from './tuning.js';
 
 function checkWeapon(def, errors) {
   const at = `武器 ${def.id}`;
@@ -150,6 +152,37 @@ export function validateContent() {
       }
     }
   }
+
+  // 区域：权重和地形覆盖必须指向真实存在的东西，否则配错了会静默失效
+  if (!(ZONE_SECONDS > 0)) errors.push('区域时长不合法');
+  if (!ZONES.length) errors.push('区域表是空的');
+  const zoneIds = ZONES.map((z) => z.id);
+  if (new Set(zoneIds).size !== zoneIds.length) errors.push('区域 id 有重复');
+  for (const z of ZONES) {
+    const at = `区域 ${z.id || '?'}`;
+    if (!z.id || !z.name || !z.hint) errors.push(`${at}：缺 id/name/hint`);
+    if (!z.weights || typeof z.weights !== 'object') errors.push(`${at}：weights 应该是对象`);
+    for (const [kind, mul] of Object.entries(z.weights || {})) {
+      if (!KINDS[kind]) errors.push(`${at}：权重里的兵种 ${kind} 不存在`);
+      else if (!(KINDS[kind].weight > 0)) errors.push(`${at}：兵种 ${kind} 基础权重是 0，乘倍率没有意义`);
+      if (!(mul >= 0)) errors.push(`${at}：兵种 ${kind} 的权重倍率不合法`);
+    }
+    for (const [field, v] of Object.entries(z.terrain || {})) {
+      if (!(field in TERRAIN_TUNING)) errors.push(`${at}：地形覆盖字段 ${field} 不在 TERRAIN_TUNING 里`);
+      if (!(v > 0)) errors.push(`${at}：地形字段 ${field} 的值不合法`);
+    }
+    if (z.tint !== null && typeof z.tint !== 'string') errors.push(`${at}：tint 应该是颜色字符串或 null`);
+    if (!Array.isArray(z.burst) || z.burst.length !== 2) errors.push(`${at}：burst 应该是两个兵种`);
+    for (const kind of z.burst || []) {
+      if (!KINDS[kind]) errors.push(`${at}：冲锋潮兵种 ${kind} 不存在`);
+    }
+  }
+  if (Object.keys(ZONES[0].weights || {}).length || Object.keys(ZONES[0].terrain || {}).length) {
+    errors.push('第一个区域必须是基准区域（不改权重也不改地形），平衡数据以它为锚点');
+  }
+  // 区域之间必须真的不一样，否则配置写了等于没写
+  const fingerprints = ZONES.map((z) => JSON.stringify([z.weights, z.terrain, z.burst]));
+  if (new Set(fingerprints).size !== fingerprints.length) errors.push('有两个区域的配置完全相同');
 
   // 槽位数得放得下东西，否则玩法直接失效
   if (!(MAX_SLOTS >= 1)) errors.push('武器槽位数不合法');

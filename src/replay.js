@@ -10,8 +10,9 @@
 import { createWorld, update, chooseUpgrade, reroll, banish, DEFAULT_HERO } from './sim.js';
 import { cardByKey } from './upgrades.js';
 
-// v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性，同样影响整局）
-export const REPLAY_VERSION = 3;
+// v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性）；
+// v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形，快照必须带上）
+export const REPLAY_VERSION = 4;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -76,6 +77,8 @@ export function snapshot(w) {
     chestTimer: w.chestTimer,
     cycleT: w.cycleT,
     phase: w.phase,
+    zoneIndex: w.zoneIndex,
+    zoneT: w.zoneT,
     slowT: w.slowT,
     slowMul: w.slowMul,
     decoy: { ...w.decoy },
@@ -106,6 +109,7 @@ export function restore(snap) {
     spawnTimer: snap.spawnTimer, eliteTimer: snap.eliteTimer, bossTimer: snap.bossTimer,
     terrainTimer: snap.terrainTimer, chestTimer: snap.chestTimer,
     cycleT: snap.cycleT, phase: snap.phase, slowT: snap.slowT, slowMul: snap.slowMul,
+    zoneIndex: snap.zoneIndex, zoneT: snap.zoneT,
   });
   Object.assign(w.player, snap.player);
   Object.assign(w.stats, snap.stats);

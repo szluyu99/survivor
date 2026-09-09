@@ -13,6 +13,10 @@ import { isFxEvent } from './fx-events.js';
 import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
 import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
 import { applyPerks, PERKS, earnShards } from './meta.js';
+import { ZONES, ZONE_SECONDS, currentZone, tickZone } from './zones.js';
+
+// 区域表定义在 zones.js，这里转出去
+export { ZONES, ZONE_SECONDS, currentZone };
 
 // 角色表定义在 heroes.js，这里转出去
 export { HEROES, findHero, DEFAULT_HERO };
@@ -79,6 +83,9 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null) {
     // 波次节奏：22 秒常规 → 5 秒冲锋 → 3 秒喘息，循环
     cycleT: 0,
     phase: 'normal',
+    // 区域：每 ZONE_SECONDS 换一段，兵种配比和地形风格跟着换
+    zoneIndex: 0,
+    zoneT: 0,
     choices: null,
     evolved: [],
     chests: 0,
@@ -373,6 +380,10 @@ export function update(w, dt, input) {
   const chest = chestTouched(w, p.x, p.y, p.r);
   if (chest) openChest(w, chest);
   if (p.flash > 0) p.flash -= dt;
+
+  // 区域推进要排在刷怪和地形之前：切换的那一帧起，新刷的怪和新长的地形就该按新区域来
+  const nextZone = tickZone(w, dt);
+  if (nextZone) emit(w, 'zone', p.x, p.y, w.zoneIndex);
 
   tickTerrain(w, dt, enemyCtx);
   tickSpawns(w, dt, enemyCtx);

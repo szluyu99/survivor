@@ -3,6 +3,7 @@
 // 和 enemies.js 一样，这个模块不 import sim.js，需要的能力由 ctx 注入。
 
 import { TERRAIN_TUNING as T } from './tuning.js';
+import { zoneTerrain } from './zones.js';
 
 export const TERRAIN = {
   rock: { name: '岩块', r: [26, 44], blocks: true },
@@ -18,7 +19,6 @@ const SPAWN_MIN = T.spawnMin;
 const SPAWN_MAX = T.spawnMax;
 const CHEST_SPAWN = [T.chestSpawnMin, T.chestSpawnMax];
 const RECYCLE = T.recycle;
-const MAX_LIVE = T.maxFillers;
 
 export function makeTerrain() {
   return { active: false, kind: 'rock', x: 0, y: 0, r: 30, hp: 0, maxHp: 0, seed: 0 };
@@ -28,11 +28,13 @@ export function makeTerrain() {
 // 实测不加限制时，一个专门去捡箱子的玩家 120 秒能开 37 个——等于每 3 秒白送一张卡
 // 冷却从 20 拉到 32：宝箱给的是"免费一张卡"，而卡池扩大后卡本身变稀缺，
 // 专门捡箱子的打法一局能拿 20 张，直接滚到 400 秒
-const CHEST_COOLDOWN = T.chestCooldown;
+// 这三个值区域可以覆盖（沼泽泥地多、巢穴岩块多且宝箱更勤），所以按需从区域里取
+const maxFillers = (w) => zoneTerrain(w, 'maxFillers');
+const chestCooldown = (w) => zoneTerrain(w, 'chestCooldown');
 
 // 岩块和泥地是"填充物"，宝箱走单独的名额（见 tickTerrain 里的说明）
 function pickFiller(w) {
-  return w.rng() < T.rockShare ? 'rock' : 'mud';
+  return w.rng() < zoneTerrain(w, 'rockShare') ? 'rock' : 'mud';
 }
 
 function spawnTerrain(w, ctx, kind) {
@@ -49,7 +51,7 @@ function spawnTerrain(w, ctx, kind) {
   t.r = def.r[0] + w.rng() * (def.r[1] - def.r[0]);
   t.seed = Math.floor(w.rng() * 1000); // 渲染层用它画出固定的不规则外形
   t.maxHp = t.hp = 0;
-  if (kind === 'chest') w.chestTimer = CHEST_COOLDOWN;
+  if (kind === 'chest') w.chestTimer = chestCooldown(w);
   return t;
 }
 
@@ -74,7 +76,7 @@ export function tickTerrain(w, dt, ctx) {
   w.terrainTimer -= dt;
   if (w.terrainTimer <= 0) {
     w.terrainTimer += T.fillerInterval;
-    if (fillers < MAX_LIVE) spawnTerrain(w, ctx, pickFiller(w));
+    if (fillers < maxFillers(w)) spawnTerrain(w, ctx, pickFiller(w));
   }
 }
 

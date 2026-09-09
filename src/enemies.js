@@ -3,6 +3,7 @@
 // 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
 import { VIEW_W, VIEW_H } from './view.js';
 import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
+import { zoneWeight, zoneBurst } from './zones.js';
 
 // 敌人对象的形状。只有 Boss 会用到后面那几个状态机字段
 export function makeEnemy() {
@@ -28,14 +29,15 @@ export // 兵种表转成数组缓存一次：pickKind 每次刷怪都要遍历�
 const KIND_LIST = Object.entries(KINDS).map(([id, k]) => ({ id, ...k }));
 
 function pickKind(w) {
+  // 权重要过一遍区域倍率：沼泽里射手多、巢穴里肉盾多，靠的就是这里
   let total = 0;
   for (const k of KIND_LIST) {
-    if (k.weight > 0 && w.t >= k.unlock) total += k.weight;
+    if (k.weight > 0 && w.t >= k.unlock) total += zoneWeight(w, k.id, k.weight);
   }
   let r = w.rng() * total;
   for (const k of KIND_LIST) {
     if (k.weight <= 0 || w.t < k.unlock) continue;
-    r -= k.weight;
+    r -= zoneWeight(w, k.id, k.weight);
     if (r <= 0) return k.id;
   }
   return 'grunt';
@@ -183,13 +185,18 @@ function phaseOf(cycleT) {
   return 'calm';
 }
 
-// 冲锋开始时从四面八方等距围一圈，形成"被包住"的压迫感
+// 冲锋开始时从四面八方等距围一圈，形成"被包住"的压迫感。
+// 用什么兵种由区域决定：实测冲锋潮的量级（后期 34 只）足以盖住普通刷怪的配比，
+// 如果这里永远是杂兵/冲锋兵，换区域最强烈的那一刻反而看不出区别
 function surgeBurst(w, ctx) {
   const wave = w.t / WAVE.burstWaveSeconds;
   const n = Math.min(WAVE.burstMax, Math.round(WAVE.burstBase + wave * WAVE.burstPerWave));
   const base = w.rng() * Math.PI * 2;
+  const [main, filler] = zoneBurst(w);
   for (let i = 0; i < n; i++) {
-    const kind = w.t >= KINDS.rusher.unlock && w.rng() < WAVE.rusherShare ? 'rusher' : 'grunt';
+    const pick = w.rng() < WAVE.rusherShare ? main : filler;
+    // 还没到解锁时间的兵种退回杂兵，否则开局第一波就会冒出后期兵种
+    const kind = w.t >= KINDS[pick].unlock ? pick : 'grunt';
     spawnEnemy(w, ctx, kind, base + (i / n) * Math.PI * 2);
   }
 }

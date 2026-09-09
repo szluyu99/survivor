@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, update, chooseUpgrade, DEFAULT_HERO } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, DEFAULT_HERO, ZONE_SECONDS } from '../src/sim.js';
 import {
   snapshot, restore, createRecorder, playback, verify, quantizeInput, REPLAY_VERSION,
 } from '../src/replay.js';
@@ -159,6 +159,20 @@ test('永久强化会跟着快照和录像走（否则重演的是另一套初�
   // 反证：同一串输入、同一个 seed，不带强化会跑出不一样的一局
   const noPerks = { ...replay, perks: null };
   assert.notEqual(fingerprint(playback(noPerks)), fingerprint(w2));
+});
+
+test('区域进度会跟着快照走（否则恢复出来的是另一个区域）', () => {
+  const w = createWorld(2);
+  w.player.maxHp = w.player.hp = 1e9;
+  // 跑过第一次区域切换
+  run(w, 0, (ZONE_SECONDS + 5) * 60);
+  assert.equal(w.zoneIndex, 1, '没跑到第二个区域');
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+  assert.equal(snap.zoneIndex, 1);
+  const w2 = restore(snap);
+  assert.equal(w2.zoneIndex, w.zoneIndex);
+  assert.ok(Math.abs(w2.zoneT - w.zoneT) < 1e-9);
+  assert.equal(fingerprint(w2), fingerprint(w));
 });
 
 test('record 返回量化后的输入（不用它就会漂）', () => {

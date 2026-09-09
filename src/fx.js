@@ -3,6 +3,7 @@
 // 全部走对象池，帧里不 new。
 import { P } from './palette.js';
 import { sfx } from './audio.js';
+import { currentZone } from './zones.js';
 
 // onDeath 由 game.js 传进来（用来写最好成绩），fx 模块自己不碰 localStorage
 export function createFx({ onDeath } = {}) {
@@ -206,6 +207,15 @@ export function createFx({ onDeath } = {}) {
       burst(f.x, f.y, 22, P.chest, 200, 3);
       fxState.flash = 0.18;
       sfx.chest();
+    },
+    // 换区域：横幅报出新区域的名字，顺便抖一下，让"场景变了"这件事有分量
+    zone: (f, w) => {
+      const z = currentZone(w);
+      fxState.warn = 2;
+      fxState.warnText = `进入 ${z.name}`;
+      fxState.warnColor = P.accent;
+      fxState.shake = Math.max(fxState.shake, 5);
+      sfx.zone();
     },
   };
 

@@ -1,6 +1,6 @@
 // 平衡回归报告：改完数值跑 `npm run balance`，一眼看出哪把武器废了、局长有没有跑偏。
 // 之前每次调数值都手写一次性的 node -e 脚本，这里固化下来。
-import { createWorld, update, chooseUpgrade, KINDS, HEROES } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, KINDS, HEROES, ZONES } from '../src/sim.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 
 const DT = 1 / 60;
@@ -98,6 +98,40 @@ for (const h of HEROES) {
   const rs = SEEDS.map((seed) => play({ seed, hero: h.id, pick: (i) => Math.floor(i / 97) % 3 }));
   console.log(`${pad(h.name, 6)} ${rs.map((r) => pad(clock(r.t), 6)).join(' ')}  平均 ${pad(clock(avg(rs.map((r) => r.t))), 7)}`
     + ` 平均击杀 ${pad(avg(rs.map((r) => r.kills)).toFixed(0), 6)} 典型 build ${rs[0].build}`);
+}
+
+console.log('\n=== 各区域的兵种构成（钉住区域各跑 40 秒，只看普通刷怪）===');
+// 冲锋潮是强制兵种（每个区域两种），量级足以盖住普通刷怪的配比，所以这里排除掉它，
+// 单独看权重表的效果。冲锋潮本身的差异看下面一行的 burst 配置
+for (const [zi, z] of ZONES.entries()) {
+  const counts = {};
+  for (const seed of SEEDS.slice(0, 3)) {
+    const w = createWorld(seed);
+    w.player.maxHp = w.player.hp = 1e9;
+    w.t = 120;            // 所有兵种都过了解锁时间
+    w.bossTimer = 1e9;
+    w.eliteTimer = 1e9;
+    const seen = new Set();
+    for (let i = 0; i < 40 * 60; i++) {
+      if (w.paused) chooseUpgrade(w, 0);
+      w.zoneIndex = zi;
+      w.zoneT = 0;
+      update(w, DT, { dx: Math.cos(i / 500), dy: Math.sin(i / 500) });
+      for (const f of w.fx) f.active = false;
+      for (const e of w.enemies) {
+        if (!e.active) continue;
+        const key = `${e.kind}#${e.x.toFixed(2)}#${e.y.toFixed(2)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        counts[e.kind] = (counts[e.kind] || 0) + 1;
+      }
+    }
+  }
+  const sum = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  const mix = Object.entries(counts).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${KINDS[k].name} ${((v / sum) * 100).toFixed(0)}%`).join('  ');
+  console.log(`${pad(z.name, 6)} ${mix}`);
+  console.log(`       冲锋潮：${z.burst.map((k) => KINDS[k].name).join(' + ')}　地形覆盖：${JSON.stringify(z.terrain)}`);
 }
 
 console.log('\n=== 进化是否值得换（打死第一只 Boss 的耗时，素材双持 Lv.3 vs 进化 Lv.1）===');

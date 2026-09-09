@@ -67,6 +67,7 @@ await import('../src/game.js');
 const { HEROES } = await import('../src/heroes.js');
 const { ALL_WEAPONS } = await import('../src/weapons.js');
 const { PERKS } = await import('../src/meta.js');
+const { ZONES, ZONE_SECONDS } = await import('../src/zones.js');
 
 function runFrames(n, startMs = 0, stepMs = 16.7) {
   for (let i = 0; i < n; i++) {
@@ -388,6 +389,30 @@ test('右键和触摸双击都能触发冲刺且不炸', () => {
   runFrames(20);
   fire(handlers.canvas, 'pointerup', { pointerId: 3, pointerType: 'touch' });
   runFrames(10);
+});
+
+test('HUD 画出当前区域，换区域时弹横幅', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9; // 别在采样中途死掉
+  try {
+    calls.length = 0;
+    runFrames(3);
+    const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.ok(texts.some((t) => t.includes(ZONES[w.zoneIndex % ZONES.length].name)), `HUD 没画区域名：${texts.slice(0, 14)}`);
+
+    // 把世界推到切换点，横幅应该弹出来
+    const nextName = ZONES[(w.zoneIndex + 1) % ZONES.length].name;
+    w.zoneT = ZONE_SECONDS - 0.005;
+    calls.length = 0;
+    runFrames(20);
+    const banner = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.ok(banner.some((t) => t.includes('进入')), `换区域没弹横幅：${banner.slice(0, 14)}`);
+    assert.ok(banner.some((t) => t.includes(nextName)), `横幅里没有新区域「${nextName}」`);
+  } finally {
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
 });
 
 test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
