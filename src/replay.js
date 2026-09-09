@@ -182,24 +182,51 @@ export function createRecorder(seed) {
   return { record, toJSON };
 }
 
-// 回放一段录像。onStep 可以用来逐帧观察（渲染层做录像播放时会用到）
-export function playback(replay, { onStep, maxSteps = 1e6 } = {}) {
+// 逐帧播放器。渲染层要的是"每帧推一步，我好画出来"，不是一口气跑完，
+// 所以真正的循环在这里，playback()（跑完就返回）也建在它上面。
+export function createPlayer(replay) {
   if (replay.version !== REPLAY_VERSION) {
     throw new Error(`录像版本不匹配：文件是 ${replay.version}，当前是 ${REPLAY_VERSION}`);
   }
   const w = createWorld(replay.seed);
+  const total = replay.steps.reduce((a, s) => a + s[0], 0);
+  let seg = 0;      // 当前在第几段
+  let left = replay.steps.length ? replay.steps[0][0] : 0; // 这段还剩几帧
   let n = 0;
-  for (const [count, dx, dy, dash, skill, actionType, actionIndex] of replay.steps) {
-    for (let i = 0; i < count && n < maxSteps; i++, n++) {
-      // 操作要在 update 之前处理：选卡/重抽/排除都是在暂停态下做的
-      if (actionType === 'pick') chooseUpgrade(w, actionIndex);
-      else if (actionType === 'reroll') reroll(w);
-      else if (actionType === 'banish') banish(w, actionIndex);
-      update(w, STEP, { dx, dy, dash: !!dash, skill: skill < 0 ? null : skill });
-      if (onStep) onStep(w, n);
-    }
+
+  // 推进一帧，返回是否还有下一帧
+  function step() {
+    while (left === 0 && seg < replay.steps.length - 1) { seg++; left = replay.steps[seg][0]; }
+    if (left === 0) return false;
+    const [, dx, dy, dash, skill, actionType, actionIndex] = replay.steps[seg];
+    // 操作要在 update 之前处理：选卡/重抽/排除都是在暂停态下做的
+    if (actionType === 'pick') chooseUpgrade(w, actionIndex);
+    else if (actionType === 'reroll') reroll(w);
+    else if (actionType === 'banish') banish(w, actionIndex);
+    update(w, STEP, { dx, dy, dash: !!dash, skill: skill < 0 ? null : skill });
+    left--;
+    n++;
+    return true;
   }
-  return w;
+
+  return {
+    world: w,
+    step,
+    get done() { return n >= total; },
+    get frame() { return n; },
+    total,
+    // 0~1，给进度条用
+    get progress() { return total ? n / total : 1; },
+  };
+}
+
+// 回放一段录像。onStep 可以用来逐帧观察
+export function playback(replay, { onStep, maxSteps = 1e6 } = {}) {
+  const p = createPlayer(replay);
+  while (p.frame < maxSteps && p.step()) {
+    if (onStep) onStep(p.world, p.frame - 1);
+  }
+  return p.world;
 }
 
 // 回放并核对结果，返回 { ok, expected, actual }

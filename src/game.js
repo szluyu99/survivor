@@ -5,8 +5,9 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn } from './layout.js';
 import { createHud } from './hud.js';
+import { createRecorder, createPlayer } from './replay.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
@@ -28,7 +29,20 @@ function saveBest(w) {
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-const { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain } = createShapes(ctx);
+const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain } = createShapes(ctx);
+
+// 批量绘制用的分组桶：key 是颜色（都是 palette 里的常量字符串，不产生新字符串），
+// value 是复用的数组。每帧只把长度清零、不重建，热循环里零分配
+const buckets = new Map();
+const PARTICLE_ALPHA_STEPS = 8; // 粒子透明度量化档数：够顺滑，又能把同档的攒成一批
+function bucketReset() {
+  for (const arr of buckets.values()) arr.length = 0;
+}
+function bucketPush(color, item) {
+  let arr = buckets.get(color);
+  if (!arr) buckets.set(color, (arr = []));
+  arr.push(item);
+}
 
 function resize() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -50,8 +64,9 @@ const hud = createHud(ctx, {
   getBest: () => best,
   getMuted: () => mutedHint,
   getPaused: () => uiPaused,
+  getReplayReady: () => !!lastReplay,
 });
-const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, WEAPON_NAME, clock } = hud;
+const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, WEAPON_NAME, clock } = hud;
 
 // ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
 // 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
@@ -74,6 +89,38 @@ let mutedHint = false;
 let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
 
+// ---- 录像：这一局的每帧输入都记下来，死了就能回放 ----
+let recorder = createRecorder(world.seed);
+let lastReplay = null;    // 上一局的录像，死亡后生成
+let player = null;        // 非 null 表示正在看回放
+// 选卡/重抽/排除排队到下一个逻辑步再执行。
+// 不这么做的话，操作在事件回调里立刻生效，而录像只能记到"下一帧"，
+// 回放时施加的时机就和当时错开一帧，整局从那里开始漂
+const queuedActions = [];
+
+function queueAction(type, index = -1) {
+  queuedActions.push({ type, index });
+}
+
+function applyAction(a) {
+  if (a.type === 'pick') chooseUpgrade(world, a.index);
+  else if (a.type === 'reroll') reroll(world);
+  else if (a.type === 'banish') banish(world, a.index);
+}
+
+function startReplay() {
+  if (!lastReplay) return;
+  player = createPlayer(lastReplay);
+  fx.reset();
+  acc = 0;
+}
+
+function exitReplay() {
+  player = null;
+  fx.reset();
+  acc = 0;
+}
+
 function beginGame() {
   unlock();
   if (!started) { started = true; last = performance.now(); }
@@ -85,12 +132,23 @@ function restart() {
   uiPaused = false;
   acc = 0;
   fx.reset();
+  recorder = createRecorder(world.seed);
+  lastReplay = null;
+  player = null;
+  queuedActions.length = 0;
 }
 
 addEventListener('keydown', (e) => {
   beginGame(); // 音频必须在用户手势里启动
   keys.add(e.code);
   if (e.code === 'KeyM') mutedHint = toggleMute();
+  // 回放中只认三个键：退出、重开、静音
+  if (player) {
+    if (e.code === 'Escape' || e.code === 'KeyP' || e.code === 'KeyR') exitReplay();
+    if (e.code === 'Space') restart();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+    return;
+  }
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') && started && !world.over && !world.paused && !uiPaused) {
     if (!e.repeat) dashQueued = true;
   }
@@ -104,9 +162,10 @@ addEventListener('keydown', (e) => {
   if (world.paused && world.choices) {
     const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
     // Shift + 数字 = 排除这张卡，单按数字 = 选它
-    if (i >= 0) (e.shiftKey ? banish : chooseUpgrade)(world, i);
-    if (e.code === 'KeyR') reroll(world);
+    if (i >= 0) queueAction(e.shiftKey ? 'banish' : 'pick', i);
+    if (e.code === 'KeyR') queueAction('reroll');
   }
+  if (world.over && e.code === 'KeyR') startReplay();  // 死亡结算里按 R 看回放
   if (world.over && e.code === 'Space') restart();
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
@@ -130,6 +189,8 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointer = viewPos(e);
   if (!wasStarted) { pointer = null; return; } // 首屏那一下只用来开始
+  // 回放中：点一下就退出回放，回到死亡结算
+  if (player) { exitReplay(); pointer = null; return; }
   const sb = skillBtnHit(pointer.x, pointer.y);
   if (sb >= 0 && !world.over && !world.paused && !uiPaused) {
     skillQueued = sb;
@@ -144,12 +205,14 @@ canvas.addEventListener('pointerdown', (e) => {
   if (uiPaused) { uiPaused = false; pointer = null; return; }
   if (world.paused && world.choices) {
     const bi = banishHit(pointer.x, pointer.y);
-    if (bi >= 0 && world.banishes > 0) { banish(world, bi); pointer = null; return; }
-    if (inRerollBtn(pointer.x, pointer.y)) { reroll(world); pointer = null; return; }
+    if (bi >= 0 && world.banishes > 0) { queueAction('banish', bi); pointer = null; return; }
+    if (inRerollBtn(pointer.x, pointer.y)) { queueAction('reroll'); pointer = null; return; }
     const i = cardHit(pointer.x, pointer.y);
-    if (i >= 0) { chooseUpgrade(world, i); pointer = null; }
+    if (i >= 0) { queueAction('pick', i); pointer = null; }
   } else if (world.over) {
-    restart();
+    // 点"看回放"看录像，点别处重开
+    if (lastReplay && inReplayBtn(pointer.x, pointer.y)) startReplay();
+    else restart();
     pointer = null;
   } else if (e.pointerType === 'touch') {
     // 双击冲刺：手机上没有 Shift
@@ -222,6 +285,19 @@ function drawStick() {
   circle(stick.ox + sx * k * STICK_R, stick.oy + sy * k * STICK_R, 16, 'rgba(255,255,255,0.28)');
 }
 
+function drawGems(w, camX, camY, color, big) {
+  let n = 0;
+  ctx.beginPath();
+  for (const g of w.gems) {
+    if (!g.active || (g.value > 1) !== big) continue;
+    const x = g.x - camX, y = g.y - camY;
+    ctx.moveTo(x + g.r, y);
+    ctx.arc(x, y, g.r, 0, Math.PI * 2);
+    n++;
+  }
+  if (n) { ctx.fillStyle = color; ctx.fill(); }
+}
+
 function render(w) {
   const camX = w.player.x - VIEW_W / 2;
   const camY = w.player.y - VIEW_H / 2;
@@ -237,23 +313,48 @@ function render(w) {
   // 地形画在实体下面：泥地是"地上的水洼"，岩块也不该盖住玩家
   for (const t of w.terrain) if (t.active) drawTerrain(t, camX, camY);
 
-  for (const g of w.gems) {
-    if (!g.active) continue;
-    circle(g.x - camX, g.y - camY, g.r, g.value > 1 ? P.gemBig : P.gem);
+  // --- 经验球：两种大小各攒一条路径 ---
+  drawGems(w, camX, camY, P.gem, false);
+  drawGems(w, camX, camY, P.gemBig, true);
+
+  // --- 敌人：按填充色分组，一色一次 fill + 一次 stroke ---
+  // 逐个 drawEntity 时 500 只怪就是 500 次 fill + 500 次 stroke，
+  // 实测这是后期掉帧的主因（单帧 canvas 调用数从 ~9700 降到 ~1000）
+  bucketReset();
+  for (const e of w.enemies) {
+    if (e.active) bucketPush(e.flash > 0 ? P.hitFlash : P.enemy[e.kind], e);
   }
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = P.outline;
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    ctx.beginPath();
+    for (const e of list) {
+      // 冲锋兵是三角形，朝向就是它追人的方向
+      const rot = (e.kind === 'rusher' || e.kind === 'shooter') ? Math.atan2(w.player.y - e.y, w.player.x - e.x) : 0;
+      subPath(e.kind, e.x - camX, e.y - camY, e.r, rot);
+    }
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // 分裂怪的内圈也是同色同线宽，攒成一条路径
+  let splitters = 0;
+  ctx.beginPath();
+  for (const e of w.enemies) {
+    if (!e.active || e.kind !== 'splitter') continue;
+    const ex = e.x - camX, ey = e.y - camY, r = e.r * 0.5;
+    ctx.moveTo(ex + r, ey);
+    ctx.arc(ex, ey, r, 0, Math.PI * 2);
+    splitters++;
+  }
+  if (splitters) { ctx.strokeStyle = P.outline; ctx.lineWidth = 2; ctx.stroke(); }
+
+  // 剩下的装饰逐个画：这几种兵种同屏最多十几只，不值得再分组
   for (const e of w.enemies) {
     if (!e.active) continue;
     const ex = e.x - camX, ey = e.y - camY;
-    // 冲锋兵是三角形，朝向就是它追人的方向
-    const rot = (e.kind === 'rusher' || e.kind === 'shooter') ? Math.atan2(w.player.y - e.y, w.player.x - e.x) : 0;
-    drawEntity(e.kind, ex, ey, e.r, e.flash > 0 ? P.hitFlash : P.enemy[e.kind], rot);
-    if (e.kind === 'splitter') {
-      ctx.strokeStyle = P.outline;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(ex, ey, e.r * 0.5, 0, Math.PI * 2);
-      ctx.stroke();
-    }
     if (e.kind === 'shooter' && e.stateT < 0.5) {
       // 快要开枪了：亮一圈提示
       ctx.strokeStyle = P.foeBullet;
@@ -307,17 +408,33 @@ function render(w) {
       ctx.fillRect(ex - bw / 2, ey - e.r - 16, bw * (e.hp / e.maxHp), 4);
     }
   }
+
+  // --- 子弹：地雷范围圈一条路径，弹体按颜色分组 ---
+  let mines = 0;
+  ctx.beginPath();
   for (const b of w.bullets) {
-    if (!b.active) continue;
-    if (b.blast > 0) {
-      // 地雷画一圈示意爆炸范围，不然踩上去很懵
-      ctx.strokeStyle = P.mineRing;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(b.x - camX, b.y - camY, b.blast, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    drawEntity('grunt', b.x - camX, b.y - camY, b.r, b.foe ? P.foeBullet : (b.color || P.bolt), 0, 1.5);
+    if (!b.active || b.blast <= 0) continue;
+    // 地雷画一圈示意爆炸范围，不然踩上去很懵
+    const bx = b.x - camX, by = b.y - camY;
+    ctx.moveTo(bx + b.blast, by);
+    ctx.arc(bx, by, b.blast, 0, Math.PI * 2);
+    mines++;
+  }
+  if (mines) { ctx.strokeStyle = P.mineRing; ctx.lineWidth = 1; ctx.stroke(); }
+
+  bucketReset();
+  for (const b of w.bullets) {
+    if (b.active) bucketPush(b.foe ? P.foeBullet : (b.color || P.bolt), b);
+  }
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = P.outline;
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    ctx.beginPath();
+    for (const b of list) subPath('grunt', b.x - camX, b.y - camY, b.r, 0);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.stroke();
   }
   // 诱饵：菱形轮廓 + 呼吸感，敌人会去打它
   if (w.decoy.active) {
@@ -380,21 +497,46 @@ function render(w) {
   ctx.arc(pcx, pcy, w.player.r * 0.5, 0, Math.PI * 2);
   ctx.stroke();
 
-  for (const p of particles) {
-    if (!p.active) continue;
-    ctx.globalAlpha = Math.max(0, p.life / p.max);
-    circle(p.x - camX, p.y - camY, p.r, p.color);
+  // 粒子：按颜色分组，透明度量化成 8 档再批量画。
+  // 逐个画的话每个粒子都要改 fillStyle + globalAlpha + 一次 fill，
+  // 一帧两百多个粒子就是七八百次状态切换；量化到 8 档在小粒子上看不出来
+  bucketReset();
+  for (const p of particles) if (p.active) bucketPush(p.color, p);
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    ctx.fillStyle = color;
+    for (let lv = 1; lv <= PARTICLE_ALPHA_STEPS; lv++) {
+      let n = 0;
+      ctx.beginPath();
+      for (const p of list) {
+        const a = Math.max(0, Math.min(1, p.life / p.max));
+        if (Math.ceil(a * PARTICLE_ALPHA_STEPS) !== lv) continue;
+        const x = p.x - camX, y = p.y - camY;
+        ctx.moveTo(x + p.r, y);
+        ctx.arc(x, y, p.r, 0, Math.PI * 2);
+        n++;
+      }
+      if (n) { ctx.globalAlpha = lv / PARTICLE_ALPHA_STEPS; ctx.fill(); }
+    }
   }
   ctx.globalAlpha = 1;
 
+  // 跳字分两趟画（普通、暴击）：ctx.font 每次赋值浏览器都要重新解析字体，
+  // 逐个设置的话一帧最多解析 48 次，分趟之后只有 2 次
   ctx.textAlign = 'center';
-  ctx.font = 'bold 13px ui-monospace, monospace';
-  for (const n of numbers) {
-    if (!n.active) continue;
-    ctx.globalAlpha = Math.min(1, n.life / (n.crit ? 0.75 : 0.55));
-    ctx.fillStyle = n.crit ? P.warn : P.hitSpark;
-    ctx.font = n.crit ? 'bold 17px ui-monospace, monospace' : 'bold 13px ui-monospace, monospace';
-    ctx.fillText(n.text, n.x - camX, n.y - camY);
+  for (let pass = 0; pass < 2; pass++) {
+    const crit = pass === 1;
+    let any = false;
+    for (const n of numbers) {
+      if (!n.active || !!n.crit !== crit) continue;
+      if (!any) {
+        ctx.font = crit ? 'bold 17px ui-monospace, monospace' : 'bold 13px ui-monospace, monospace';
+        ctx.fillStyle = crit ? P.warn : P.hitSpark;
+        any = true;
+      }
+      ctx.globalAlpha = Math.min(1, n.life / (crit ? 0.75 : 0.55));
+      ctx.fillText(n.text, n.x - camX, n.y - camY);
+    }
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -456,13 +598,37 @@ function frame(now) {
     try {
       if (!started) {
         drawTitle();
+      } else if (player) {
+        // 回放：不读输入，按录像逐帧推进，其余（fx、音效、HUD）和正常游戏一样
+        acc += dt;
+        let steps = 0;
+        while (acc >= STEP && steps < MAX_CATCHUP) {
+          if (!player.step()) { acc = 0; break; }
+          consumeFx(player.world);
+          acc -= STEP;
+          steps++;
+        }
+        if (steps === MAX_CATCHUP) acc = 0;
+        stepFx(dt);
+        render(player.world);
+        drawReplayBadge(player.world, player.progress);
       } else {
         if (!uiPaused) {
           acc += dt;
           let steps = 0;
           while (acc >= STEP && steps < MAX_CATCHUP) {
-            update(world, STEP, readInput());
+            // 选卡类操作排队到这里执行，保证"录像里的时机"和"当时的时机"完全一致
+            const action = queuedActions.shift() || null;
+            // 死后画面还在跑，但不再往录像里加帧
+            const inp = world.over ? readInput() : recorder.record(readInput(), action);
+            if (action) applyAction(action);
+            update(world, STEP, inp);
             consumeFx(world);
+            // 死亡的那一帧收尾录像
+            if (world.over && !lastReplay) {
+              lastReplay = recorder.toJSON(world);
+              globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能不能重演这一局
+            }
             acc -= STEP;
             steps++;
           }

@@ -6,7 +6,7 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN } from './layout.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
 
@@ -454,6 +454,32 @@ export function createHud(ctx, deps) {
     ctx.fillStyle = P.dim;
     ctx.font = '15px sans-serif';
     ctx.fillText('按空格或点击重开', VIEW_W / 2, 516);
+
+    // 有录像才画"看回放"：第一帧就死的极端情况下没有可放的东西
+    if (deps.getReplayReady && deps.getReplayReady()) {
+      ctx.strokeStyle = P.accent;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(REPLAY_BTN.x, REPLAY_BTN.y, REPLAY_BTN.w, REPLAY_BTN.h);
+      ctx.fillStyle = P.accent;
+      ctx.font = '14px sans-serif';
+      ctx.fillText('R 看这局回放', REPLAY_BTN.x + REPLAY_BTN.w / 2, REPLAY_BTN.y + 19);
+    }
+  }
+
+  // 回放中的角标：说明"这不是你在玩"，外加进度条和退出提示
+  function drawReplayBadge(w, progress) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('回放中', VIEW_W / 2, 24);
+    const bw = 220, bx = VIEW_W / 2 - bw / 2;
+    ctx.fillStyle = P.bar;
+    ctx.fillRect(bx, 32, bw, 4);
+    ctx.fillStyle = P.warn;
+    ctx.fillRect(bx, 32, bw * Math.max(0, Math.min(1, progress)), 4);
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('ESC / 点击退出　空格重开', VIEW_W / 2, 50);
   }
 
   function drawTitle() {
@@ -510,5 +536,5 @@ export function createHud(ctx, deps) {
     if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 522);
   }
 
-  return { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, statBars, WEAPON_NAME, clock };
+  return { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, statBars, WEAPON_NAME, clock };
 }

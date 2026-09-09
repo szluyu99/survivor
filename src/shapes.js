@@ -14,8 +14,10 @@ export function createShapes(ctx) {
   }
 
   // 形状比颜色识别得更快，也对色盲友好：圆=杂兵 三角=冲锋兵 方=肉盾 菱=精英
-  function shapePath(kind, x, y, r, rot) {
-    ctx.beginPath();
+  // subPath 只往当前路径里加子路径、不自己 beginPath：
+  // 这样同色的一批实体可以攒进一条路径里，一次 fill + 一次 stroke 画完。
+  // 500 只怪的场面下，这一点决定了是几十次 canvas 调用还是上千次
+  function subPath(kind, x, y, r, rot) {
     if (kind === 'rusher') {
       // 三角形，尖端指向前进方向
       const s = r * 1.45;
@@ -54,8 +56,15 @@ export function createShapes(ctx) {
       ctx.lineTo(x - s, y);
       ctx.closePath();
     } else {
+      // moveTo 是必须的：同一条路径里连着画多个圆时，arc 会从上一个点连一条线过来
+      ctx.moveTo(x + r, y);
       ctx.arc(x, y, r, 0, Math.PI * 2);
     }
+  }
+
+  function shapePath(kind, x, y, r, rot) {
+    ctx.beginPath();
+    subPath(kind, x, y, r, rot);
   }
 
   // 统一描边：密集场面里全靠这一圈暗色分出边界
@@ -138,5 +147,5 @@ export function createShapes(ctx) {
     ctx.strokeRect(x - t.r, y - t.r * 0.8, t.r * 2, t.r * 1.6);
   }
 
-  return { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain };
+  return { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain };
 }

@@ -148,6 +148,37 @@ test('长时间跑到死亡结算，最好成绩会写进 localStorage', () => {
   assert.ok(best.t > 0 && best.kills >= 0, `最好成绩内容异常：${store.get('survivor.best')}`);
 });
 
+test('这一局的录像能原样重演（真实输入路径，不是脚本造的）', async () => {
+  const { verify } = await import('../src/replay.js');
+  const replay = globalThis.__survivorReplay;
+  assert.ok(replay, '死亡时没有生成录像');
+  const { ok, expected, actual } = verify(replay);
+  assert.ok(ok, `录像重演对不上：期望 ${JSON.stringify(expected)}，实际 ${JSON.stringify(actual)}`);
+});
+
+test('死亡结算能进回放，回放画面在跑，ESC 能退回结算', () => {
+  // 接着上一个测试的阵亡状态
+  calls.length = 0;
+  runFrames(3);
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('阵亡'), '不在死亡结算上');
+  assert.ok(texts.some((t) => t.includes('看这局回放')), '结算里没有看回放的入口');
+
+  fire(handlers.window, 'keydown', { code: 'KeyR', preventDefault() {} });
+  calls.length = 0;
+  runFrames(120, 1e6);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('回放中'), '没有进回放');
+  assert.ok(calls.some(([m]) => m === 'arc'), '回放里没画实体，等于没在推进世界');
+
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(!texts.includes('回放中'), 'ESC 没退出回放');
+  assert.ok(texts.includes('阵亡'), 'ESC 之后没回到结算');
+});
+
 test('ESC 暂停后世界停住，面板画得出来，再按继续', () => {
   // 上一个测试已经打到阵亡，阵亡状态下不允许暂停，先空格重开
   fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
@@ -200,6 +231,36 @@ test('四种敌人各画各自的形状（圆/三角/方/菱），且都带描�
   assert.ok(used.has('stroke'), '描边没画');
   assert.ok(used.has('ellipse'), '玩家脚下阴影没画');
   assert.ok(gradients > 0, '暗角渐变一次都没建过');
+});
+
+test('密集场面下绘制调用不随敌人数量线性增长（同色实体必须批量画）', () => {
+  // 接着上一个测试的世界：此时场上已经有一大堆敌人。
+  // 这条断言钉住的是"批量绘制"这件事本身：以前每只怪一次 fill + 一次 stroke，
+  // 500 只怪时单帧 canvas 调用能到 9700 次、其中 880 次 stroke，浏览器就开始掉帧了
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9; // 不许死，否则取不到密集场面的样本
+  const live = () => w.enemies.filter((e) => e.active).length;
+  const dirs = ['KeyD', 'KeyS', 'KeyA', 'KeyW'];
+  for (let i = 0; i < 60 * 90 && live() < 120; i++) {
+    if (i % 180 === 0) fire(handlers.window, 'keydown', { code: dirs[(i / 180) % 4], preventDefault() {} });
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1, 600000 + i * 16.7, 0);
+  }
+  const enemies = live();
+  assert.ok(enemies >= 120, `样本不够密集，只有 ${enemies} 只怪`);
+
+  calls.length = 0;
+  const FRAMES = 60;
+  runFrames(FRAMES, 900000);
+  const strokes = calls.filter(([m]) => m === 'stroke').length / FRAMES;
+  const fills = calls.filter(([m]) => m === 'fill').length / FRAMES;
+  // 分组数 = 出现的兵种数 + 受击闪白 + 少量装饰，和敌人数量无关
+  assert.ok(strokes < 60, `每帧 ${strokes.toFixed(0)} 次 stroke（${enemies} 只怪），批量绘制退化了`);
+  assert.ok(fills < 80, `每帧 ${fills.toFixed(0)} 次 fill（${enemies} 只怪），批量绘制退化了`);
+  // 把血量还回去，否则后面测死亡结算的用例永远死不了
+  w.player.maxHp = realMaxHp;
+  w.player.hp = Math.min(w.player.hp, realMaxHp);
 });
 
 test('色板里没有重复色值（撞色会让人分不清语义）', async () => {

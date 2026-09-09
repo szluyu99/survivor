@@ -44,7 +44,12 @@ function banishHit(x, y) {
   return -1;
 }
 
+// 死亡结算：看回放按钮。点它以外的地方还是重开，所以按钮要单独判定
+const REPLAY_BTN = { x: VIEW_W / 2 - 176, y: 502, w: 150, h: 28 };
+const inReplayBtn = (x, y) => x >= REPLAY_BTN.x && x <= REPLAY_BTN.x + REPLAY_BTN.w
+  && y >= REPLAY_BTN.y && y <= REPLAY_BTN.y + REPLAY_BTN.h;
+
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
-  REROLL_BTN, inRerollBtn, banishBtn, banishHit,
+  REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
 };
