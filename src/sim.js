@@ -94,6 +94,7 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     // 区域：每 ZONE_SECONDS 换一段，兵种配比和地形风格跟着换
     zoneIndex: 0,
     zoneT: 0,
+    loop: 0,              // 无尽轮次：区域循环完一整轮算一轮，敌人再叠一档强度
     choices: null,
     evolved: [],
     chests: 0,
@@ -403,8 +404,13 @@ export function update(w, dt, input) {
   if (p.flash > 0) p.flash -= dt;
 
   // 区域推进要排在刷怪和地形之前：切换的那一帧起，新刷的怪和新长的地形就该按新区域来
+  const loopBefore = w.loop;
   const nextZone = tickZone(w, dt);
-  if (nextZone) emit(w, 'zone', p.x, p.y, w.zoneIndex);
+  if (nextZone) {
+    // 进入新一轮时报轮次，否则只报区域——两条横幅同时弹会互相盖掉
+    if (w.loop > loopBefore) emit(w, 'loop', p.x, p.y, w.loop);
+    else emit(w, 'zone', p.x, p.y, w.zoneIndex);
+  }
 
   tickTerrain(w, dt, enemyCtx);
   tickSpawns(w, dt, enemyCtx);

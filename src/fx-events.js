@@ -14,7 +14,7 @@ export const FX_EVENTS = [
   // Boss
   'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
   // 地图
-  'chest', 'zone',
+  'chest', 'zone', 'loop',
   // 通关
   'win',
 ];

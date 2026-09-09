@@ -13,8 +13,9 @@ import { cardByKey } from './upgrades.js';
 // v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性）；
 // v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形）；
 // v5：加了 Boss 原型（boss/gen/shielded 决定行为和减伤）；
-// v6：加了难度（difficulty 改敌人数值）和通关状态
-export const REPLAY_VERSION = 6;
+// v6：加了难度（difficulty 改敌人数值）和通关状态；
+// v7：加了无尽轮次（loop 决定敌人额外倍率）
+export const REPLAY_VERSION = 7;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -84,6 +85,7 @@ export function snapshot(w) {
     phase: w.phase,
     zoneIndex: w.zoneIndex,
     zoneT: w.zoneT,
+    loop: w.loop,
     slowT: w.slowT,
     slowMul: w.slowMul,
     decoy: { ...w.decoy },
@@ -114,7 +116,7 @@ export function restore(snap) {
     spawnTimer: snap.spawnTimer, eliteTimer: snap.eliteTimer, bossTimer: snap.bossTimer,
     terrainTimer: snap.terrainTimer, chestTimer: snap.chestTimer,
     cycleT: snap.cycleT, phase: snap.phase, slowT: snap.slowT, slowMul: snap.slowMul,
-    zoneIndex: snap.zoneIndex, zoneT: snap.zoneT, won: snap.won, wonAt: snap.wonAt,
+    zoneIndex: snap.zoneIndex, zoneT: snap.zoneT, loop: snap.loop || 0, won: snap.won, wonAt: snap.wonAt,
   });
   Object.assign(w.player, snap.player);
   Object.assign(w.stats, snap.stats);

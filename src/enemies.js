@@ -3,7 +3,7 @@
 // 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
 import { VIEW_W, VIEW_H } from './view.js';
 import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
-import { zoneWeight, zoneBurst, zoneBoss } from './zones.js';
+import { zoneWeight, zoneBurst, zoneBoss, loopScale } from './zones.js';
 import { BOSS_KINDS, findBossKind, rollPlan, DEFAULT_BOSS } from './bosses.js';
 
 export { BOSS_KINDS, findBossKind };
@@ -66,6 +66,14 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   e.hp = e.maxHp;
   e.speed = (SPAWN.speedBase + wave * SPAWN.speedLinear + w.rng() * SPAWN.speedJitter) * k.speed * w.stats.enemySpeedMul;
   e.dmg = (SPAWN.dmgBase + wave * SPAWN.dmgLinear) * k.dmg;
+  // 无尽轮次的加成：第 0 轮没有加成，之后每轮再叠一档
+  const loop = loopScale(w);
+  if (loop) {
+    e.maxHp *= loop.hp;
+    e.hp = e.maxHp;
+    e.speed *= loop.speed;
+    e.dmg *= loop.dmg;
+  }
   e.r = (SPAWN.rBase + Math.min(SPAWN.rGrowthCap, wave)) * k.r;
   e.gem = k.gem;
   e.hitCd = 0;

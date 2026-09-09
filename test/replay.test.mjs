@@ -161,6 +161,19 @@ test('永久强化会跟着快照和录像走（否则重演的是另一套初�
   assert.notEqual(fingerprint(playback(noPerks)), fingerprint(w2));
 });
 
+test('无尽轮次会跟着快照走（否则恢复出来的敌人强度不对）', () => {
+  const w = createWorld(6);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.zoneIndex = 5;      // 第二轮的最后一个区域
+  w.loop = 1;
+  run(w, 0, 300);
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+  assert.equal(snap.loop, 1);
+  const w2 = restore(snap);
+  assert.equal(w2.loop, 1);
+  assert.equal(fingerprint(w2), fingerprint(w));
+});
+
 test('区域进度会跟着快照走（否则恢复出来的是另一个区域）', () => {
   const w = createWorld(2);
   w.player.maxHp = w.player.hp = 1e9;

@@ -9,6 +9,7 @@ import { createWorld, update, chooseUpgrade, HEROES, BOSS_KINDS } from '../src/s
 import { PERKS, earnShards, heroCost } from '../src/meta.js';
 import { ZONES, ZONE_SECONDS } from '../src/zones.js';
 import { DIFFICULTIES } from '../src/difficulty.js';
+import { LOOP } from '../src/tuning.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
@@ -319,6 +320,33 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
   console.log(`  普通 ${normalAvg.toFixed(0)}s → ${hard.name} ${hardAvg.toFixed(0)}s（${(hardAvg / normalAvg).toFixed(2)} 倍）`);
   check(hardAvg < normalAvg * 0.95, `${hard.name}难度平均 ${hardAvg.toFixed(0)}s，和普通的 ${normalAvg.toFixed(0)}s 差不多，难度倍率没起作用`);
   check(hardAvg > 25, `${hard.name}难度平均只活 ${hardAvg.toFixed(0)}s，太劝退了`);
+}
+
+console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==');
+{
+  // 直接把世界摆到第 2 / 第 3 轮起步，看还能撑多久。
+  // 通关后"继续无尽"是新加的路径，如果第二轮一进去就秒死，这个入口等于没有
+  const runLoop = (loop) => avgOf(SEEDS.map((seed) => {
+    const w = createWorld(seed);
+    w.loop = loop;
+    w.zoneIndex = loop * ZONES.length;
+    for (let i = 0; i < 400 * 60 && !w.over; i++) {
+      if (w.paused) chooseUpgrade(w, Math.floor(i / 97) % 3);
+      const a = (i / 60) * 1.6;
+      update(w, DT, { dx: Math.cos(a), dy: Math.sin(a), dash: w.player.dashCd <= 0 });
+      for (const f of w.fx) f.active = false;
+    }
+    return w.t;
+  }));
+  const base = runLoop(0);
+  const second = runLoop(1);
+  const third = runLoop(2);
+  console.log(`  第 1 轮 ${base.toFixed(0)}s → 第 2 轮 ${second.toFixed(0)}s → 第 3 轮 ${third.toFixed(0)}s`);
+  console.log(`  第 3 轮敌人血量倍率 ${(LOOP.hpMul ** 2).toFixed(2)}x`);
+  check(second < base * 0.95, `第 2 轮平均 ${second.toFixed(0)}s，和第 1 轮的 ${base.toFixed(0)}s 差不多，轮次加成没起作用`);
+  check(third < second, '第 3 轮不比第 2 轮难，轮次加成没有累积');
+  check(second > 25, `第 2 轮平均只活 ${second.toFixed(0)}s，进无尽模式等于直接墙死`);
+  check(LOOP.hpMul ** 2 < 4, `第 3 轮血量已经 ${(LOOP.hpMul ** 2).toFixed(1)} 倍，乘方叠得太快`);
 }
 
 console.log('');

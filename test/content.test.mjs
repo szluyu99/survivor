@@ -97,24 +97,54 @@ test('给不存在的角色 id 会退回基准角色，而不是崩', () => {
   assert.equal(findHero('nope').id, DEFAULT_HERO);
 });
 
-test('区域按时间推进、循环，并在切换那一帧登记 zone 事件', () => {
+test('区域按时间推进、循环，切换报 zone、进新一轮报 loop', () => {
   const w = createWorld(1);
   w.player.maxHp = w.player.hp = 1e9;
   assert.equal(w.zoneIndex, 0);
-  let switches = 0;
+  assert.equal(w.loop, 0);
+  let zoneEvents = 0;
+  let loopEvents = 0;
   // 跑满两轮区域，记录切换次数
   for (let i = 0; i < ZONES.length * 2 * ZONE_SECONDS * 60; i++) {
     // 不选卡的话世界会一直停在选卡界面，时间根本不走（第一版就这么写，切换次数是 0）
     if (w.paused) chooseUpgrade(w, 0);
     update(w, 1 / 60, { dx: 1, dy: 0 });
     for (const f of w.fx) {
-      if (f.active && f.type === 'zone') switches++;
+      if (f.active && f.type === 'zone') zoneEvents++;
+      if (f.active && f.type === 'loop') loopEvents++;
       f.active = false;
     }
   }
-  assert.equal(switches, ZONES.length * 2 - 1, `切换次数不对：${switches}`);
+  // 一共切换 2*len-1 次，其中进入新一轮那次报的是 loop 而不是 zone
+  assert.equal(loopEvents, 1, `轮次事件数不对：${loopEvents}`);
+  assert.equal(zoneEvents + loopEvents, ZONES.length * 2 - 1, `切换次数不对：${zoneEvents + loopEvents}`);
+  assert.equal(w.loop, 1, '跑完一轮之后轮次应该是 1');
   // 走完一轮要循环回第一个区域
   assert.equal(currentZone({ zoneIndex: ZONES.length }).id, ZONES[0].id);
+});
+
+test('轮次会给敌人叠加成，第 0 轮没有加成', () => {
+  const base = createWorld(7);
+  base.t = 120;
+  base.spawnTimer = 1e9;
+  base.eliteTimer = 1e9;
+  base.bossTimer = 1e9;
+  const spawnOne = (w) => {
+    for (const e of w.enemies) e.active = false;
+    w.spawnTimer = 0;
+    update(w, 1 / 60, { dx: 0, dy: 0 });
+    return w.enemies.find((e) => e.active && e.kind !== 'boss');
+  };
+  // 同一个 seed、同一时刻，只有 loop 不同
+  const a = createWorld(7); a.t = 120; a.eliteTimer = 1e9; a.bossTimer = 1e9;
+  const b = createWorld(7); b.t = 120; b.eliteTimer = 1e9; b.bossTimer = 1e9; b.loop = 2;
+  const ea = spawnOne(a);
+  const eb = spawnOne(b);
+  assert.ok(ea && eb, '没刷出可比较的敌人');
+  assert.ok(eb.maxHp > ea.maxHp * 1.5, `第 3 轮的血量没涨够：${ea.maxHp.toFixed(0)} → ${eb.maxHp.toFixed(0)}`);
+  assert.ok(eb.speed > ea.speed, '轮次没提升移速');
+  assert.ok(eb.dmg > ea.dmg, '轮次没提升伤害');
+  assert.equal(base.loop, 0, '新世界的轮次必须是 0（平衡数据的锚点）');
 });
 
 test('区域权重真的改变刷怪构成', () => {

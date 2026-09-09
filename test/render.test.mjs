@@ -600,6 +600,36 @@ test('通关时弹通关面板，回车继续无尽', () => {
   }
 });
 
+test('长局结算图表会合并时间桶（不然柱子和标签会叠在一起）', () => {
+  const w = globalThis.__survivorWorld;
+  const realBuckets = w.log.killsPer15s;
+  const realOver = w.over;
+  try {
+    // 造一个 40 桶（= 600 秒）的假记录，看图表标签的粒度是否变粗。
+    // 直接把 over 掀起来：这条测的是结算图表的画法，不是死亡判定
+    // （把血设成 0 并不会死，over 是在受到伤害那一刻才置的）
+    w.log.killsPer15s = Array.from({ length: 40 }, (_, i) => i + 1);
+    w.over = true;
+    calls.length = 0;
+    runFrames(4, 5.2e6, 0);
+    const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    const title = texts.find((t) => /^每 \d+ 秒击杀$/.test(t));
+    assert.ok(title, `没画击杀柱图标题：${texts.slice(0, 12)}`);
+    assert.notEqual(title, '每 15 秒击杀', '40 个桶时应该合并粒度，而不是继续按 15 秒画');
+    // 40 桶 / 上限 16 根 → 3 桶合一，粒度 45 秒、共 14 根，最后一根的标签是 630s。
+    // 不能用"数所有 \d+s 文本"的办法核对根数：HUD 也在下面画着（区域倒计时、下一只精英都是 xxs）
+    const group = Math.ceil(40 / 16);
+    const step = 15 * group;
+    const bars = Math.ceil(40 / group);
+    assert.equal(title, `每 ${step} 秒击杀`);
+    assert.ok(texts.includes(`${step * bars}s`), `最后一根柱子的标签应该是 ${step * bars}s`);
+    assert.ok(!texts.includes(`${step * (bars + 1)}s`), '柱子画多了');
+  } finally {
+    w.log.killsPer15s = realBuckets;
+    w.over = realOver;
+  }
+});
+
 test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
   // 让它一路打到死
   for (let i = 0; i < 200 * 60; i++) {
@@ -614,7 +644,7 @@ test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
   assert.ok(texts.includes('阵亡'), '没死成，结算面板没出来');
   assert.ok(texts.includes('伤害来源'), '没画伤害来源');
   assert.ok(texts.includes('承受伤害'), '没画承受伤害');
-  assert.ok(texts.includes('每 15 秒击杀'), '没画击杀柱图');
+  assert.ok(texts.some((t) => /^每 \d+ 秒击杀$/.test(t)), '没画击杀柱图');
   // 具体是哪把武器取决于这一局的角色和抽卡，所以只要求"有某把武器的名字"
   const anyWeapon = ALL_WEAPONS.some((def) => texts.some((t) => t.includes(def.name)));
   assert.ok(anyWeapon, `伤害来源里没有任何武器名：${texts.slice(0, 20)}`);
@@ -645,13 +675,29 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
   };
   ensurePlaying();
 
-  const clockBase = 2e6;
+  // 测量期间不许升级、不许死：选卡界面和阵亡都会让世界停住，
+  // 而"停了多少帧"两段不一定一样，这条用例就会莫名其妙地红。
+  // 注意每次都要重新读 __survivorWorld：ensurePlaying 可能按了空格重开，
+  // 那时候世界是个新对象，改在旧对象上的血量和经验需求全都白搭（就是这么红过一次）
+  const cur = () => globalThis.__survivorWorld;
+  const freeze = () => {
+    const w = cur();
+    w.player.xpNext = 1e9;                  // 不升级 → 不弹选卡 → 世界不会停
+    w.player.maxHp = w.player.hp = 1e9;     // 不死 → 世界不会完全停住。
+    // 只补满血是不够的：后期一秒挨的伤害就能超过一条命，两段里"死了多久"不一样，
+    // 量出来就是 5s vs 3s（这条用例为此红了好几轮）
+  };
+  freeze();
+
+  // 时间戳要接着前面的用例往后走：往回跳会让 dt 被夹成 0，那一段就白跑了
+  const clockBase = 6e6;
   let elapsed = 0;
   const play = (frameTimes) => {
-    for (const ms of frameTimes) {
+    frameTimes.forEach((ms, i) => {
+      if (i % 30 === 0) freeze();
       elapsed += ms;
       runFrames(1, clockBase + elapsed, 0);
-    }
+    });
   };
   const steady = Array.from({ length: 300 }, () => 16.7);              // 60fps，共 5010ms
   const jittery = Array.from({ length: 300 }, (_, i) => [33.4, 8.3, 8.4][i % 3]); // 抖动，同样 5010ms
@@ -659,11 +705,14 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
   const t0 = readClock();
   play(steady);
   const t1 = readClock();
+  assert.equal(cur().over, false, '稳定帧那一段里世界就已经结束了，测不了');
   play(jittery);
   const t2 = readClock();
+  assert.equal(cur().over, false, '抖动帧那一段里世界结束了，测不了');
   const a = t1 - t0, b = t2 - t1;
   assert.ok(Math.abs(a - b) <= 1, `同样 5 秒真实时间，稳定帧推进 ${a}s、抖动帧推进 ${b}s`);
   assert.ok(a >= 4, `推进量看起来不对：${a}s`);
+  cur().player.xpNext = 4;   // 还回一个正常的经验需求，别影响后面的用例
 });
 
 test('Q/E 和右下角按钮都能放技能，HUD 画出技能槽', () => {

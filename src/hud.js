@@ -27,6 +27,18 @@ const TAKEN_NAME = {
 
 const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
+// 击杀柱图最多画这么多根，超了就把相邻的桶合并（15s → 30s → 45s …）
+const MAX_KILL_BARS = 16;
+function mergeBuckets(list, group) {
+  const out = [];
+  for (let i = 0; i < list.length; i += group) {
+    let sum = 0;
+    for (let j = i; j < Math.min(list.length, i + group); j++) sum += list[j];
+    out.push(sum);
+  }
+  return out;
+}
+
 // deps: { shapes, fxState, getBest, getMuted, getPaused, getHero, getMeta, getReplayReady }
 export function createHud(ctx, deps) {
   const { shapes, fxState } = deps;
@@ -71,10 +83,12 @@ export function createHud(ctx, deps) {
     ctx.font = '22px ui-monospace, monospace';
     ctx.fillStyle = P.text;
     ctx.fillText(`${m}:${String(s).padStart(2, '0')}`, VIEW_W - 16, 34);
-    // 当前区域 + 还剩多久换：换区域会改兵种配比，值得让人提前知道
+    // 当前区域 + 还剩多久换：换区域会改兵种配比，值得让人提前知道。
+    // 进了无尽轮次之后前面加上轮数，它是这一局"打到哪儿了"的刻度
     ctx.font = 'bold 13px sans-serif';
-    ctx.fillStyle = P.accent;
-    ctx.fillText(`${currentZone(w).name}　${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`, VIEW_W - 16, 52);
+    ctx.fillStyle = w.loop > 0 ? P.danger : P.accent;
+    const loopTag = w.loop > 0 ? `第${w.loop + 1}轮 ` : '';
+    ctx.fillText(`${loopTag}${currentZone(w).name}　${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`, VIEW_W - 16, 52);
     ctx.font = '12px ui-monospace, monospace';
     ctx.fillStyle = P.faint;
     if (best()) ctx.fillText(`最好 ${clock(best().t)}`, VIEW_W - 16, 70);
@@ -312,6 +326,7 @@ export function createHud(ctx, deps) {
       ['下一只精英', `${Math.max(0, w.eliteTimer).toFixed(0)}s`],
       ['最好成绩', bestRun ? `${clock(bestRun.t)} / ${bestRun.kills} 杀` : '暂无'],
       ['区域', `${currentZone(w).name}（${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s 后切换）`],
+      ['轮次', w.loop > 0 ? `第 ${w.loop + 1} 轮（敌人已叠 ${w.loop} 档）` : '第 1 轮'],
       ['难度', findDifficulty(w.difficulty).name],
     ];
     ctx.font = '13px ui-monospace, monospace';
@@ -422,7 +437,8 @@ export function createHud(ctx, deps) {
 
     ctx.fillStyle = P.text;
     ctx.font = '18px ui-monospace, monospace';
-    ctx.fillText(`存活 ${clock(w.t)}   击杀 ${w.kills}   Lv.${w.player.level}   Boss ${w.bossCount} 只`, VIEW_W / 2, 82);
+    const loopTag = w.loop > 0 ? `   第 ${w.loop + 1} 轮` : '';
+    ctx.fillText(`存活 ${clock(w.t)}   击杀 ${w.kills}   Lv.${w.player.level}   Boss ${w.bossCount} 只${loopTag}`, VIEW_W / 2, 82);
     if (best()) {
       const isNew = Math.abs(best().t - w.t) < 1e-6;
       ctx.fillStyle = isNew ? P.warn : P.dimmer;
@@ -469,11 +485,15 @@ export function createHud(ctx, deps) {
       .map(([id, v]) => [TAKEN_NAME[id] || id, v]);
     if (takenRows.length) statBars(takenRows, 520, 152, 330, L.taken, P.hp);
 
-    // 下方：每 15 秒击杀柱图
+    // 下方：击杀柱图。桶太多就合并粒度——柱宽是 780/桶数，
+    // 400 秒 27 根就只剩 28px、600 秒 40 根 19px，10px 的时间标签必然叠在一起
+    const raw = L.killsPer15s;
+    const group = Math.max(1, Math.ceil(raw.length / MAX_KILL_BARS));
+    const buckets = group === 1 ? raw : mergeBuckets(raw, group);
+    const step = 15 * group;
     ctx.fillStyle = P.accent;
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('每 15 秒击杀', 70, 372);
-    const buckets = L.killsPer15s;
+    ctx.fillText(`每 ${step} 秒击杀`, 70, 372);
     const maxK = Math.max(1, ...buckets);
     const bw = Math.min(46, Math.floor(780 / Math.max(1, buckets.length)));
     buckets.forEach((k, i) => {
@@ -487,7 +507,7 @@ export function createHud(ctx, deps) {
       ctx.font = '10px ui-monospace, monospace';
       ctx.textAlign = 'center';
       ctx.fillText(String(k), x + (bw - 4) / 2, 472);
-      ctx.fillText(`${(i + 1) * 15}s`, x + (bw - 4) / 2, 484);
+      ctx.fillText(`${(i + 1) * step}s`, x + (bw - 4) / 2, 484);
       ctx.textAlign = 'left';
     });
 

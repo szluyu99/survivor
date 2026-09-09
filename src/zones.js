@@ -7,7 +7,7 @@
 //
 // 写法和其他内容表一致：一条配置就是一个区域。weights 是"在基础权重上乘多少"，
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
-import { TERRAIN_TUNING } from './tuning.js';
+import { TERRAIN_TUNING, LOOP } from './tuning.js';
 
 export const ZONE_SECONDS = 100;  // 每个区域的时长，走完一轮再从头循环（难度靠时间继续涨）
 
@@ -74,11 +74,26 @@ export function zoneBoss(w) {
   return currentZone(w).boss || 'brute';
 }
 
+// 无尽轮次：区域循环完一整轮算一轮。第 0 轮就是第一遍走完之前
+export const loopOf = (w) => Math.floor((w.zoneIndex || 0) / ZONES.length);
+
+// 轮次带来的敌人加成。乘方叠加，所以刷怪那边直接乘上就行
+export function loopScale(w) {
+  const n = w.loop || 0;
+  if (n <= 0) return null;
+  return {
+    hp: LOOP.hpMul ** n,
+    speed: LOOP.speedMul ** n,
+    dmg: LOOP.dmgMul ** n,
+  };
+}
+
 // 推进区域。切换的那一帧返回新区域，让 sim 去登记横幅和音效
 export function tickZone(w, dt) {
   w.zoneT += dt;
   if (w.zoneT < ZONE_SECONDS) return null;
   w.zoneT -= ZONE_SECONDS;
   w.zoneIndex++;
+  w.loop = loopOf(w);
   return currentZone(w);
 }

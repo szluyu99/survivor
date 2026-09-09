@@ -226,6 +226,16 @@ export function createFx({ onDeath, onWin } = {}) {
       fxState.shake = Math.max(fxState.shake, 5);
       sfx.zone();
     },
+    // 进入新一轮：比换区域更重的提示，敌人从这一刻起又硬一档
+    loop: (f, w) => {
+      burst(f.x, f.y, 44, P.danger, 300, 4.5);
+      fxState.flash = 0.28;
+      fxState.shake = Math.max(fxState.shake, 9);
+      fxState.warn = 2.4;
+      fxState.warnText = `第 ${(w.loop || 0) + 1} 轮 · 敌人更强了`;
+      fxState.warnColor = P.danger;
+      sfx.bossRage();
+    },
     // 通关：打完最后一个区域的 Boss。面板由 game.js 画，这里只负责"这一刻"的表现
     win: (f, w) => {
       burst(f.x, f.y, 60, P.calm, 340, 5);
