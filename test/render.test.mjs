@@ -269,3 +269,48 @@ test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
   assert.ok(texts.some((t) => t.includes('追踪弹')), `伤害来源里没有武器名：${texts.slice(0, 20)}`);
   assert.ok(texts.some((t) => /%/.test(t)), '没画占比数字');
 });
+
+test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更慢', () => {
+  // 空格只在阵亡时才重开，所以不能靠它拿"新的一局"。
+  // 改成在同一局里连续测两段：两段真实时长一样，世界推进量就该一样。
+  const readClock = () => {
+    calls.length = 0;
+    runFrames(1, clockBase + elapsed, 0);
+    const txt = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0])).find((x) => /^\d+:\d\d$/.test(x));
+    const [m, sec] = txt.split(':').map(Number);
+    return m * 60 + sec;
+  };
+  // 前面的测试可能把状态留在"阵亡/已暂停/首屏"，先恢复到正常游戏中
+  const ensurePlaying = () => {
+    for (let i = 0; i < 5; i++) {
+      calls.length = 0;
+      runFrames(1, 1.9e6 + i * 17, 0);
+      const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+      if (texts.includes('阵亡')) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+      else if (texts.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+      else if (texts.some((t) => t.includes('按任意键'))) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+      else return;
+    }
+  };
+  ensurePlaying();
+
+  const clockBase = 2e6;
+  let elapsed = 0;
+  const play = (frameTimes) => {
+    for (const ms of frameTimes) {
+      elapsed += ms;
+      runFrames(1, clockBase + elapsed, 0);
+    }
+  };
+  const steady = Array.from({ length: 300 }, () => 16.7);              // 60fps，共 5010ms
+  const jittery = Array.from({ length: 300 }, (_, i) => [33.4, 8.3, 8.4][i % 3]); // 抖动，同样 5010ms
+
+  const t0 = readClock();
+  play(steady);
+  const t1 = readClock();
+  play(jittery);
+  const t2 = readClock();
+  const a = t1 - t0, b = t2 - t1;
+  assert.ok(Math.abs(a - b) <= 1, `同样 5 秒真实时间，稳定帧推进 ${a}s、抖动帧推进 ${b}s`);
+  assert.ok(a >= 4, `推进量看起来不对：${a}s`);
+});

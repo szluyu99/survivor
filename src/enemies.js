@@ -1,0 +1,285 @@
+// 敌人：兵种表、刷怪、各兵种行为（含 Boss 状态机）、波次节奏。
+// 这个模块不 import sim.js——需要的能力（生成子弹、登记 fx 事件、从池里取对象）
+// 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
+import { VIEW_W, VIEW_H } from './view.js';
+
+// 敌人对象的形状。只有 Boss 会用到后面那几个状态机字段
+export function makeEnemy() {
+  return {
+    active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0,
+    speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
+    state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0,
+  };
+}
+
+export const KINDS = {
+  grunt: { name: '杂兵', hp: 1, speed: 1, dmg: 1, r: 1, gem: 1, unlock: 0, weight: 1 },
+  rusher: { name: '冲锋兵', hp: 0.55, speed: 1.8, dmg: 0.7, r: 0.78, gem: 1, unlock: 15, weight: 0.45 },
+  tank: { name: '肉盾', hp: 3.2, speed: 0.55, dmg: 1.6, r: 1.7, gem: 2, unlock: 30, weight: 0.25 },
+  elite: { name: '精英', hp: 9, speed: 0.8, dmg: 2, r: 2.2, gem: 6, unlock: 30, weight: 0 },
+  shooter: { name: '射手', hp: 0.9, speed: 0.75, dmg: 1, r: 0.95, gem: 2, unlock: 25, weight: 0.3 },
+  splitter: { name: '分裂怪', hp: 1.6, speed: 0.8, dmg: 1.1, r: 1.25, gem: 2, unlock: 40, weight: 0.22 },
+  summoner: { name: '召唤者', hp: 2.4, speed: 0.5, dmg: 1.2, r: 1.35, gem: 3, unlock: 50, weight: 0.2 },
+  boss: { name: 'Boss', hp: 32, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
+};
+
+export function pickKind(w) {
+  let total = 0;
+  for (const id in KINDS) {
+    const k = KINDS[id];
+    if (k.weight > 0 && w.t >= k.unlock) total += k.weight;
+  }
+  let r = w.rng() * total;
+  for (const id in KINDS) {
+    const k = KINDS[id];
+    if (k.weight <= 0 || w.t < k.unlock) continue;
+    r -= k.weight;
+    if (r <= 0) return id;
+  }
+  return 'grunt';
+}
+
+export function spawnEnemy(w, ctx, kindId = null, angle = null) {
+  const e = ctx.alloc(w.enemies);
+  if (!e) return null;
+  const id = kindId || pickKind(w);
+  const k = KINDS[id];
+  // 在视野外一圈随机位置刷怪
+  const ang = angle === null ? w.rng() * Math.PI * 2 : angle;
+  const dist = Math.max(VIEW_W, VIEW_H) * 0.62;
+  const wave = w.t / 55; // 每 55 秒强化一档
+  e.active = true;
+  e.kind = id;
+  e.x = w.player.x + Math.cos(ang) * dist;
+  e.y = w.player.y + Math.sin(ang) * dist;
+  // 玩家 dps 是复合成长（武器等级 × 词条倍率），敌人血量必须超线性，否则后期必然无敌
+  e.maxHp = (10 + wave * 9 + wave * wave * 7) * k.hp * w.stats.enemyHpMul;
+  e.hp = e.maxHp;
+  e.speed = (55 + wave * 7 + w.rng() * 20) * k.speed * w.stats.enemySpeedMul;
+  e.dmg = (6 + wave * 1.5) * k.dmg;
+  e.r = (9 + Math.min(6, wave)) * k.r;
+  e.gem = k.gem;
+  e.hitCd = 0;
+  e.orbCd = 0;
+  e.lastBulletId = 0;
+  e.flash = 0;
+  e.state = 'chase';
+  e.stateT = id === 'boss' ? 2.5 : id === 'shooter' ? 1.2 : id === 'summoner' ? 3 : 0;
+  e.volley = 0;
+  e.plan = '';
+  e.rage = 0;
+  return e;
+}
+
+// Boss 行为：追人 2.5 秒 → 预警 0.8 秒 → 随机放一个技能 → 回到追人。
+// 预警必须有，否则冲撞完全没法躲，只会让人觉得是随机掉血。
+const BOSS = {
+  think: 2.5, telegraph: 0.8, charge: 0.62, chargeMul: 3.4,
+  volleys: 3, volleyGap: 0.26, shots: 10, shotSpeed: 190, minions: 4,
+};
+
+function tickBoss(w, e, dt, ctx) {
+  const p = w.player;
+  const toP = Math.atan2(p.y - e.y, p.x - e.x);
+  e.stateT -= dt;
+
+  // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
+  if (!e.rage && e.hp <= e.maxHp * 0.5) {
+    e.rage = 1;
+    e.speed *= 1.25;
+    e.state = 'chase';
+    e.stateT = 0.7;
+    ctx.emit(w, 'bossrage', e.x, e.y, e.r);
+  }
+  const think = e.rage ? BOSS.think * 0.55 : BOSS.think;
+  const shots = e.rage ? BOSS.shots + 4 : BOSS.shots;
+  const volleys = e.rage ? BOSS.volleys + 1 : BOSS.volleys;
+  const chargeMul = e.rage ? BOSS.chargeMul * 1.25 : BOSS.chargeMul;
+  const minions = e.rage ? BOSS.minions + 3 : BOSS.minions;
+
+  if (e.state === 'chase') {
+    e.x += Math.cos(toP) * e.speed * dt;
+    e.y += Math.sin(toP) * e.speed * dt;
+    if (e.stateT <= 0) {
+      const roll = w.rng();
+      e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
+      e.state = 'telegraph';
+      e.stateT = e.rage ? BOSS.telegraph * 0.75 : BOSS.telegraph;
+      e.moveX = Math.cos(toP);
+      e.moveY = Math.sin(toP);
+      ctx.emit(w, 'bosstell', e.x, e.y, e.r);
+    }
+    return;
+  }
+
+  if (e.state === 'telegraph') {
+    // 站住不动，只在冲撞前锁定方向（其他技能不需要方向）
+    if (e.plan === 'charge') { e.moveX = Math.cos(toP); e.moveY = Math.sin(toP); }
+    if (e.stateT <= 0) {
+      e.state = e.plan;
+      e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? volleys * BOSS.volleyGap : 0.5;
+      e.volley = 0;
+      if (e.plan === 'summon') {
+        for (let i = 0; i < minions; i++) {
+          const a = (i / minions) * Math.PI * 2;
+          const m = spawnEnemy(w, ctx, 'rusher', a);
+          // 召唤出来的贴着 Boss 放，而不是从视野外走进来
+          if (m) { m.x = e.x + Math.cos(a) * (e.r + 26); m.y = e.y + Math.sin(a) * (e.r + 26); }
+        }
+        ctx.emit(w, 'bosssummon', e.x, e.y, e.r);
+      }
+    }
+    return;
+  }
+
+  if (e.state === 'charge') {
+    e.x += e.moveX * e.speed * chargeMul * dt;
+    e.y += e.moveY * e.speed * chargeMul * dt;
+  } else if (e.state === 'shoot') {
+    const done = volleys - Math.ceil(Math.max(0, e.stateT) / BOSS.volleyGap);
+    if (done > e.volley) {
+      e.volley = done;
+      const base = toP + done * 0.31; // 每轮转一点，形成旋转弹幕
+      for (let i = 0; i < shots; i++) {
+        const a = base + (i / shots) * Math.PI * 2;
+        ctx.spawnBullet(w, e.x, e.y, {
+          vx: Math.cos(a) * BOSS.shotSpeed, vy: Math.sin(a) * BOSS.shotSpeed,
+          dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true, src: 'bossBullet',
+        });
+      }
+      ctx.emit(w, 'bossshoot', e.x, e.y, e.r);
+    }
+  }
+
+  if (e.stateT <= 0) { e.state = 'chase'; e.stateT = think; }
+}
+
+// 波次周期：常规 22s → 冲锋 4s → 喘息 4s
+const CYCLE = { surge: 22, calm: 26, end: 30 };
+
+function phaseOf(cycleT) {
+  if (cycleT < CYCLE.surge) return 'normal';
+  if (cycleT < CYCLE.calm) return 'surge';
+  return 'calm';
+}
+
+// 冲锋开始时从四面八方等距围一圈，形成"被包住"的压迫感
+function surgeBurst(w, ctx) {
+  const wave = w.t / 45;
+  const n = Math.min(34, Math.round(10 + wave * 4));
+  const base = w.rng() * Math.PI * 2;
+  for (let i = 0; i < n; i++) {
+    const kind = w.t >= KINDS.rusher.unlock && w.rng() < 0.7 ? 'rusher' : 'grunt';
+    spawnEnemy(w, ctx, kind, base + (i / n) * Math.PI * 2);
+  }
+}
+
+export function tickWave(w, dt, ctx) {
+  w.cycleT += dt;
+  if (w.cycleT >= CYCLE.end) w.cycleT -= CYCLE.end;
+  const next = phaseOf(w.cycleT);
+  if (next !== w.phase) {
+    w.phase = next;
+    if (next === 'surge') { surgeBurst(w, ctx); ctx.emit(w, 'surge', w.player.x, w.player.y); }
+    else if (next === 'calm') ctx.emit(w, 'calm', w.player.x, w.player.y);
+  }
+}
+
+// 冲刺参数：0.16 秒冲出去，期间 0.3 秒无敌（比冲刺本身长一点，穿怪才不会刚出来就被贴脸）
+
+// 各兵种的行为分派。普通兵种就是直线追人，射手和召唤者有自己的小逻辑，Boss 走状态机
+export function tickEnemy(w, e, dt, ctx) {
+  const p = w.player;
+  const ex = p.x - e.x, ey = p.y - e.y;
+  const d = Math.hypot(ex, ey) || 1;
+
+  if (e.kind === 'boss') {
+    tickBoss(w, e, dt, ctx);
+    return;
+  }
+
+  if (e.kind === 'shooter') {
+    // 保持中距离：太近就退，太远就靠，射程内就绕着走
+    e.stateT -= dt;
+    const want = 230;
+    if (d < want - 40) { e.x -= (ex / d) * e.speed * dt; e.y -= (ey / d) * e.speed * dt; }
+    else if (d > want + 40) { e.x += (ex / d) * e.speed * dt; e.y += (ey / d) * e.speed * dt; }
+    else { e.x += (-ey / d) * e.speed * 0.6 * dt; e.y += (ex / d) * e.speed * 0.6 * dt; }
+    if (e.stateT <= 0) {
+      e.stateT = 2.2;
+      const a = Math.atan2(ey, ex);
+      ctx.spawnBullet(w, e.x, e.y, {
+        vx: Math.cos(a) * 260, vy: Math.sin(a) * 260,
+        dmg: e.dmg * 0.8, pierce: 1, life: 3, r: 6, foe: true, src: 'shooterBullet',
+      });
+      ctx.emit(w, 'shoot', e.x, e.y, e.r);
+    }
+    return;
+  }
+
+  if (e.kind === 'summoner') {
+    e.stateT -= dt;
+    e.x += (ex / d) * e.speed * dt;
+    e.y += (ey / d) * e.speed * dt;
+    if (e.stateT <= 0) {
+      e.stateT = 4.5;
+      for (const sign of [-1, 1]) {
+        const m = spawnEnemy(w, ctx, 'rusher');
+        if (!m) continue;
+        m.x = e.x + sign * (e.r + 20);
+        m.y = e.y;
+      }
+      ctx.emit(w, 'summon', e.x, e.y, e.r);
+    }
+    return;
+  }
+
+  e.x += (ex / d) * e.speed * dt;
+  e.y += (ey / d) * e.speed * dt;
+}
+
+// 分裂怪死亡：裂成两只小杂兵
+export function splitOnDeath(w, e, ctx) {
+  // 先把父体的数据抄下来：alloc 会优先复用刚刚释放的槽位，
+  // 也就是子体很可能就是父体这个对象，直接读 e.x / e.maxHp 会读到已被覆盖的值
+  const px = e.x, py = e.y, pr = e.r, php = e.maxHp, pspd = e.speed;
+  ctx.emit(w, 'split', px, py, pr);
+  // 故意生成 grunt 而不是 splitter，否则会无限分裂
+  for (const sign of [-1, 1]) {
+    const m = spawnEnemy(w, ctx, 'grunt');
+    if (!m) continue;
+    m.x = px + sign * (pr + 6);
+    m.y = py;
+    m.maxHp = m.hp = Math.max(6, php * 0.3);
+    m.r = Math.max(6, pr * 0.6);
+    m.speed = pspd * 1.25;
+  }
+}
+
+// 每帧的刷怪：波次节奏 + 常规刷怪 + 精英/Boss 定时
+export function tickSpawns(w, dt, ctx) {
+  tickWave(w, dt, ctx);
+
+  const base = Math.max(0.08, 1.1 - w.t * 0.009);
+  if (w.phase === 'calm') {
+    w.spawnTimer = base; // 喘息期完全不刷
+  } else {
+    w.spawnTimer -= dt;
+    const interval = w.phase === 'surge' ? base * 0.5 : base;
+    while (w.spawnTimer <= 0) { spawnEnemy(w, ctx); w.spawnTimer += interval; }
+  }
+
+  w.bossTimer -= dt;
+  if (w.bossTimer <= 0) {
+    w.bossTimer += 55;
+    const b = spawnEnemy(w, ctx, 'boss');
+    if (b) { w.bossCount++; ctx.emit(w, 'boss', w.player.x, w.player.y); }
+  }
+
+  w.eliteTimer -= dt;
+  if (w.eliteTimer <= 0) {
+    w.eliteTimer += 40;
+    spawnEnemy(w, ctx, 'elite');
+    ctx.emit(w, 'elite', w.player.x, w.player.y);
+  }
+}

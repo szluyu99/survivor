@@ -201,15 +201,25 @@ for (const id of Object.keys(KINDS)) {
   console.log(pad(KINDS[id].name, 8), t === undefined ? '这局没出现' : `${t.toFixed(0)}s（解锁 ${KINDS[id].unlock}s）`);
 }
 
-console.log('\n=== 帧率敏感度（同 seed 不同步长）===');
-for (const [name, dt] of [['30fps', 1 / 30], ['60fps', 1 / 60], ['144fps', 1 / 144]]) {
+console.log('\n=== 帧率无关性（走 game.js 的固定步长累加器）===');
+// 直接用 1/30、1/144 调 update 已经没有意义了：游戏主循环现在固定按 1/60 推进。
+// 这里复刻累加器逻辑，同一个 seed 在不同刷新率下的结果应该完全一致
+const STEP = 1 / 60;
+for (const [name, frameDt] of [['30fps', 1 / 30], ['60fps', 1 / 60], ['144fps', 1 / 144]]) {
   const ts = SEEDS.slice(0, 3).map((seed) => {
     const w = createWorld(seed);
-    for (let i = 0; i < Math.round(600 / dt) && !w.over; i++) {
-      if (w.paused) chooseUpgrade(w, 0);
-      const a = w.t * 1.6;
-      update(w, dt, { dx: Math.cos(a), dy: Math.sin(a) });
-      for (const f of w.fx) f.active = false;
+    let acc = 0;
+    for (let frame = 0; frame < Math.round(600 / frameDt) && !w.over; frame++) {
+      acc += frameDt;
+      let steps = 0;
+      while (acc >= STEP && steps < 5) {
+        if (w.paused) chooseUpgrade(w, 0);
+        const a = w.t * 1.6;
+        update(w, STEP, { dx: Math.cos(a), dy: Math.sin(a) });
+        for (const f of w.fx) f.active = false;
+        acc -= STEP;
+        steps++;
+      }
     }
     return w.t;
   });

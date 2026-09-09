@@ -47,31 +47,39 @@ export const WEAPONS = [
     id: 'orbit',
     name: '光环',
     maxLevel: 5,
-    desc: ['两颗光球绕身旋转，贴身清场', '半径 +25%', '光球 +1', '伤害 +35%', '光球 +1'],
+    desc: ['两颗光球绕身旋转，贴身清场', '半径 +22%，伤害 +25%', '光球 +1，判定更快', '伤害 +26%', '光球 +1，判定更快'],
     orbs: T([2, 2, 3, 3, 4]),
     // 光球体积必须大到让"环带"盖住贴身那一圈：怪挤到玩家身上时距离约 21，
     // 之前 radius 46 / orbR 16 的组合刚好差一点点碰不到，实测 60 秒零击杀
-    radius: T([44, 54, 54, 54, 62]),
-    orbR: 22,
-    dmg: T([10, 10, 10, 13.5, 13.5]),
-    hitCd: 0.3,
+    // 半径不能越升越大：环太大就会把贴身那一圈漏掉（L5 半径 70 时，
+    // 30px 处的怪反而打不到）。所以半径缓涨，同时让光球本身变大来兜住内圈
+    // 轨道半径几乎不涨，靠光球变大来扩大覆盖。这样任何等级下"贴身那一圈"都在判定内，
+    // 之前 L5 半径 64 时 22px 处的怪打不到（环从它头上飞过），等于满级反而丢了本职
+    radius: T([44, 46, 48, 50, 52]),
+    orbRBy: T([24, 26, 28, 31, 34]),
+    // 伤害每级都得涨：之前 1-3 级全是 10，升两级只是圈变大，单体 DPS 一点没变
+    dmg: T([12, 15, 19, 24, 30]),
+    // 同一目标的受击间隔随等级变短。光球数量对单体输出没用（被这个冷却卡住），
+    // 只有缩短冷却才能让升级在单体上也有感觉
+    hitCdBy: T([0.28, 0.26, 0.22, 0.20, 0.17]),
     info(lv, w) {
       return [
         `每下 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)} 伤害 × ${this.orbs(lv)} 球`,
-        `半径 ${this.radius(lv)}，同目标 ${this.hitCd}s 一次`,
+        `半径 ${this.radius(lv)}，同目标 ${this.hitCdBy(lv)}s 一次`,
       ];
     },
     tick(w, inst, dt, api) {
       inst.timer += dt * 2.6; // 旋转相位
       const n = this.orbs(inst.level);
       const rad = this.radius(inst.level);
+      const orbR = this.orbRBy(inst.level);
       const dmg = this.dmg(inst.level) * api.dmgMul(w);
       for (let i = 0; i < n; i++) {
         const ang = inst.timer + (i / n) * Math.PI * 2;
         const ox = w.player.x + Math.cos(ang) * rad;
         const oy = w.player.y + Math.sin(ang) * rad;
-        api.addOrb(w, ox, oy, this.orbR);
-        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
+        api.addOrb(w, ox, oy, orbR);
+        api.damageArea(w, ox, oy, orbR, dmg, this.hitCdBy(inst.level), this.id);
       }
     },
   },

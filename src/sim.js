@@ -1,38 +1,25 @@
 // 纯逻辑层：不碰 DOM，方便在 node 里跑测试。
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
-import { WEAPONS, MAX_SLOTS, findWeapon, EVOLUTIONS, EVO_LEVEL, findEvolution } from './weapons.js';
+import { findWeapon } from './weapons.js';
+import { rollChoices, TRAITS, CURSES } from './upgrades.js';
+import { KINDS, tickEnemy, tickSpawns, splitOnDeath, makeEnemy } from './enemies.js';
+import { VIEW_W, VIEW_H } from './view.js';
 
-export const VIEW_W = 960;
-export const VIEW_H = 540;
+export { VIEW_W, VIEW_H };
+import { mulberry32, pool, alloc } from './pool.js';
 
-// 确定性随机，方便复现同一局
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// 词条与诅咒的定义在 upgrades.js，这里转出去，外部（UI/测试）不用关心分了几个文件
+export { TRAITS, CURSES };
+// 兵种表定义在 enemies.js，同样转出去
+export { KINDS };
 
+
+// 各种池子的上限。池满就丢弃新实体，宁可少生成也不动态扩容
 const MAX_ENEMIES = 600;
 const MAX_BULLETS = 400;
 const MAX_GEMS = 400;
 const MAX_ORBS = 8;
 const MAX_FX = 64;
-
-function pool(size, make) {
-  const arr = new Array(size);
-  for (let i = 0; i < size; i++) arr[i] = make();
-  return arr;
-}
-
-function alloc(list) {
-  for (let i = 0; i < list.length; i++) if (!list[i].active) return list[i];
-  return null; // 池满就丢弃，宁可少生成也不扩容
-}
 
 export function createWorld(seed = 1) {
   return {
@@ -57,9 +44,7 @@ export function createWorld(seed = 1) {
       enemyHpMul: 1, enemySpeedMul: 1, // 诅咒卡用
     },
     weapons: [{ id: 'bolt', level: 1, timer: 0 }],
-    enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
-      // 只有 Boss 用：行为状态机
-      state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0 })),
+    enemies: pool(MAX_ENEMIES, makeEnemy),
     bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
@@ -115,87 +100,6 @@ function emit(w, type, x, y, amount = 0) {
 }
 
 // 通用词条：不绑定具体武器
-export const TRAITS = [
-  { id: 'damage', name: '狠', desc: '全体伤害 +25%', apply: (w) => { w.stats.damageMul *= 1.25; } },
-  { id: 'rate', name: '快', desc: '全体攻速 +20%', apply: (w) => { w.stats.rateMul *= 1.2; } },
-  { id: 'speed', name: '滑', desc: '移速 +15%', apply: (w) => { w.player.speed *= 1.15; } },
-  { id: 'maxHp', name: '肉', desc: '生命上限 +25 并回满', apply: (w) => { w.player.maxHp += 25; w.player.hp = w.player.maxHp; } },
-  { id: 'pickup', name: '贪', desc: '拾取范围 +50%', apply: (w) => { w.stats.pickupRange *= 1.5; } },
-  // 下面这些改的是行为，不只是数值
-  { id: 'crit', name: '准', desc: '15% 概率暴击（双倍伤害）', apply: (w) => { w.stats.critChance = Math.min(0.75, w.stats.critChance + 0.15); } },
-  { id: 'drain', name: '吸', desc: '每次击杀回 2 点生命', apply: (w) => { w.stats.lifeOnKill += 2; } },
-  { id: 'greed', name: '学', desc: '经验获取 +35%', apply: (w) => { w.stats.xpMul *= 1.35; } },
-  { id: 'gemBlast', name: '炸', desc: '捡到经验球时炸一圈', apply: (w) => { w.stats.gemBlast += 1; } },
-];
-
-// 诅咒卡：有明确代价的强化。抽中率低，但它是让选卡从"选最大的数"变成赌一把的东西
-export const CURSES = [
-  {
-    id: 'curseSpeed', name: '狂躁', desc: '全体伤害 +50%，但敌人移速 +20%',
-    apply: (w) => { w.stats.damageMul *= 1.5; w.stats.enemySpeedMul *= 1.2; },
-  },
-  {
-    id: 'curseHp', name: '厚皮', desc: '攻速 +40%，但敌人血量 +25%',
-    apply: (w) => { w.stats.rateMul *= 1.4; w.stats.enemyHpMul *= 1.25; },
-  },
-  {
-    id: 'curseFrail', name: '玻璃', desc: '全体伤害 +60%，但生命上限 -25',
-    apply: (w) => {
-      w.stats.damageMul *= 1.6;
-      w.player.maxHp = Math.max(30, w.player.maxHp - 25);
-      w.player.hp = Math.min(w.player.hp, w.player.maxHp);
-    },
-  },
-];
-
-function evolveWeapon(w, evo) {
-  // 两把素材合成一把，占一个槽——所以进化也是腾槽位的手段
-  w.weapons = w.weapons.filter((x) => !evo.from.includes(x.id));
-  w.weapons.push({ id: evo.id, level: 1, timer: 0 });
-  w.evolved = (w.evolved || []).concat(evo.id);
-}
-
-function upgradeWeapon(w, id) {
-  const inst = w.weapons.find((x) => x.id === id);
-  if (inst) inst.level++;
-  else w.weapons.push({ id, level: 1, timer: 0 });
-}
-
-// 抽三张：已有武器的升级、没拿过的新武器、通用词条混在一起
-function rollChoices(w) {
-  const bag = [];
-  for (const inst of w.weapons) {
-    const def = findWeapon(inst.id);
-    if (inst.level < def.maxLevel) {
-      bag.push({ name: `${def.name} Lv.${inst.level + 1}`, desc: def.desc[inst.level], apply: (x) => upgradeWeapon(x, def.id) });
-    }
-  }
-  if (w.weapons.length < MAX_SLOTS) {
-    for (const def of WEAPONS) {
-      if (w.weapons.some((x) => x.id === def.id)) continue;
-      bag.push({ name: `新武器 · ${def.name}`, desc: def.desc[0], apply: (x) => upgradeWeapon(x, def.id) });
-    }
-  }
-  for (const evo of findEvolution(w)) {
-    const def = findWeapon(evo.id);
-    const parts = evo.from.map((id) => findWeapon(id).name).join(' + ');
-    const card = { name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
-    // 放四份：卡池里现在有 9 个词条 + 3 张诅咒 + 新武器 + 升级，只放一两份会经常抽不到，
-    // 而进化本该是一局里的高光时刻
-    bag.push(card, card, card, card);
-  }
-  for (const t of TRAITS) bag.push({ name: t.name, desc: t.desc, apply: t.apply });
-  for (const c of CURSES) bag.push({ name: `诅咒 · ${c.name}`, desc: c.desc, curse: true, apply: c.apply });
-
-  const out = [];
-  while (out.length < 3 && bag.length) {
-    const card = bag.splice(Math.floor(w.rng() * bag.length), 1)[0];
-    if (out.includes(card)) continue; // 进化卡放了两份，别抽出两张一样的
-    out.push(card);
-  }
-  return out;
-}
-
 export function chooseUpgrade(w, index) {
   if (!w.choices || !w.choices[index]) return;
   w.choices[index].apply(w);
@@ -215,30 +119,18 @@ function dropGem(w, x, y, value = 1) {
 }
 
 function killEnemy(w, e) {
+  // 先把死者的信息抄下来：splitOnDeath 里会 alloc 新敌人，而 alloc 优先复用
+  // 刚释放的槽位——也就是 e 这个对象很可能已经变成了它的子体
+  const { kind, x, y, r, gem } = e;
   e.active = false;
   w.kills++;
   noteKill(w);
   if (w.stats.lifeOnKill > 0 && w.player.hp > 0) {
     w.player.hp = Math.min(w.player.maxHp, w.player.hp + w.stats.lifeOnKill);
   }
-  if (e.kind === 'splitter') {
-    // 先把父体的数据抄下来：alloc 会优先复用刚刚释放的槽位，
-    // 也就是子体很可能就是父体这个对象，直接读 e.x / e.maxHp 会读到已被覆盖的值
-    const px = e.x, py = e.y, pr = e.r, php = e.maxHp, pspd = e.speed;
-    emit(w, 'split', px, py, pr);
-    // 裂成两只小杂兵。故意生成 grunt 而不是 splitter，否则会无限分裂
-    for (const sign of [-1, 1]) {
-      const m = spawnEnemy(w, 'grunt');
-      if (!m) continue;
-      m.x = px + sign * (pr + 6);
-      m.y = py;
-      m.maxHp = m.hp = Math.max(6, php * 0.3);
-      m.r = Math.max(6, pr * 0.6);
-      m.speed = pspd * 1.25;
-    }
-  }
-  emit(w, e.kind === 'boss' ? 'bossdead' : 'kill', e.x, e.y, e.r);
-  dropGem(w, e.x, e.y, e.gem);
+  if (kind === 'splitter') splitOnDeath(w, e, enemyCtx);
+  emit(w, kind === 'boss' ? 'bossdead' : 'kill', x, y, r);
+  dropGem(w, x, y, gem);
 }
 
 // 武器 tick 用的接口，避免 weapons.js 反过来 import sim.js
@@ -350,180 +242,14 @@ const api = {
 
 // 敌人种类：hp/speed/dmg/r 都是对基础值的倍率，unlock 是出场时间（秒）
 // 出场时间压得比较早：实测一局只有 70 秒左右，太晚解锁的兵种玩家根本见不到
-export const KINDS = {
-  grunt: { name: '杂兵', hp: 1, speed: 1, dmg: 1, r: 1, gem: 1, unlock: 0, weight: 1 },
-  rusher: { name: '冲锋兵', hp: 0.55, speed: 1.8, dmg: 0.7, r: 0.78, gem: 1, unlock: 15, weight: 0.45 },
-  tank: { name: '肉盾', hp: 3.2, speed: 0.55, dmg: 1.6, r: 1.7, gem: 2, unlock: 30, weight: 0.25 },
-  elite: { name: '精英', hp: 9, speed: 0.8, dmg: 2, r: 2.2, gem: 6, unlock: 30, weight: 0 },
-  shooter: { name: '射手', hp: 0.9, speed: 0.75, dmg: 1, r: 0.95, gem: 2, unlock: 25, weight: 0.3 },
-  splitter: { name: '分裂怪', hp: 1.6, speed: 0.8, dmg: 1.1, r: 1.25, gem: 2, unlock: 40, weight: 0.22 },
-  summoner: { name: '召唤者', hp: 2.4, speed: 0.5, dmg: 1.2, r: 1.35, gem: 3, unlock: 50, weight: 0.2 },
-  boss: { name: 'Boss', hp: 32, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
+// 注入给 enemies.js 的能力集合：它需要生成子弹、登记 fx 事件、从池里取对象，
+// 但不能反向 import sim.js（会形成循环），所以统一从这里传进去
+const enemyCtx = {
+  emit,
+  alloc,
+  spawnBullet: (w, x, y, opts) => api.spawnBullet(w, x, y, opts),
 };
 
-function pickKind(w) {
-  let total = 0;
-  for (const id in KINDS) {
-    const k = KINDS[id];
-    if (k.weight > 0 && w.t >= k.unlock) total += k.weight;
-  }
-  let r = w.rng() * total;
-  for (const id in KINDS) {
-    const k = KINDS[id];
-    if (k.weight <= 0 || w.t < k.unlock) continue;
-    r -= k.weight;
-    if (r <= 0) return id;
-  }
-  return 'grunt';
-}
-
-function spawnEnemy(w, kindId = null, angle = null) {
-  const e = alloc(w.enemies);
-  if (!e) return null;
-  const id = kindId || pickKind(w);
-  const k = KINDS[id];
-  // 在视野外一圈随机位置刷怪
-  const ang = angle === null ? w.rng() * Math.PI * 2 : angle;
-  const dist = Math.max(VIEW_W, VIEW_H) * 0.62;
-  const wave = w.t / 55; // 每 55 秒强化一档
-  e.active = true;
-  e.kind = id;
-  e.x = w.player.x + Math.cos(ang) * dist;
-  e.y = w.player.y + Math.sin(ang) * dist;
-  // 玩家 dps 是复合成长（武器等级 × 词条倍率），敌人血量必须超线性，否则后期必然无敌
-  e.maxHp = (10 + wave * 9 + wave * wave * 7) * k.hp * w.stats.enemyHpMul;
-  e.hp = e.maxHp;
-  e.speed = (55 + wave * 7 + w.rng() * 20) * k.speed * w.stats.enemySpeedMul;
-  e.dmg = (6 + wave * 1.5) * k.dmg;
-  e.r = (9 + Math.min(6, wave)) * k.r;
-  e.gem = k.gem;
-  e.hitCd = 0;
-  e.orbCd = 0;
-  e.lastBulletId = 0;
-  e.flash = 0;
-  e.state = 'chase';
-  e.stateT = id === 'boss' ? 2.5 : id === 'shooter' ? 1.2 : id === 'summoner' ? 3 : 0;
-  e.volley = 0;
-  e.plan = '';
-  e.rage = 0;
-  return e;
-}
-
-// Boss 行为：追人 2.5 秒 → 预警 0.8 秒 → 随机放一个技能 → 回到追人。
-// 预警必须有，否则冲撞完全没法躲，只会让人觉得是随机掉血。
-const BOSS = {
-  think: 2.5, telegraph: 0.8, charge: 0.62, chargeMul: 3.4,
-  volleys: 3, volleyGap: 0.26, shots: 10, shotSpeed: 190, minions: 4,
-};
-
-function tickBoss(w, e, dt) {
-  const p = w.player;
-  const toP = Math.atan2(p.y - e.y, p.x - e.x);
-  e.stateT -= dt;
-
-  // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
-  if (!e.rage && e.hp <= e.maxHp * 0.5) {
-    e.rage = 1;
-    e.speed *= 1.25;
-    e.state = 'chase';
-    e.stateT = 0.7;
-    emit(w, 'bossrage', e.x, e.y, e.r);
-  }
-  const think = e.rage ? BOSS.think * 0.55 : BOSS.think;
-  const shots = e.rage ? BOSS.shots + 4 : BOSS.shots;
-  const volleys = e.rage ? BOSS.volleys + 1 : BOSS.volleys;
-  const chargeMul = e.rage ? BOSS.chargeMul * 1.25 : BOSS.chargeMul;
-  const minions = e.rage ? BOSS.minions + 3 : BOSS.minions;
-
-  if (e.state === 'chase') {
-    e.x += Math.cos(toP) * e.speed * dt;
-    e.y += Math.sin(toP) * e.speed * dt;
-    if (e.stateT <= 0) {
-      const roll = w.rng();
-      e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
-      e.state = 'telegraph';
-      e.stateT = e.rage ? BOSS.telegraph * 0.75 : BOSS.telegraph;
-      e.moveX = Math.cos(toP);
-      e.moveY = Math.sin(toP);
-      emit(w, 'bosstell', e.x, e.y, e.r);
-    }
-    return;
-  }
-
-  if (e.state === 'telegraph') {
-    // 站住不动，只在冲撞前锁定方向（其他技能不需要方向）
-    if (e.plan === 'charge') { e.moveX = Math.cos(toP); e.moveY = Math.sin(toP); }
-    if (e.stateT <= 0) {
-      e.state = e.plan;
-      e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? volleys * BOSS.volleyGap : 0.5;
-      e.volley = 0;
-      if (e.plan === 'summon') {
-        for (let i = 0; i < minions; i++) {
-          const a = (i / minions) * Math.PI * 2;
-          const m = spawnEnemy(w, 'rusher', a);
-          // 召唤出来的贴着 Boss 放，而不是从视野外走进来
-          if (m) { m.x = e.x + Math.cos(a) * (e.r + 26); m.y = e.y + Math.sin(a) * (e.r + 26); }
-        }
-        emit(w, 'bosssummon', e.x, e.y, e.r);
-      }
-    }
-    return;
-  }
-
-  if (e.state === 'charge') {
-    e.x += e.moveX * e.speed * chargeMul * dt;
-    e.y += e.moveY * e.speed * chargeMul * dt;
-  } else if (e.state === 'shoot') {
-    const done = volleys - Math.ceil(Math.max(0, e.stateT) / BOSS.volleyGap);
-    if (done > e.volley) {
-      e.volley = done;
-      const base = toP + done * 0.31; // 每轮转一点，形成旋转弹幕
-      for (let i = 0; i < shots; i++) {
-        const a = base + (i / shots) * Math.PI * 2;
-        api.spawnBullet(w, e.x, e.y, {
-          vx: Math.cos(a) * BOSS.shotSpeed, vy: Math.sin(a) * BOSS.shotSpeed,
-          dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true, src: 'bossBullet',
-        });
-      }
-      emit(w, 'bossshoot', e.x, e.y, e.r);
-    }
-  }
-
-  if (e.stateT <= 0) { e.state = 'chase'; e.stateT = think; }
-}
-
-// 波次周期：常规 22s → 冲锋 4s → 喘息 4s
-const CYCLE = { surge: 22, calm: 26, end: 30 };
-
-function phaseOf(cycleT) {
-  if (cycleT < CYCLE.surge) return 'normal';
-  if (cycleT < CYCLE.calm) return 'surge';
-  return 'calm';
-}
-
-// 冲锋开始时从四面八方等距围一圈，形成"被包住"的压迫感
-function surgeBurst(w) {
-  const wave = w.t / 45;
-  const n = Math.min(34, Math.round(10 + wave * 4));
-  const base = w.rng() * Math.PI * 2;
-  for (let i = 0; i < n; i++) {
-    const kind = w.t >= KINDS.rusher.unlock && w.rng() < 0.7 ? 'rusher' : 'grunt';
-    spawnEnemy(w, kind, base + (i / n) * Math.PI * 2);
-  }
-}
-
-function tickWave(w, dt) {
-  w.cycleT += dt;
-  if (w.cycleT >= CYCLE.end) w.cycleT -= CYCLE.end;
-  const next = phaseOf(w.cycleT);
-  if (next !== w.phase) {
-    w.phase = next;
-    if (next === 'surge') { surgeBurst(w); emit(w, 'surge', w.player.x, w.player.y); }
-    else if (next === 'calm') emit(w, 'calm', w.player.x, w.player.y);
-  }
-}
-
-// 冲刺参数：0.16 秒冲出去，期间 0.3 秒无敌（比冲刺本身长一点，穿怪才不会刚出来就被贴脸）
 export const DASH = { time: 0.16, speed: 780, invuln: 0.3, cd: 3 };
 
 export function update(w, dt, input) {
@@ -564,32 +290,7 @@ export function update(w, dt, input) {
   }
   if (p.flash > 0) p.flash -= dt;
 
-  // 刷怪：随时间加速，但有上限；冲锋期加倍，喘息期完全停
-  tickWave(w, dt);
-  const base = Math.max(0.08, 1.1 - w.t * 0.009);
-  if (w.phase === 'calm') {
-    w.spawnTimer = base;
-  } else {
-    w.spawnTimer -= dt;
-    const interval = w.phase === 'surge' ? base * 0.5 : base;
-    while (w.spawnTimer <= 0) { spawnEnemy(w); w.spawnTimer += interval; }
-  }
-
-  // Boss 定时出场
-  w.bossTimer -= dt;
-  if (w.bossTimer <= 0) {
-    w.bossTimer += 55;
-    const b = spawnEnemy(w, 'boss');
-    if (b) { w.bossCount++; emit(w, 'boss', p.x, p.y); }
-  }
-
-  // 精英定时来一只
-  w.eliteTimer -= dt;
-  if (w.eliteTimer <= 0) {
-    w.eliteTimer += 40;
-    spawnEnemy(w, 'elite');
-    emit(w, 'elite', p.x, p.y);
-  }
+  tickSpawns(w, dt, enemyCtx);
 
   // 光球每帧重算位置，先全部回收
   for (const o of w.orbs) o.active = false;
@@ -600,42 +301,7 @@ export function update(w, dt, input) {
     if (!e.active) continue;
     const ex = p.x - e.x, ey = p.y - e.y;
     const d = Math.hypot(ex, ey) || 1;
-    if (e.kind === 'boss') {
-      tickBoss(w, e, dt);
-    } else if (e.kind === 'shooter') {
-      // 保持中距离：太近就退，太远就靠，射程内就绕着走
-      e.stateT -= dt;
-      const want = 230;
-      if (d < want - 40) { e.x -= (ex / d) * e.speed * dt; e.y -= (ey / d) * e.speed * dt; }
-      else if (d > want + 40) { e.x += (ex / d) * e.speed * dt; e.y += (ey / d) * e.speed * dt; }
-      else { e.x += (-ey / d) * e.speed * 0.6 * dt; e.y += (ex / d) * e.speed * 0.6 * dt; }
-      if (e.stateT <= 0) {
-        e.stateT = 2.2;
-        const a = Math.atan2(ey, ex);
-        api.spawnBullet(w, e.x, e.y, {
-          vx: Math.cos(a) * 260, vy: Math.sin(a) * 260,
-          dmg: e.dmg * 0.8, pierce: 1, life: 3, r: 6, foe: true, src: 'shooterBullet',
-        });
-        emit(w, 'shoot', e.x, e.y, e.r);
-      }
-    } else if (e.kind === 'summoner') {
-      e.stateT -= dt;
-      e.x += (ex / d) * e.speed * dt;
-      e.y += (ey / d) * e.speed * dt;
-      if (e.stateT <= 0) {
-        e.stateT = 4.5;
-        for (const sign of [-1, 1]) {
-          const m = spawnEnemy(w, 'rusher');
-          if (!m) continue;
-          m.x = e.x + sign * (e.r + 20);
-          m.y = e.y;
-        }
-        emit(w, 'summon', e.x, e.y, e.r);
-      }
-    } else {
-      e.x += (ex / d) * e.speed * dt;
-      e.y += (ey / d) * e.speed * dt;
-    }
+    tickEnemy(w, e, dt, enemyCtx);
     if (e.flash > 0) e.flash -= dt;
     if (e.hitCd > 0) e.hitCd -= dt;
     if (e.orbCd > 0) e.orbCd -= dt;
