@@ -159,12 +159,24 @@ function restart() {
 }
 
 addEventListener('keydown', (e) => {
-  // 首屏：1–4 直接选角色并开局，其他键用上次选的角色
+  // 首屏只认"明确的开局意图"：1–4 选角色开局，方向键换选中，回车用选中的角色开局。
+  // 以前是"按任意键开始"，太容易误触（随手按一下就开了一局）
   if (!started) {
+    unlock(); // 音频必须在用户手势里启动，这一步不代表开局
+    keys.add(e.code);
     const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
-    if (hi >= 0 && hi < HERO_CARD.count) setHero(HEROES[hi].id);
+    if (hi >= 0 && hi < HERO_CARD.count) { setHero(HEROES[hi].id); beginGame(); return; }
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      const cur = HEROES.findIndex((h) => h.id === heroId);
+      const n = Math.min(HEROES.length, HERO_CARD.count);
+      setHero(HEROES[(cur + (e.code === 'ArrowRight' ? 1 : n - 1) + n) % n].id);
+      e.preventDefault();
+      return;
+    }
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') { beginGame(); return; }
+    if (e.code === 'KeyM') mutedHint = toggleMute();
+    return;
   }
-  beginGame(); // 音频必须在用户手势里启动
   keys.add(e.code);
   if (e.code === 'KeyM') mutedHint = toggleMute();
   // 回放中只认三个键：退出、重开、静音
@@ -209,17 +221,21 @@ const STICK_R = 46;
 let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
-  const wasStarted = started;
-  // 首屏点角色卡：选中它再开局（beginGame 会按新角色重建世界）
-  if (!wasStarted) {
+  // 首屏只有点在角色卡上才开局：点空白处只解锁音频，什么都不发生
+  if (!started) {
+    unlock();
     const at = viewPos(e);
     const hi = heroCardHit(at.x, at.y);
-    if (hi >= 0 && hi < HEROES.length) setHero(HEROES[hi].id);
+    if (hi >= 0 && hi < HEROES.length) {
+      setHero(HEROES[hi].id);
+      beginGame();
+    }
+    pointer = null;
+    return;
   }
   beginGame();
   canvas.setPointerCapture(e.pointerId);
   pointer = viewPos(e);
-  if (!wasStarted) { pointer = null; return; } // 首屏那一下只用来开始
   // 回放中：点一下就退出回放，回到死亡结算
   if (player) { exitReplay(); pointer = null; return; }
   const sb = skillBtnHit(pointer.x, pointer.y);

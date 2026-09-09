@@ -95,6 +95,29 @@ test('开始前是首屏，操作说明、角色卡和形状图例都在', () =>
   for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
 });
 
+test('首屏不会误触：按无关的键、点空白处都不开局', () => {
+  // 以前是"按任意键 / 点任意位置开始"，随手一按就开了一局
+  for (const code of ['KeyW', 'KeyD', 'Space', 'ShiftLeft', 'KeyQ']) {
+    fire(handlers.window, 'keydown', { code, preventDefault() {} });
+    fire(handlers.window, 'keyup', { code });
+  }
+  // 点在角色卡以外的位置（标题附近）
+  fire(handlers.canvas, 'pointerdown', { pointerId: 9, clientX: 480, clientY: 60 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 9 });
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('选择角色'), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
+});
+
+test('首屏方向键能换选中的角色', () => {
+  fire(handlers.window, 'keydown', { code: 'ArrowRight', preventDefault() {} });
+  calls.length = 0;
+  runFrames(2);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('选择角色'), '方向键不该直接开局');
+});
+
 test('首屏按数字键选角色，开局用的就是那个角色', () => {
   // 按 2 = 第二张角色卡（游侠，穿透枪开局）
   fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
@@ -389,7 +412,7 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
       const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
       if (texts.includes('阵亡')) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
       else if (texts.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
-      else if (texts.some((t) => t.includes('按任意键'))) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+      else if (texts.includes('选择角色')) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
       else return;
     }
   };
@@ -438,7 +461,8 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
     calls.length = 0;
     runFrames(1, 2.9e6 + i * 17, 0);
     const t = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-    if (t.includes('阵亡') || t.some((x) => x.includes('按任意键'))) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+    if (t.includes('阵亡')) fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+    else if (t.includes('选择角色')) fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
     else if (t.includes('已暂停')) fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
     else break;
   }

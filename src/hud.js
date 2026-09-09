@@ -532,7 +532,7 @@ export function createHud(ctx, deps) {
     ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 428);
     ctx.fillStyle = P.faint;
     ctx.font = '12px sans-serif';
-    ctx.fillText('按空格用上次选的角色　ESC 暂停看详细属性　M 静音', cx, 452);
+    ctx.fillText('← → 换选中，回车用选中的角色开始　只有这几个操作会开局，不怕误触', cx, 452);
     if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 472);
   }
 
