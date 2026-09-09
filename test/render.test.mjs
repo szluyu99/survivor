@@ -177,14 +177,22 @@ test('四种敌人各画各自的形状（圆/三角/方/菱），且都带描�
   // 上一个测试打到阵亡了，重开一局，然后整段跑 40 秒并累计所有绘制调用：
   // 冲锋兵 15s 出场、肉盾和精英 30s 出场，只在某一帧取样会因为它们刚好被打死而抓不到
   fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
-  // 按住一个方向键别松：不动的话玩家会在 30 秒左右就死，肉盾和 Boss 都还没出场
-  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
   runFrames(5);
   calls.length = 0;
-  for (let i = 0; i < 50 * 60; i++) {
+  // 必须一直移动（不动的话 30 秒就死，肉盾和 Boss 都还没出场），
+  // 而且要定期换方向——加了岩块之后一直按同一个键会顶在石头上动不了
+  const dirs = ['KeyD', 'KeyS', 'KeyA', 'KeyW'];
+  let held = null;
+  for (let i = 0; i < 60 * 60; i++) {
+    if (i % 180 === 0) {
+      if (held) fire(handlers.window, 'keyup', { code: held });
+      held = dirs[(i / 180) % dirs.length];
+      fire(handlers.window, 'keydown', { code: held, preventDefault() {} });
+    }
     if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
     runFrames(1, 300000 + i * 16.7, 0);
   }
+  if (held) fire(handlers.window, 'keyup', { code: held });
   const used = new Set(calls.map(([m]) => m));
   assert.ok(used.has('arc'), '圆形（杂兵/子弹/玩家）没画');
   assert.ok(used.has('closePath'), '三角形或菱形没画（它们靠 closePath 收口）');
@@ -192,7 +200,6 @@ test('四种敌人各画各自的形状（圆/三角/方/菱），且都带描�
   assert.ok(used.has('stroke'), '描边没画');
   assert.ok(used.has('ellipse'), '玩家脚下阴影没画');
   assert.ok(gradients > 0, '暗角渐变一次都没建过');
-  fire(handlers.window, 'keyup', { code: 'KeyD' });
 });
 
 test('色板里没有重复色值（撞色会让人分不清语义）', async () => {

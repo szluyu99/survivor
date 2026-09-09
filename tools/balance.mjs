@@ -176,6 +176,30 @@ console.log('\n=== 局内真实输出占比（三把武器同带，看谁在干�
   }
 }
 
+console.log('\n=== 地图元素：贪宝箱 vs 不管宝箱 ===');
+{
+  // 宝箱要走过去才能开，等于用清怪时间换一张免费卡，值不值得只能实测
+  function playSeeking(seed) {
+    const w = createWorld(seed);
+    for (let i = 0; i < 600 * 60 && !w.over; i++) {
+      if (w.paused) chooseUpgrade(w, Math.floor(i / 97) % 3);
+      const c = w.terrain.find((t) => t.active && t.kind === 'chest');
+      let dx = Math.cos((i / 60) * 1.6), dy = Math.sin((i / 60) * 1.6);
+      if (c) {
+        dx = c.x - w.player.x; dy = c.y - w.player.y;
+        const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      }
+      update(w, DT, { dx, dy, dash: w.player.dashCd <= 0 });
+      for (const f of w.fx) f.active = false;
+    }
+    return { t: w.t, kills: w.kills, chests: w.chests };
+  }
+  const seek = SEEDS.map(playSeeking);
+  const ignore = SEEDS.map((seed) => play({ seed, pick: (i) => Math.floor(i / 97) % 3, dash: true }));
+  console.log(pad('贪宝箱', 10), `平均存活 ${clock(avg(seek.map((r) => r.t)))}  平均击杀 ${avg(seek.map((r) => r.kills)).toFixed(0)}  平均开箱 ${avg(seek.map((r) => r.chests)).toFixed(1)} 个`);
+  console.log(pad('不管宝箱', 10), `平均存活 ${clock(avg(ignore.map((r) => r.t)))}  平均击杀 ${avg(ignore.map((r) => r.kills)).toFixed(0)}`);
+}
+
 console.log('\n=== 冲刺对难度的影响（同 seed，其他条件一致）===');
 {
   const pick = (i) => Math.floor(i / 97) % 3;

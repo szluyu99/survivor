@@ -4,6 +4,7 @@ import { findWeapon } from './weapons.js';
 import { rollChoices, TRAITS, CURSES } from './upgrades.js';
 import { KINDS, tickEnemy, tickSpawns, splitOnDeath, makeEnemy } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
+import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
 
 export { VIEW_W, VIEW_H };
 import { mulberry32, pool, alloc } from './pool.js';
@@ -12,6 +13,7 @@ import { mulberry32, pool, alloc } from './pool.js';
 export { TRAITS, CURSES };
 // 兵种表定义在 enemies.js，同样转出去
 export { KINDS };
+export { TERRAIN };
 
 
 // 各种池子的上限。池满就丢弃新实体，宁可少生成也不动态扩容
@@ -20,6 +22,7 @@ const MAX_BULLETS = 400;
 const MAX_GEMS = 400;
 const MAX_ORBS = 8;
 const MAX_FX = 64;
+const MAX_TERRAIN = 40;
 
 export function createWorld(seed = 1) {
   return {
@@ -48,6 +51,10 @@ export function createWorld(seed = 1) {
     bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
+    terrain: pool(MAX_TERRAIN, makeTerrain),
+    terrainTimer: 0,
+    chestTimer: 8, // 第一个宝箱 8 秒后才可能出现
+
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
     fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0 })),
     spawnTimer: 0,
@@ -59,6 +66,7 @@ export function createWorld(seed = 1) {
     phase: 'normal',
     choices: null,
     evolved: [],
+    chests: 0,
     // 局内统计：给死亡结算面板用，同时也是我们唯一可靠的"真实 DPS"数据来源
     log: { damageBy: {}, takenBy: {}, killsPer15s: [], dealt: 0, taken: 0 },
   };
@@ -106,6 +114,16 @@ export function chooseUpgrade(w, index) {
   w.player.level++;
   w.choices = null;
   w.paused = false;
+}
+
+// 开箱：直接给一次免费升级（白捡一张卡），所以宝箱值得绕路
+function openChest(w, t) {
+  if (!t.active) return;
+  t.active = false;
+  emit(w, 'chest', t.x, t.y, t.r);
+  w.chests++;
+  w.paused = true;
+  w.choices = rollChoices(w);
 }
 
 function dropGem(w, x, y, value = 1) {
@@ -278,18 +296,25 @@ export function update(w, dt, input) {
     emit(w, 'dash', p.x, p.y);
   }
 
+  // 泥地减速对玩家和敌人都生效，所以可以拿泥地当"减速带"卡怪
+  const mud = slowFactor(w, p.x, p.y);
   if (p.dashT > 0) {
-    // 冲刺期间无视输入，按固定速度走完
+    // 冲刺期间无视输入，按固定速度走完；冲刺不吃泥地减速（这是它的价值之一）
     const step = Math.min(dt, p.dashT);
     p.x += p.dashX * DASH.speed * step;
     p.y += p.dashY * DASH.speed * step;
     p.dashT -= dt;
   } else if (len > 0) {
-    p.x += dx * p.speed * dt;
-    p.y += dy * p.speed * dt;
+    p.x += dx * p.speed * mud * dt;
+    p.y += dy * p.speed * mud * dt;
   }
+  resolveBlock(w, p, p.r);
+  // 走上去就开箱：这才是让人愿意为地图元素绕路的原因
+  const chest = chestTouched(w, p.x, p.y, p.r);
+  if (chest) openChest(w, chest);
   if (p.flash > 0) p.flash -= dt;
 
+  tickTerrain(w, dt, enemyCtx);
   tickSpawns(w, dt, enemyCtx);
 
   // 光球每帧重算位置，先全部回收
@@ -301,7 +326,15 @@ export function update(w, dt, input) {
     if (!e.active) continue;
     const ex = p.x - e.x, ey = p.y - e.y;
     const d = Math.hypot(ex, ey) || 1;
+    const before = { x: e.x, y: e.y };
     tickEnemy(w, e, dt, enemyCtx);
+    // 泥地：把这一帧的位移按倍率折回去，效果等于减速
+    const emud = slowFactor(w, e.x, e.y);
+    if (emud < 1) {
+      e.x = before.x + (e.x - before.x) * emud;
+      e.y = before.y + (e.y - before.y) * emud;
+    }
+    resolveBlock(w, e, e.r);
     if (e.flash > 0) e.flash -= dt;
     if (e.hitCd > 0) e.hitCd -= dt;
     if (e.orbCd > 0) e.orbCd -= dt;
@@ -345,6 +378,12 @@ export function update(w, dt, input) {
     }
     if (b.life <= 0) {
       if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg, b.src); // 地雷到期自爆
+      b.active = false;
+      continue;
+    }
+    // 撞到岩块：子弹被吃掉（敌对子弹同样被挡，所以岩块可以当掩体用）
+    if (bulletHitTerrain(w, b)) {
+      if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
       b.active = false;
       continue;
     }

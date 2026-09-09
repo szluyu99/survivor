@@ -28,7 +28,7 @@ function saveBest(w) {
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-const { circle, shapePath, drawEntity, drawGrid, drawVignette } = createShapes(ctx);
+const { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain } = createShapes(ctx);
 
 function resize() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -45,7 +45,7 @@ window.addEventListener('resize', resize);
 const fx = createFx({ onDeath: (w) => saveBest(w) });
 const { consumeFx, stepFx, state: fxState, particles, numbers, bolts } = fx;
 const hud = createHud(ctx, {
-  shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette },
+  shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain },
   fxState,
   getBest: () => best,
   getMuted: () => mutedHint,
@@ -202,6 +202,8 @@ function render(w) {
     ctx.translate((Math.random() - 0.5) * fxState.shake, (Math.random() - 0.5) * fxState.shake);
   }
   drawGrid(camX, camY);
+  // 地形画在实体下面：泥地是"地上的水洼"，岩块也不该盖住玩家
+  for (const t of w.terrain) if (t.active) drawTerrain(t, camX, camY);
 
   for (const g of w.gems) {
     if (!g.active) continue;

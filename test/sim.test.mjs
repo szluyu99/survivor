@@ -625,13 +625,23 @@ test('素材没到等级时不会出现进化卡', () => {
 test('素材达标后能抽到进化卡，选了就合成并腾出槽位', () => {
   const w = forceMaterials(3, ['orbit', 'chain']);
   assert.equal(findEvolution(w).length, 1, '应该刚好有一项可进化');
-  const cards = rollUntilChoices(w);
-  const k = cards.findIndex((c) => c.evo);
-  assert.ok(k >= 0, `没抽到进化卡：${cards.map((c) => c.name)}`);
+  // 进化卡只是权重高，不是必出（卡池里还有 9 词条 + 3 诅咒 + 武器升级），所以多抽几次
+  let k = -1;
+  for (let round = 0; round < 6 && k < 0; round++) {
+    const cards = rollUntilChoices(w);
+    assert.ok(cards, '没能升级');
+    k = cards.findIndex((c) => c.evo);
+    if (k < 0) chooseUpgrade(w, cards.length - 1);
+  }
+  assert.ok(k >= 0, '连抽 6 次都没出现进化卡，权重可能太低');
+  const slotsBefore = w.weapons.length;
   chooseUpgrade(w, k);
-  assert.deepEqual(w.weapons.map((x) => x.id), ['arcfield'], '合成结果不对');
+  const ids = w.weapons.map((x) => x.id);
+  // 中间几轮可能拿到新武器，所以只断言"素材没了、进化品在手、槽位少了一个"
+  assert.ok(ids.includes('arcfield'), `合成结果不对：${ids}`);
+  assert.ok(!ids.includes('orbit') && !ids.includes('chain'), `素材没被消耗：${ids}`);
   assert.deepEqual(w.evolved, ['arcfield']);
-  assert.ok(w.weapons.length < 3, '合成后应该腾出槽位');
+  assert.equal(w.weapons.length, slotsBefore - 1, '合成应该把两把并成一把，腾出一个槽位');
 });
 
 test('三条进化线的素材配方都能走通', () => {
@@ -652,8 +662,8 @@ test('三条进化线的素材配方都能走通', () => {
 });
 
 // 绝对击杀数会被刷怪量顶住，所以拿"同条件下的基础追踪弹"当基准做相对比较
-function kills25s(id, level = 1) {
-  const w = createWorld(4);
+function kills25s(id, level = 1, seed = 4) {
+  const w = createWorld(seed);
   w.weapons = [{ id, level, timer: 0 }];
   for (let i = 0; i < 25 * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, 0);
@@ -665,10 +675,12 @@ function kills25s(id, level = 1) {
 }
 
 test('每把进化武器都不该弱于基础追踪弹太多', () => {
-  const baseline = kills25s('bolt');
+  // 单个 seed 噪声太大（岩块会挡枪、泥地会拖慢，贴身武器尤其吃亏），取三个 seed 平均
+  const avg3 = (id) => [4, 8, 12].reduce((sum, seed) => sum + kills25s(id, 1, seed), 0) / 3;
+  const baseline = avg3('bolt');
   for (const def of EVO_WEAPONS) {
-    const k = kills25s(def.id);
-    assert.ok(k >= baseline * 0.8, `${def.name} 25 秒杀 ${k}，基准追踪弹 ${baseline}，差得太多`);
+    const k = avg3(def.id);
+    assert.ok(k >= baseline * 0.75, `${def.name} 25 秒平均杀 ${k.toFixed(1)}，基准追踪弹 ${baseline.toFixed(1)}，差得太多`);
   }
 });
 
@@ -800,7 +812,10 @@ test('多武器局里每把都有自己的账，加起来等于总量', () => {
     for (const f of w.fx) f.active = false;
   }
   const keys = Object.keys(w.log.damageBy).sort();
-  assert.deepEqual(keys, ['bolt', 'mine', 'orbit'], `应该三把都有输出：${keys}`);
+  // 只断言这三把都有账：开宝箱会白送升级，可能带来 gemBlast 这种额外的伤害来源
+  for (const id of ['bolt', 'mine', 'orbit']) {
+    assert.ok(keys.includes(id), `${id} 没有记录输出：${keys}`);
+  }
   const sum = Object.values(w.log.damageBy).reduce((a, b) => a + b, 0);
   assert.ok(Math.abs(sum - w.log.dealt) < 1e-6, `分摊 ${sum} 和总量 ${w.log.dealt} 不一致`);
 });
@@ -1027,4 +1042,119 @@ test('召唤者会不断产小怪', () => {
   }
   const rushers = w.enemies.filter((e) => e.active && e.kind === 'rusher').length;
   assert.ok(rushers >= 2, `召唤者只产出了 ${rushers} 只小怪`);
+});
+
+// ---- 地图元素 ----
+import { TERRAIN } from '../src/sim.js';
+
+function putTerrain(w, kind, x, y, r) {
+  const t = w.terrain.find((x2) => !x2.active);
+  Object.assign(t, { active: true, kind, x, y, r, hp: 0, maxHp: 0, seed: 7 });
+  return t;
+}
+
+test('地形会围着玩家生成，走远了回收，数量有上限', () => {
+  const w = createWorld(5);
+  for (let i = 0; i < 40 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, DT, { dx: 1, dy: 0 }); // 一直朝一个方向跑
+    for (const f of w.fx) f.active = false;
+  }
+  const live = w.terrain.filter((t) => t.active);
+  assert.ok(live.length > 0, '一个地形都没生成');
+  assert.ok(live.length <= 40, `地形数量超过池上限：${live.length}`);
+  for (const t of live) {
+    const d = Math.hypot(t.x - w.player.x, t.y - w.player.y);
+    assert.ok(d <= 1200, `有地形离玩家 ${d.toFixed(0)}px 还没被回收`);
+  }
+});
+
+test('岩块会挡住玩家，走不进去', () => {
+  const w = createWorld(5);
+  for (const t of w.terrain) t.active = false;
+  const rock = putTerrain(w, 'rock', 60, 0, 30);
+  for (let i = 0; i < 3 * 60; i++) update(w, DT, { dx: 1, dy: 0 });
+  const d = Math.hypot(w.player.x - rock.x, w.player.y - rock.y);
+  assert.ok(d >= rock.r + w.player.r - 1, `玩家挤进了岩块：距离 ${d.toFixed(1)}，应该 >= ${rock.r + w.player.r}`);
+});
+
+test('岩块会吃掉子弹，可以当掩体', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  for (const t of w.terrain) t.active = false;
+  for (const e of w.enemies) e.active = false;
+  // 岩块正好挡在玩家和敌人之间
+  putTerrain(w, 'rock', 90, 0, 34);
+  const e = w.enemies[0];
+  Object.assign(e, {
+    active: true, kind: 'grunt', x: 200, y: 0, r: 12, maxHp: 1e9, hp: 1e9,
+    speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 1e9, lastBulletId: 0, flash: 0,
+  });
+  for (let i = 0; i < 5 * 60; i++) {
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  assert.equal(e.hp, 1e9, '子弹穿过了岩块打到了后面的敌人');
+});
+
+test('泥地让玩家变慢，冲刺不受影响', () => {
+  function distanceIn(seconds, mud, dash = false) {
+    const w = createWorld(5);
+    for (const t of w.terrain) t.active = false;
+    w.terrainTimer = 1e9;
+    if (mud) putTerrain(w, 'mud', 0, 0, 400); // 一大片泥，整段路程都在里面
+    const x0 = w.player.x;
+    for (let i = 0; i < seconds * 60; i++) update(w, DT, { dx: 1, dy: 0, dash: dash && i === 0 });
+    return w.player.x - x0;
+  }
+  const dry = distanceIn(1, false);
+  const wet = distanceIn(1, true);
+  assert.ok(wet < dry * 0.8, `泥地没有减速：干地 ${dry.toFixed(0)}px，泥地 ${wet.toFixed(0)}px`);
+  const wetDash = distanceIn(0.2, true, true);
+  const wetWalk = distanceIn(0.2, true, false);
+  assert.ok(wetDash > wetWalk * 1.5, `冲刺没能无视泥地：${wetWalk.toFixed(0)} → ${wetDash.toFixed(0)}`);
+});
+
+test('走到宝箱上会开箱，白送一次升级', () => {
+  const w = createWorld(5);
+  for (const t of w.terrain) t.active = false;
+  w.terrainTimer = 1e9;
+  putTerrain(w, 'chest', 20, 0, 17);
+  const before = w.chests;
+  for (let i = 0; i < 30 && !w.paused; i++) update(w, DT, { dx: 1, dy: 0 });
+  assert.equal(w.chests, before + 1, '没有开箱');
+  assert.equal(w.paused, true, '开箱没有弹出升级选择');
+  assert.equal(w.choices.length, 3);
+  assert.ok(w.fx.some((f) => f.active && f.type === 'chest'), '没有登记 chest 事件');
+});
+
+test('宝箱限量：同时只有一个，而且有冷却', () => {
+  const w = createWorld(11);
+  let maxChests = 0;
+  let opened = 0;
+  for (let i = 0; i < 180 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    // 主动扑向最近的宝箱，模拟真人贪箱子
+    const c = w.terrain.filter((t) => t.active && t.kind === 'chest')[0];
+    let dx = 1, dy = 0;
+    if (c) {
+      dx = c.x - w.player.x; dy = c.y - w.player.y;
+      const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+    }
+    update(w, DT, { dx, dy, dash: w.player.dashCd <= 0 });
+    maxChests = Math.max(maxChests, w.terrain.filter((t) => t.active && t.kind === 'chest').length);
+    for (const f of w.fx) { if (f.active && f.type === 'chest') opened++; f.active = false; }
+  }
+  assert.equal(maxChests, 1, `场上同时出现了 ${maxChests} 个宝箱`);
+  // 冷却 20 秒，180 秒理论上限 9 个，留点余量
+  assert.ok(opened <= 10, `开箱 ${opened} 次，冷却没起作用`);
+});
+
+test('TERRAIN 配置表里每种元素都有合法的半径区间', () => {
+  for (const [id, def] of Object.entries(TERRAIN)) {
+    assert.ok(Array.isArray(def.r) && def.r.length === 2, `${id} 的半径区间不对`);
+    assert.ok(def.r[0] > 0 && def.r[1] >= def.r[0], `${id} 的半径区间不合法`);
+  }
 });

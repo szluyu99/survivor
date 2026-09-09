@@ -104,6 +104,10 @@ export const sfx = {
     [440, 330, 220, 110].forEach((f, i) => tone({ freq: f, to: f * 0.6, type: 'square', dur: 0.3, gain: 0.22, delay: i * 0.11 }));
     noise({ dur: 0.8, gain: 0.22, hp: 150 });
   },
+  chest() {
+    // 上行三音，和升级的琶音区分：这是"捡到东西"而不是"变强了"
+    [659, 880, 1175].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.14, gain: 0.16, delay: i * 0.06 }));
+  },
   crit() { if (throttle('crit', 60)) tone({ freq: 780, to: 1180, type: 'square', dur: 0.07, gain: 0.13 }); },
   dash() { noise({ dur: 0.18, gain: 0.14, hp: 1600 }); },
   blast() { if (throttle('blast', 60)) noise({ dur: 0.22, gain: 0.22, hp: 200 }); },

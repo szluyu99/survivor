@@ -92,5 +92,51 @@ export function createShapes(ctx) {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
 
-  return { circle, shapePath, drawEntity, drawGrid, drawVignette };
+  // 地图元素：岩块用 seed 生成固定的不规则轮廓，泥地是半透明水洼，宝箱是个小箱子
+  function drawTerrain(t, camX, camY) {
+    const x = t.x - camX, y = t.y - camY;
+    if (t.kind === 'rock') {
+      const sides = 7;
+      ctx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        // 用 seed 掺进角度里做出"每块石头长得不一样但每帧一致"的形状
+        const wobble = 0.78 + ((t.seed * (i + 3)) % 100) / 220;
+        const a = (i / sides) * Math.PI * 2 + (t.seed % 31) / 31;
+        const px = x + Math.cos(a) * t.r * wobble;
+        const py = y + Math.sin(a) * t.r * wobble;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = P.rock;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = P.rockEdge;
+      ctx.stroke();
+      return;
+    }
+    if (t.kind === 'mud') {
+      ctx.beginPath();
+      ctx.arc(x, y, t.r, 0, Math.PI * 2);
+      ctx.fillStyle = P.mud;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = P.mudEdge;
+      ctx.stroke();
+      return;
+    }
+    // 宝箱：加一圈呼吸光，让人在混战里也能注意到
+    const pulse = 0.5 + 0.5 * Math.sin(t.seed + Date.now() / 260);
+    ctx.globalAlpha = 0.25 + pulse * 0.35;
+    circle(x, y, t.r + 8, P.chest);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = P.chest;
+    ctx.fillRect(x - t.r, y - t.r * 0.8, t.r * 2, t.r * 1.6);
+    ctx.fillStyle = P.chestLid;
+    ctx.fillRect(x - t.r, y - t.r * 0.8, t.r * 2, t.r * 0.5);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = P.outline;
+    ctx.strokeRect(x - t.r, y - t.r * 0.8, t.r * 2, t.r * 1.6);
+  }
+
+  return { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain };
 }

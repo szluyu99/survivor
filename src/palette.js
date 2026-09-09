@@ -47,6 +47,14 @@ export const P = {
   blastSpark: '#ffc08a',  // 原来和冲锋兵同色，炸开时分不清是爆炸还是来怪
   levelSpark: '#b8f0ff',
 
+  // 地图元素
+  rock: '#2b3244',
+  rockEdge: '#3d4760',
+  mud: 'rgba(96, 78, 52, 0.42)',
+  mudEdge: 'rgba(150, 122, 78, 0.5)',
+  chest: '#e8b44a',
+  chestLid: '#a3762a',
+
   // 拾取
   gem: '#4fc3f7',
   gemBig: '#7ee8ff',      // 原来是 bolt 的黄色，容易看成子弹
