@@ -20,7 +20,10 @@ export const P = {
     rusher: '#ff6b81',  // 亮粉红，要跳出来（原来是橙色，和地雷爆炸粒子撞了）
     tank: '#8b6fd6',    // 紫，厚重
     elite: '#f2f2f7',   // 白，最扎眼
-    boss: '#d94f8a',    // 洋红，体积本身已经很扎眼了
+    shooter: '#e07a5f',   // 陶土色，远程，五边形
+    splitter: '#b5537a',  // 深粉，会裂成两只
+    summoner: '#6f5fc4',  // 靛蓝，会不停产小怪
+    boss: '#d94f8a',      // 洋红，体积本身已经很扎眼了
   },
   hitFlash: '#ffffff',
   foeBullet: '#ff5d7a',   // Boss 弹幕，必须和己方投射物一眼分开

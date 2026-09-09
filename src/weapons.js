@@ -219,6 +219,8 @@ export const EVOLUTIONS = [
   { id: 'arcfield', from: ['orbit', 'chain'] },
   { id: 'blastlance', from: ['mine', 'lance'] },
   { id: 'homing', from: ['boomerang', 'bolt'] },
+  { id: 'arclance', from: ['lance', 'chain'] },
+  { id: 'minefield', from: ['orbit', 'mine'] },
 ];
 
 export const EVO_WEAPONS = [
@@ -344,6 +346,94 @@ export const EVO_WEAPONS = [
             homing: this.turn(inst.level),
           });
         }
+      }
+    },
+  },
+  {
+    id: 'arclance',
+    name: '链式激光',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['穿透激光命中后向附近敌人放电', '连锁目标 +2，伤害 +35%', '攻速 +40%'],
+    dmg: T([40, 54, 54]),
+    arcDmg: T([20, 27, 27]),
+    rate: T([1.0, 1.0, 1.4]),
+    links: T([3, 5, 5]),
+    range: 220,
+    info(lv, w) {
+      return [
+        `激光 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，无限穿透`,
+        `命中后连锁 ${this.links(lv)} 个，每个 ${(this.arcDmg(lv) * w.stats.damageMul).toFixed(0)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      const period = 1 / this.rate(inst.level);
+      while (inst.timer <= 0) {
+        inst.timer += period;
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        if (!target) { inst.timer = 0; break; }
+        const ang = Math.atan2(target.y - w.player.y, target.x - w.player.x);
+        api.spawnBullet(w, w.player.x, w.player.y, {
+          vx: Math.cos(ang) * 760, vy: Math.sin(ang) * 760,
+          dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 999, life: 0.9, r: 9, color: P.lance, src: this.id,
+        });
+        // 激光打出去的同时，从目标点向外连锁放电
+        const arc = this.arcDmg(inst.level) * api.dmgMul(w);
+        const list = api.nearestN(w, target.x, target.y, this.links(inst.level), this.range);
+        let fx = w.player.x, fy = w.player.y;
+        for (const e of list) {
+          api.chainFx(w, fx, fy, e.x, e.y);
+          fx = e.x; fy = e.y;
+          api.hurtOne(w, e, arc, this.id);
+        }
+      }
+    },
+  },
+  {
+    id: 'minefield',
+    name: '环形雷场',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['光球轨道上不断留下地雷', '光球 +1，爆炸范围 +20%', '伤害 +45%，攻速 +30%'],
+    orbs: T([3, 4, 4]),
+    radius: T([64, 64, 74]),
+    orbR: 18,
+    orbDmg: T([20, 20, 28]),
+    mineDmg: T([46, 46, 64]),
+    blast: T([52, 62, 62]),
+    rate: T([1.7, 1.7, 2.1]),
+    hitCd: 0.3,
+    info(lv, w) {
+      return [
+        `光球 ${this.orbs(lv)} 颗，每下 ${(this.orbDmg(lv) * w.stats.damageMul).toFixed(0)}`,
+        `每秒 ${this.rate(lv).toFixed(1)} 颗雷，爆炸 ${(this.mineDmg(lv) * w.stats.damageMul).toFixed(0)}／范围 ${this.blast(lv)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer += dt * 2.2;
+      const n = this.orbs(inst.level);
+      const rad = this.radius(inst.level);
+      const dmg = this.orbDmg(inst.level) * api.dmgMul(w);
+      for (let i = 0; i < n; i++) {
+        const a = inst.timer + (i / n) * Math.PI * 2;
+        const ox = w.player.x + Math.cos(a) * rad;
+        const oy = w.player.y + Math.sin(a) * rad;
+        api.addOrb(w, ox, oy, this.orbR);
+        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
+      }
+      // 光球轨道上周期性掉雷：站在原地也能靠雷场清场
+      inst.mineT = (inst.mineT || 0) - dt * api.rateMul(w);
+      if (inst.mineT <= 0) {
+        inst.mineT += 1 / this.rate(inst.level);
+        // 雷埋在光球轨道之外：埋在同一圈上跟光球的判定重叠，等于白给
+        const a = inst.timer + w.rng() * Math.PI * 2;
+        const mr = rad * 1.6;
+        api.spawnBullet(w, w.player.x + Math.cos(a) * mr, w.player.y + Math.sin(a) * mr, {
+          vx: 0, vy: 0,
+          dmg: this.mineDmg(inst.level) * api.dmgMul(w),
+          pierce: 1, life: 5, r: 7, color: P.mine, blast: this.blast(inst.level), src: this.id,
+        });
       }
     },
   },

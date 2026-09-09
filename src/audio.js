@@ -104,6 +104,7 @@ export const sfx = {
     [440, 330, 220, 110].forEach((f, i) => tone({ freq: f, to: f * 0.6, type: 'square', dur: 0.3, gain: 0.22, delay: i * 0.11 }));
     noise({ dur: 0.8, gain: 0.22, hp: 150 });
   },
+  crit() { if (throttle('crit', 60)) tone({ freq: 780, to: 1180, type: 'square', dur: 0.07, gain: 0.13 }); },
   dash() { noise({ dur: 0.18, gain: 0.14, hp: 1600 }); },
   blast() { if (throttle('blast', 60)) noise({ dur: 0.22, gain: 0.22, hp: 200 }); },
   chain() { if (throttle('chain', 60)) tone({ freq: 900, to: 1600, type: 'square', dur: 0.06, gain: 0.1 }); },

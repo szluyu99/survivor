@@ -10,7 +10,7 @@ const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.
 
 // ---- 表现层状态：粒子、跳字、震屏、闪白。全部对象池，不在帧里 new ----
 const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
-const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '' }));
+const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false }));
 const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
 const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn };
 
@@ -35,22 +35,27 @@ function burst(x, y, n, color, speed, size) {
   }
 }
 
-function popNumber(x, y, text) {
+function popNumber(x, y, text, crit = false) {
   const n = take(numbers);
   if (!n) return;
   n.active = true;
   n.x = x + (Math.random() - 0.5) * 10;
   n.y = y;
-  n.vy = -46;
-  n.life = 0.55;
+  n.vy = crit ? -62 : -46;
+  n.life = crit ? 0.75 : 0.55;
   n.text = text;
+  n.crit = crit;
 }
 
 // 消费逻辑层这一帧登记的事件，转成画面和声音
 function consumeFx(w) {
   for (const f of w.fx) {
     if (!f.active) continue;
-    if (f.type === 'hit') {
+    if (f.type === 'crit') {
+      burst(f.x, f.y, 6, P.warn, 130, 2.5);
+      popNumber(f.x, f.y - 14, `${Math.round(f.amount)}!`, true);
+      sfx.crit();
+    } else if (f.type === 'hit') {
       burst(f.x, f.y, 3, P.hitSpark, 90, 2);
       popNumber(f.x, f.y - 12, Math.round(f.amount));
       sfx.hit();
@@ -104,6 +109,15 @@ function consumeFx(w) {
       fxState.warnText = 'BOSS 倒下';
       fxState.warnColor = P.warn;
       sfx.bossDead();
+    } else if (f.type === 'split') {
+      burst(f.x, f.y, 14, P.enemy.splitter, 190, 3);
+      sfx.hit();
+    } else if (f.type === 'shoot') {
+      burst(f.x, f.y, 4, P.foeBullet, 90, 2);
+      sfx.bossShoot();
+    } else if (f.type === 'summon') {
+      burst(f.x, f.y, 10, P.enemy.summoner, 150, 3);
+      sfx.bossShoot();
     } else if (f.type === 'elite') {
       fxState.warn = 1.2;
       fxState.warnText = '精英出现';
@@ -351,6 +365,15 @@ function shapePath(kind, x, y, r, rot) {
   } else if (kind === 'tank') {
     const s = r * 0.92;
     ctx.rect(x - s, y - s, s * 2, s * 2);
+  } else if (kind === 'shooter' || kind === 'summoner') {
+    const sides = kind === 'shooter' ? 5 : 8;
+    const sd = r * 1.15;
+    for (let i = 0; i < sides; i++) {
+      const a = rot - Math.PI / 2 + (i / sides) * Math.PI * 2;
+      const px = x + Math.cos(a) * sd, py = y + Math.sin(a) * sd;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
   } else if (kind === 'boss') {
     const sd = r;
     for (let i = 0; i < 6; i++) {
@@ -549,6 +572,10 @@ function drawPausePanel(w) {
     ['伤害倍率', `×${w.stats.damageMul.toFixed(2)}`],
     ['攻速倍率', `×${w.stats.rateMul.toFixed(2)}`],
     ['拾取范围', w.stats.pickupRange.toFixed(0)],
+    ['暴击率', `${(w.stats.critChance * 100).toFixed(0)}%`],
+    ['击杀回血', w.stats.lifeOnKill ? `${w.stats.lifeOnKill}` : '无'],
+    ['经验倍率', `×${w.stats.xpMul.toFixed(2)}`],
+    ['敌人强化', `血 ×${w.stats.enemyHpMul.toFixed(2)}　速 ×${w.stats.enemySpeedMul.toFixed(2)}`],
   ];
   ctx.font = '13px ui-monospace, monospace';
   for (const [k, v] of rows) {
@@ -601,18 +628,19 @@ function drawChoices(w) {
     ctx.fillRect(x, CARD_Y, CARD_W, CARD_H);
     ctx.strokeStyle = P.cardLine;
     ctx.strokeRect(x, CARD_Y, CARD_W, CARD_H);
-    if (u.evo) {
-      ctx.strokeStyle = P.evo;
+    if (u.evo || u.curse) {
+      ctx.strokeStyle = u.evo ? P.evo : P.danger;
       ctx.lineWidth = 2;
       ctx.strokeRect(x - 2, CARD_Y - 2, CARD_W + 4, CARD_H + 4);
       ctx.lineWidth = 1;
     }
-    ctx.fillStyle = u.evo ? P.evo : P.warn;
-    ctx.font = u.evo ? 'bold 22px sans-serif' : 'bold 26px sans-serif';
+    ctx.fillStyle = u.evo ? P.evo : u.curse ? P.danger : P.warn;
+    ctx.font = (u.evo || u.curse) ? 'bold 22px sans-serif' : 'bold 26px sans-serif';
     ctx.fillText(u.name, x + CARD_W / 2, CARD_Y + 62);
     ctx.fillStyle = P.dim;
-    ctx.font = '15px sans-serif';
-    ctx.fillText(u.desc, x + CARD_W / 2, CARD_Y + 98);
+    ctx.font = '14px sans-serif';
+    const lines = u.desc.length > 14 ? [u.desc.slice(0, 13), u.desc.slice(13)] : [u.desc];
+    lines.forEach((t, li) => ctx.fillText(t, x + CARD_W / 2, CARD_Y + 96 + li * 19));
     ctx.fillStyle = P.faint;
     ctx.font = '13px ui-monospace, monospace';
     ctx.fillText(`[${i + 1}]`, x + CARD_W / 2, CARD_Y + CARD_H - 16);
@@ -622,6 +650,8 @@ function drawChoices(w) {
 const TAKEN_NAME = {
   grunt: '杂兵接触', rusher: '冲锋兵', tank: '肉盾', elite: '精英',
   boss: 'Boss 接触/冲撞', bossBullet: 'Boss 弹幕',
+  shooter: '射手接触', shooterBullet: '射手子弹',
+  splitter: '分裂怪', summoner: '召唤者',
 };
 
 // 横条：名字 + 条 + 占比，左右两栏共用
@@ -752,11 +782,13 @@ function drawTitle() {
 
   // 图例：把四种敌人的形状先亮一遍
   const legend = [
-    ['grunt', '杂兵'], ['rusher', '冲锋兵'], ['tank', '肉盾'], ['elite', '精英'],
+    ['grunt', '杂兵'], ['rusher', '冲锋兵'], ['tank', '肉盾'],
+    ['shooter', '射手'], ['splitter', '分裂'], ['summoner', '召唤'],
+    ['elite', '精英'], ['boss', 'Boss'],
   ];
-  const startX = cx - (legend.length - 1) * 90 / 2;
+  const startX = cx - (legend.length - 1) * 78 / 2;
   legend.forEach(([kind, name], i) => {
-    const x = startX + i * 90;
+    const x = startX + i * 78;
     drawEntity(kind, x, 392, 13, P.enemy[kind], -Math.PI / 2);
     ctx.fillStyle = P.dimmer;
     ctx.font = '12px sans-serif';
@@ -807,8 +839,25 @@ function render(w) {
     if (!e.active) continue;
     const ex = e.x - camX, ey = e.y - camY;
     // 冲锋兵是三角形，朝向就是它追人的方向
-    const rot = e.kind === 'rusher' ? Math.atan2(w.player.y - e.y, w.player.x - e.x) : 0;
+    const rot = (e.kind === 'rusher' || e.kind === 'shooter') ? Math.atan2(w.player.y - e.y, w.player.x - e.x) : 0;
     drawEntity(e.kind, ex, ey, e.r, e.flash > 0 ? P.hitFlash : P.enemy[e.kind], rot);
+    if (e.kind === 'splitter') {
+      ctx.strokeStyle = P.outline;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ex, ey, e.r * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (e.kind === 'shooter' && e.stateT < 0.5) {
+      // 快要开枪了：亮一圈提示
+      ctx.strokeStyle = P.foeBullet;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.8 - e.stateT;
+      ctx.beginPath();
+      ctx.arc(ex, ey, e.r + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     if (e.kind === 'boss') {
       // 预警：黄圈跳动；要冲撞时额外画出方向，让人来得及躲
       if (e.state === 'telegraph') {
@@ -916,8 +965,9 @@ function render(w) {
   ctx.font = 'bold 13px ui-monospace, monospace';
   for (const n of numbers) {
     if (!n.active) continue;
-    ctx.globalAlpha = Math.min(1, n.life / 0.55);
-    ctx.fillStyle = P.hitSpark;
+    ctx.globalAlpha = Math.min(1, n.life / (n.crit ? 0.75 : 0.55));
+    ctx.fillStyle = n.crit ? P.warn : P.hitSpark;
+    ctx.font = n.crit ? 'bold 17px ui-monospace, monospace' : 'bold 13px ui-monospace, monospace';
     ctx.fillText(n.text, n.x - camX, n.y - camY);
   }
   ctx.globalAlpha = 1;

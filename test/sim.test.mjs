@@ -13,6 +13,25 @@ function run(w, seconds, input = { dx: 0, dy: 0 }, onPause) {
 const count = (list) => list.reduce((n, o) => n + (o.active ? 1 : 0), 0);
 const pickFirst = (w) => chooseUpgrade(w, 0);
 
+// 手工在指定位置放一只指定兵种：测单个兵种行为时不想被刷怪干扰
+function spawnAt(w, kind, x, y) {
+  const e = w.enemies.find((en) => !en.active);
+  const base = KINDS[kind];
+  e.active = true;
+  e.kind = kind;
+  e.x = x; e.y = y;
+  e.r = 10 * base.r;
+  e.maxHp = e.hp = 40 * base.hp;
+  e.speed = 60 * base.speed;
+  e.dmg = 6 * base.dmg;
+  e.gem = base.gem;
+  e.hitCd = 0; e.orbCd = 0; e.lastBulletId = 0; e.flash = 0;
+  e.state = 'chase'; e.stateT = kind === 'shooter' ? 1 : kind === 'summoner' ? 1 : 0;
+  e.volley = 0; e.plan = ''; e.rage = 0;
+  return e;
+}
+
+
 test('刷怪、开火、击杀、掉经验的链路能跑通', () => {
   const w = createWorld(42);
   run(w, 6);
@@ -186,8 +205,10 @@ test('击退会把敌人往子弹飞行方向推', () => {
 });
 
 // ---- 敌人种类 ----
-function survey(seed, seconds) {
+function survey(seed, seconds, opts = {}) {
   const w = createWorld(seed);
+  // 后期兵种解锁在 50 秒之后，普通血量活不到那时候，测"会不会出现"就要先扛住
+  if (opts.tanky) w.player.maxHp = w.player.hp = 1e9;
   const firstSeen = {};
   let elites = 0;
   for (let i = 0; i < seconds * 60 && !w.over; i++) {
@@ -200,8 +221,8 @@ function survey(seed, seconds) {
   return { w, firstSeen, elites };
 }
 
-test('四种敌人都会在一局里出现，且不早于各自解锁时间', () => {
-  const { firstSeen } = survey(5, 120);
+test('所有兵种都会在一局里出现，且不早于各自解锁时间', () => {
+  const { firstSeen } = survey(5, 150, { tanky: true });
   for (const id of Object.keys(KINDS)) {
     assert.ok(firstSeen[id] !== undefined, `${KINDS[id].name} 一局都没出现过`);
     assert.ok(firstSeen[id] >= KINDS[id].unlock - 1, `${KINDS[id].name} 在解锁时间前就出现了`);
@@ -630,17 +651,24 @@ test('三条进化线的素材配方都能走通', () => {
   }
 });
 
-test('三把进化武器单独用都能打死人', () => {
+// 绝对击杀数会被刷怪量顶住，所以拿"同条件下的基础追踪弹"当基准做相对比较
+function kills25s(id, level = 1) {
+  const w = createWorld(4);
+  w.weapons = [{ id, level, timer: 0 }];
+  for (let i = 0; i < 25 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) f.active = false;
+  }
+  return w.kills;
+}
+
+test('每把进化武器都不该弱于基础追踪弹太多', () => {
+  const baseline = kills25s('bolt');
   for (const def of EVO_WEAPONS) {
-    const w = createWorld(4);
-    w.weapons = [{ id: def.id, level: 1, timer: 0 }];
-    for (let i = 0; i < 25 * 60 && !w.over; i++) {
-      if (w.paused) chooseUpgrade(w, 0);
-      const a = (i / 60) * 1.6;
-      update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
-      for (const f of w.fx) f.active = false;
-    }
-    assert.ok(w.kills > 20, `${def.name} 25 秒只杀了 ${w.kills} 个，进化武器不该比基础武器还弱`);
+    const k = kills25s(def.id);
+    assert.ok(k >= baseline * 0.8, `${def.name} 25 秒杀 ${k}，基准追踪弹 ${baseline}，差得太多`);
   }
 });
 
@@ -681,8 +709,8 @@ test('每把进化武器的 info() 都能给出可读数值', () => {
   }
 });
 
-test('findWeapon 能找到进化武器，ALL_WEAPONS 包含全部九把', () => {
-  assert.equal(ALL_WEAPONS.length, 9, `武器总数不对：${ALL_WEAPONS.length}`);
+test('findWeapon 能找到进化武器，ALL_WEAPONS 覆盖基础 + 进化', () => {
+  assert.equal(ALL_WEAPONS.length, WEAPONS.length + EVO_WEAPONS.length, `武器总数不对：${ALL_WEAPONS.length}`);
   for (const def of EVO_WEAPONS) assert.ok(findWeapon(def.id), `findWeapon 找不到 ${def.id}`);
 });
 
@@ -827,4 +855,176 @@ test('每 15 秒击杀分桶之和等于总击杀', () => {
   const sum = w.log.killsPer15s.reduce((a, b) => a + b, 0);
   assert.equal(sum, w.kills, `分桶合计 ${sum} != 总击杀 ${w.kills}`);
   assert.ok(w.log.killsPer15s.length >= 2, '至少该有两个时间桶');
+});
+
+// ---- 特殊词条与诅咒卡 ----
+import { CURSES } from '../src/sim.js';
+
+test('暴击会显著抬高输出，并发 crit 事件', () => {
+  // 必须打固定靶：打杂兵时溢出伤害不计入账，暴击的收益会被 min(dmg, hp) 吃掉
+  function totalDamage(crit) {
+    const w = createWorld(3);
+    w.weapons = [{ id: 'bolt', level: 2, timer: 0 }];
+    w.stats.critChance = crit;
+    w.spawnTimer = 1e9;
+    w.eliteTimer = 1e9;
+    w.bossTimer = 1e9;
+    for (const e of w.enemies) e.active = false;
+    const dummy = w.enemies[0];
+    Object.assign(dummy, {
+      active: true, kind: 'grunt', x: 90, y: 0, r: 14, maxHp: 1e12, hp: 1e12,
+      speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 0, lastBulletId: 0, flash: 0,
+    });
+    let crits = 0;
+    for (let i = 0; i < 20 * 60; i++) {
+      update(w, DT, { dx: 0, dy: 0 });
+      dummy.x = 90; dummy.y = 0; // 命中有击退，钉住它
+      for (const f of w.fx) { if (f.active && f.type === 'crit') crits++; f.active = false; }
+    }
+    return { dealt: w.log.dealt, crits };
+  }
+  const off = totalDamage(0);
+  const on = totalDamage(0.5);
+  assert.equal(off.crits, 0, '没开暴击却出现了暴击事件');
+  assert.ok(on.crits > 0, '开了 50% 暴击却一次都没暴');
+  assert.ok(on.dealt > off.dealt * 1.15, `暴击没抬高输出：${off.dealt.toFixed(0)} → ${on.dealt.toFixed(0)}`);
+});
+
+test('吸血在击杀时回血，且不超过上限', () => {
+  const w = createWorld(3);
+  w.stats.lifeOnKill = 5;
+  w.player.hp = 20;
+  let healed = false;
+  for (let i = 0; i < 30 * 60 && !w.over; i++) {
+    const before = w.player.hp;
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    if (w.player.hp > before) healed = true;
+    assert.ok(w.player.hp <= w.player.maxHp, '回血超过了上限');
+    for (const f of w.fx) f.active = false;
+  }
+  assert.ok(healed, '一次都没回血');
+});
+
+test('经验倍率让升级更快', () => {
+  function levelsIn(seconds, xpMul) {
+    const w = createWorld(9);
+    w.stats.xpMul = xpMul;
+    let lv = 0;
+    for (let i = 0; i < seconds * 60 && !w.over; i++) {
+      if (w.paused) { lv++; chooseUpgrade(w, w.choices.length - 1); }
+      const a = (i / 60) * 1.6;
+      update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+      for (const f of w.fx) f.active = false;
+    }
+    return lv;
+  }
+  assert.ok(levelsIn(45, 2) > levelsIn(45, 1), '经验倍率没有加快升级');
+});
+
+test('拾取即爆会把伤害记在 gemBlast 名下', () => {
+  const w = createWorld(3);
+  w.weapons = []; // 卸掉武器，确保记到的伤害只可能来自拾取爆炸
+  w.stats.gemBlast = 1;
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  for (const e of w.enemies) e.active = false;
+  const dummy = w.enemies[0];
+  Object.assign(dummy, {
+    active: true, kind: 'grunt', x: 40, y: 0, r: 12, maxHp: 1e9, hp: 1e9,
+    speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 0, lastBulletId: 0, flash: 0,
+  });
+  const g = w.gems[0];
+  g.active = true; g.x = 6; g.y = 0; g.r = 4; g.value = 1;
+  for (let i = 0; i < 30; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.log.damageBy.gemBlast > 0, `没有记录拾取爆炸的伤害：${JSON.stringify(w.log.damageBy)}`);
+});
+
+test('诅咒卡同时生效正反两面', () => {
+  for (const c of CURSES) {
+    const w = createWorld(1);
+    const before = { dmg: w.stats.damageMul, rate: w.stats.rateMul, hpMul: w.stats.enemyHpMul, spd: w.stats.enemySpeedMul, maxHp: w.player.maxHp };
+    c.apply(w);
+    const up = w.stats.damageMul > before.dmg || w.stats.rateMul > before.rate;
+    const down = w.stats.enemyHpMul > before.hpMul || w.stats.enemySpeedMul > before.spd || w.player.maxHp < before.maxHp;
+    assert.ok(up, `${c.id} 没有正面效果`);
+    assert.ok(down, `${c.id} 没有负面代价`);
+  }
+});
+
+test('敌人强化倍率会作用到新刷出来的怪', () => {
+  function firstEnemy(hpMul, spdMul) {
+    const w = createWorld(4);
+    w.stats.enemyHpMul = hpMul;
+    w.stats.enemySpeedMul = spdMul;
+    for (let i = 0; i < 120 && !w.enemies.some((e) => e.active); i++) update(w, DT, { dx: 0, dy: 0 });
+    return w.enemies.find((e) => e.active);
+  }
+  const base = firstEnemy(1, 1);
+  const cursed = firstEnemy(1.25, 1.2);
+  assert.ok(cursed.maxHp > base.maxHp, '诅咒后血量没变高');
+  assert.ok(cursed.speed > base.speed, '诅咒后移速没变快');
+});
+
+// ---- 新兵种行为 ----
+test('射手会保持距离并射出敌对子弹', () => {
+  const w = createWorld(4);
+  w.weapons = [];
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  for (const e of w.enemies) e.active = false;
+  const shooter = spawnAt(w, 'shooter', 120, 0);
+  let sawBullet = false;
+  let minDist = Infinity;
+  for (let i = 0; i < 6 * 60; i++) {
+    update(w, DT, { dx: 0, dy: 0 });
+    minDist = Math.min(minDist, Math.hypot(shooter.x, shooter.y));
+    if (w.bullets.some((b) => b.active && b.foe && b.src === 'shooterBullet')) sawBullet = true;
+    for (const f of w.fx) f.active = false;
+  }
+  assert.ok(sawBullet, '射手没开枪');
+  assert.ok(shooter.active && Math.hypot(shooter.x, shooter.y) > 150, `射手没有拉开距离，当前 ${Math.hypot(shooter.x, shooter.y).toFixed(0)}px`);
+});
+
+test('分裂怪死后会裂成两只小怪', () => {
+  const w = createWorld(4);
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  for (const e of w.enemies) e.active = false;
+  const sp = spawnAt(w, 'splitter', 70, 0);
+  sp.hp = 1;
+  const spr = sp.r, sphp = sp.maxHp;
+  let split = false;
+  for (let i = 0; i < 3 * 60 && !split; i++) {
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) { if (f.active && f.type === 'split') split = true; f.active = false; }
+  }
+  assert.ok(split, '没有发生分裂');
+  const kids = w.enemies.filter((e) => e.active && e.kind === 'grunt');
+  assert.equal(kids.length, 2, `应该裂出两只小怪，实际 ${kids.length}`);
+  for (const k of kids) {
+    assert.ok(k.maxHp < sphp, `子体血量 ${k.maxHp} 不该 >= 父体 ${sphp}`);
+    assert.ok(k.r < spr, '子体体积不该 >= 父体');
+    assert.ok(Math.hypot(k.x - 70, k.y) < spr + 30, '子体位置不该离父体死亡点太远');
+  }
+  assert.ok(w.enemies.filter((e) => e.active).every((e) => e.kind !== 'splitter'), '裂出来的还是分裂怪，会无限分裂');
+});
+
+test('召唤者会不断产小怪', () => {
+  const w = createWorld(4);
+  w.weapons = [];
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  for (const e of w.enemies) e.active = false;
+  spawnAt(w, 'summoner', 200, 0);
+  for (let i = 0; i < 10 * 60; i++) {
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  const rushers = w.enemies.filter((e) => e.active && e.kind === 'rusher').length;
+  assert.ok(rushers >= 2, `召唤者只产出了 ${rushers} 只小怪`);
 });

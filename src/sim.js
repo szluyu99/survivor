@@ -51,7 +51,11 @@ export function createWorld(seed = 1) {
       // 冲刺：dashT 是剩余冲刺时间，invuln 是剩余无敌时间，faceX/Y 是站着不动时的冲刺朝向
       dashT: 0, dashCd: 0, invuln: 0, dashX: 1, dashY: 0, faceX: 1, faceY: 0,
     },
-    stats: { damageMul: 1, rateMul: 1, pickupRange: 90 },
+    stats: {
+      damageMul: 1, rateMul: 1, pickupRange: 90,
+      critChance: 0, critMul: 2, lifeOnKill: 0, xpMul: 1, gemBlast: 0,
+      enemyHpMul: 1, enemySpeedMul: 1, // 诅咒卡用
+    },
     weapons: [{ id: 'bolt', level: 1, timer: 0 }],
     enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
       // 只有 Boss 用：行为状态机
@@ -73,6 +77,12 @@ export function createWorld(seed = 1) {
     // 局内统计：给死亡结算面板用，同时也是我们唯一可靠的"真实 DPS"数据来源
     log: { damageBy: {}, takenBy: {}, killsPer15s: [], dealt: 0, taken: 0 },
   };
+}
+
+// 暴击在这里统一掷点，返回 [实际伤害, 是否暴击]
+function rollDmg(w, dmg) {
+  if (w.stats.critChance > 0 && w.rng() < w.stats.critChance) return [dmg * w.stats.critMul, true];
+  return [dmg, false];
 }
 
 function noteDamage(w, src, amount) {
@@ -111,6 +121,31 @@ export const TRAITS = [
   { id: 'speed', name: '滑', desc: '移速 +15%', apply: (w) => { w.player.speed *= 1.15; } },
   { id: 'maxHp', name: '肉', desc: '生命上限 +25 并回满', apply: (w) => { w.player.maxHp += 25; w.player.hp = w.player.maxHp; } },
   { id: 'pickup', name: '贪', desc: '拾取范围 +50%', apply: (w) => { w.stats.pickupRange *= 1.5; } },
+  // 下面这些改的是行为，不只是数值
+  { id: 'crit', name: '准', desc: '15% 概率暴击（双倍伤害）', apply: (w) => { w.stats.critChance = Math.min(0.75, w.stats.critChance + 0.15); } },
+  { id: 'drain', name: '吸', desc: '每次击杀回 2 点生命', apply: (w) => { w.stats.lifeOnKill += 2; } },
+  { id: 'greed', name: '学', desc: '经验获取 +35%', apply: (w) => { w.stats.xpMul *= 1.35; } },
+  { id: 'gemBlast', name: '炸', desc: '捡到经验球时炸一圈', apply: (w) => { w.stats.gemBlast += 1; } },
+];
+
+// 诅咒卡：有明确代价的强化。抽中率低，但它是让选卡从"选最大的数"变成赌一把的东西
+export const CURSES = [
+  {
+    id: 'curseSpeed', name: '狂躁', desc: '全体伤害 +50%，但敌人移速 +20%',
+    apply: (w) => { w.stats.damageMul *= 1.5; w.stats.enemySpeedMul *= 1.2; },
+  },
+  {
+    id: 'curseHp', name: '厚皮', desc: '攻速 +40%，但敌人血量 +25%',
+    apply: (w) => { w.stats.rateMul *= 1.4; w.stats.enemyHpMul *= 1.25; },
+  },
+  {
+    id: 'curseFrail', name: '玻璃', desc: '全体伤害 +60%，但生命上限 -25',
+    apply: (w) => {
+      w.stats.damageMul *= 1.6;
+      w.player.maxHp = Math.max(30, w.player.maxHp - 25);
+      w.player.hp = Math.min(w.player.hp, w.player.maxHp);
+    },
+  },
 ];
 
 function evolveWeapon(w, evo) {
@@ -145,9 +180,12 @@ function rollChoices(w) {
     const def = findWeapon(evo.id);
     const parts = evo.from.map((id) => findWeapon(id).name).join(' + ');
     const card = { name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
-    bag.push(card, card); // 放两份，提高被抽到的概率：进化是这局的最大惊喜，不该经常抽不到
+    // 放四份：卡池里现在有 9 个词条 + 3 张诅咒 + 新武器 + 升级，只放一两份会经常抽不到，
+    // 而进化本该是一局里的高光时刻
+    bag.push(card, card, card, card);
   }
   for (const t of TRAITS) bag.push({ name: t.name, desc: t.desc, apply: t.apply });
+  for (const c of CURSES) bag.push({ name: `诅咒 · ${c.name}`, desc: c.desc, curse: true, apply: c.apply });
 
   const out = [];
   while (out.length < 3 && bag.length) {
@@ -180,6 +218,25 @@ function killEnemy(w, e) {
   e.active = false;
   w.kills++;
   noteKill(w);
+  if (w.stats.lifeOnKill > 0 && w.player.hp > 0) {
+    w.player.hp = Math.min(w.player.maxHp, w.player.hp + w.stats.lifeOnKill);
+  }
+  if (e.kind === 'splitter') {
+    // 先把父体的数据抄下来：alloc 会优先复用刚刚释放的槽位，
+    // 也就是子体很可能就是父体这个对象，直接读 e.x / e.maxHp 会读到已被覆盖的值
+    const px = e.x, py = e.y, pr = e.r, php = e.maxHp, pspd = e.speed;
+    emit(w, 'split', px, py, pr);
+    // 裂成两只小杂兵。故意生成 grunt 而不是 splitter，否则会无限分裂
+    for (const sign of [-1, 1]) {
+      const m = spawnEnemy(w, 'grunt');
+      if (!m) continue;
+      m.x = px + sign * (pr + 6);
+      m.y = py;
+      m.maxHp = m.hp = Math.max(6, php * 0.3);
+      m.r = Math.max(6, pr * 0.6);
+      m.speed = pspd * 1.25;
+    }
+  }
   emit(w, e.kind === 'boss' ? 'bossdead' : 'kill', e.x, e.y, e.r);
   dropGem(w, e.x, e.y, e.gem);
 }
@@ -231,14 +288,16 @@ const api = {
     return found.slice(0, n).map((o) => o.e);
   },
   // 单次范围伤害，无视 orbCd（爆炸不该被光环的冷却吃掉）
-  blast(w, x, y, r, dmg, src = '') {
+  blast(w, x, y, r, dmg0, src = '') {
     emit(w, 'blast', x, y, r);
     for (const e of w.enemies) {
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
       if (dx * dx + dy * dy <= rr * rr) {
+        const [dmg, crit] = rollDmg(w, dmg0);
         const real = Math.min(dmg, e.hp);
         e.hp -= dmg;
+        if (crit) emit(w, 'crit', e.x, e.y, dmg);
         e.flash = 0.1;
         noteDamage(w, src, real);
         emit(w, 'hit', e.x, e.y, dmg);
@@ -246,9 +305,11 @@ const api = {
       }
     }
   },
-  hurtOne(w, e, dmg, src = '') {
+  hurtOne(w, e, dmg0, src = '') {
+    const [dmg, crit] = rollDmg(w, dmg0);
     const real = Math.min(dmg, e.hp);
     e.hp -= dmg;
+    if (crit) emit(w, 'crit', e.x, e.y, dmg);
     e.flash = 0.08;
     noteDamage(w, src, real);
     emit(w, 'hit', e.x, e.y, dmg);
@@ -268,13 +329,15 @@ const api = {
     o.x = x; o.y = y; o.r = r;
   },
   // 持续伤害区域：每个敌人有独立冷却，不然一帧能被打十几下
-  damageArea(w, x, y, r, dmg, cd, src = '') {
+  damageArea(w, x, y, r, dmg0, cd, src = '') {
     for (const e of w.enemies) {
       if (!e.active || e.orbCd > 0) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
       if (dx * dx + dy * dy <= rr * rr) {
+        const [dmg, crit] = rollDmg(w, dmg0);
         const real = Math.min(dmg, e.hp);
         e.hp -= dmg;
+        if (crit) emit(w, 'crit', e.x, e.y, dmg);
         e.orbCd = cd;
         e.flash = 0.08;
         noteDamage(w, src, real);
@@ -292,6 +355,9 @@ export const KINDS = {
   rusher: { name: '冲锋兵', hp: 0.55, speed: 1.8, dmg: 0.7, r: 0.78, gem: 1, unlock: 15, weight: 0.45 },
   tank: { name: '肉盾', hp: 3.2, speed: 0.55, dmg: 1.6, r: 1.7, gem: 2, unlock: 30, weight: 0.25 },
   elite: { name: '精英', hp: 9, speed: 0.8, dmg: 2, r: 2.2, gem: 6, unlock: 30, weight: 0 },
+  shooter: { name: '射手', hp: 0.9, speed: 0.75, dmg: 1, r: 0.95, gem: 2, unlock: 25, weight: 0.3 },
+  splitter: { name: '分裂怪', hp: 1.6, speed: 0.8, dmg: 1.1, r: 1.25, gem: 2, unlock: 40, weight: 0.22 },
+  summoner: { name: '召唤者', hp: 2.4, speed: 0.5, dmg: 1.2, r: 1.35, gem: 3, unlock: 50, weight: 0.2 },
   boss: { name: 'Boss', hp: 32, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
 };
 
@@ -325,9 +391,9 @@ function spawnEnemy(w, kindId = null, angle = null) {
   e.x = w.player.x + Math.cos(ang) * dist;
   e.y = w.player.y + Math.sin(ang) * dist;
   // 玩家 dps 是复合成长（武器等级 × 词条倍率），敌人血量必须超线性，否则后期必然无敌
-  e.maxHp = (10 + wave * 9 + wave * wave * 7) * k.hp;
+  e.maxHp = (10 + wave * 9 + wave * wave * 7) * k.hp * w.stats.enemyHpMul;
   e.hp = e.maxHp;
-  e.speed = (55 + wave * 7 + w.rng() * 20) * k.speed;
+  e.speed = (55 + wave * 7 + w.rng() * 20) * k.speed * w.stats.enemySpeedMul;
   e.dmg = (6 + wave * 1.5) * k.dmg;
   e.r = (9 + Math.min(6, wave)) * k.r;
   e.gem = k.gem;
@@ -336,7 +402,7 @@ function spawnEnemy(w, kindId = null, angle = null) {
   e.lastBulletId = 0;
   e.flash = 0;
   e.state = 'chase';
-  e.stateT = id === 'boss' ? 2.5 : 0;
+  e.stateT = id === 'boss' ? 2.5 : id === 'shooter' ? 1.2 : id === 'summoner' ? 3 : 0;
   e.volley = 0;
   e.plan = '';
   e.rage = 0;
@@ -416,7 +482,7 @@ function tickBoss(w, e, dt) {
         const a = base + (i / shots) * Math.PI * 2;
         api.spawnBullet(w, e.x, e.y, {
           vx: Math.cos(a) * BOSS.shotSpeed, vy: Math.sin(a) * BOSS.shotSpeed,
-          dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true,
+          dmg: e.dmg * 0.55, pierce: 1, life: 3.4, r: 7, foe: true, src: 'bossBullet',
         });
       }
       emit(w, 'bossshoot', e.x, e.y, e.r);
@@ -536,6 +602,36 @@ export function update(w, dt, input) {
     const d = Math.hypot(ex, ey) || 1;
     if (e.kind === 'boss') {
       tickBoss(w, e, dt);
+    } else if (e.kind === 'shooter') {
+      // 保持中距离：太近就退，太远就靠，射程内就绕着走
+      e.stateT -= dt;
+      const want = 230;
+      if (d < want - 40) { e.x -= (ex / d) * e.speed * dt; e.y -= (ey / d) * e.speed * dt; }
+      else if (d > want + 40) { e.x += (ex / d) * e.speed * dt; e.y += (ey / d) * e.speed * dt; }
+      else { e.x += (-ey / d) * e.speed * 0.6 * dt; e.y += (ex / d) * e.speed * 0.6 * dt; }
+      if (e.stateT <= 0) {
+        e.stateT = 2.2;
+        const a = Math.atan2(ey, ex);
+        api.spawnBullet(w, e.x, e.y, {
+          vx: Math.cos(a) * 260, vy: Math.sin(a) * 260,
+          dmg: e.dmg * 0.8, pierce: 1, life: 3, r: 6, foe: true, src: 'shooterBullet',
+        });
+        emit(w, 'shoot', e.x, e.y, e.r);
+      }
+    } else if (e.kind === 'summoner') {
+      e.stateT -= dt;
+      e.x += (ex / d) * e.speed * dt;
+      e.y += (ey / d) * e.speed * dt;
+      if (e.stateT <= 0) {
+        e.stateT = 4.5;
+        for (const sign of [-1, 1]) {
+          const m = spawnEnemy(w, 'rusher');
+          if (!m) continue;
+          m.x = e.x + sign * (e.r + 20);
+          m.y = e.y;
+        }
+        emit(w, 'summon', e.x, e.y, e.r);
+      }
     } else {
       e.x += (ex / d) * e.speed * dt;
       e.y += (ey / d) * e.speed * dt;
@@ -593,7 +689,7 @@ export function update(w, dt, input) {
       if (fdx * fdx + fdy * fdy <= rr * rr) {
         b.active = false;
         if (p.invuln <= 0) {
-          noteTaken(w, 'bossBullet', Math.min(b.dmg, p.hp));
+          noteTaken(w, b.src || 'bossBullet', Math.min(b.dmg, p.hp));
           p.hp -= b.dmg;
           p.flash = 0.15;
           emit(w, 'hurt', p.x, p.y, b.dmg);
@@ -612,12 +708,13 @@ export function update(w, dt, input) {
           b.active = false;
           break;
         }
-        const real = Math.min(b.dmg, e.hp);
-        e.hp -= b.dmg;
+        const [bdmg, bcrit] = rollDmg(w, b.dmg);
+        const real = Math.min(bdmg, e.hp);
+        e.hp -= bdmg;
         e.flash = 0.08;
         e.lastBulletId = b.id;
         noteDamage(w, b.src, real);
-        emit(w, 'hit', e.x, e.y, b.dmg);
+        emit(w, bcrit ? 'crit' : 'hit', e.x, e.y, bdmg);
         // 击退：沿子弹方向推一小段，让命中有"接触感"
         const bl = Math.hypot(b.vx, b.vy) || 1;
         e.x += (b.vx / bl) * 7;
@@ -644,7 +741,10 @@ export function update(w, dt, input) {
     }
     if (d < p.r + g.r + 4) {
       g.active = false;
-      p.xp += g.value;
+      if (w.stats.gemBlast > 0) {
+        api.blast(w, p.x, p.y, 76, 26 * w.stats.gemBlast * w.stats.damageMul, 'gemBlast');
+      }
+      p.xp += g.value * w.stats.xpMul;
       if (p.xp >= p.xpNext) {
         p.xp -= p.xpNext;
         p.xpNext = Math.round(p.xpNext * 1.25 + 1);
