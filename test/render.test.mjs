@@ -250,3 +250,22 @@ test('右键和触摸双击都能触发冲刺且不炸', () => {
   fire(handlers.canvas, 'pointerup', { pointerId: 3, pointerType: 'touch' });
   runFrames(10);
 });
+
+test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
+  // 让它一路打到死
+  for (let i = 0; i < 200 * 60; i++) {
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1, 900000 + i * 16.7, 0);
+    const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    if (texts.includes('阵亡')) break;
+    calls.length = 0;
+  }
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('阵亡'), '没死成，结算面板没出来');
+  assert.ok(texts.includes('伤害来源'), '没画伤害来源');
+  assert.ok(texts.includes('承受伤害'), '没画承受伤害');
+  assert.ok(texts.includes('每 15 秒击杀'), '没画击杀柱图');
+  assert.ok(texts.some((t) => t.includes('追踪弹')), `伤害来源里没有武器名：${texts.slice(0, 20)}`);
+  assert.ok(texts.some((t) => /%/.test(t)), '没画占比数字');
+});

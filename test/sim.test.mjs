@@ -745,3 +745,86 @@ test('Boss 放弹幕产出的是敌对子弹（走 spawnBullet 这条真实路�
   // 玩家自己的武器也在开火，所以场上同时有非 foe 子弹是正常的
   assert.ok(foes.every((b) => b.dmg > 0), '敌对子弹伤害为 0');
 });
+
+// ---- 局内统计 ----
+test('伤害按武器分摊，单武器局里全部伤害都归它', () => {
+  const w = createWorld(5);
+  w.weapons = [{ id: 'lance', level: 2, timer: 0 }];
+  for (let i = 0; i < 40 * 60 && !w.over; i++) {
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    // 把经验球全部吞掉：一升级就会送来别的武器，武器集合就不纯了
+    for (const g of w.gems) g.active = false;
+    for (const f of w.fx) f.active = false;
+  }
+  assert.ok(w.log.dealt > 0, '没有记录任何输出');
+  assert.deepEqual(Object.keys(w.log.damageBy), ['lance'], `伤害来源不该有别人：${JSON.stringify(w.log.damageBy)}`);
+  assert.ok(Math.abs(w.log.damageBy.lance - w.log.dealt) < 1e-6, '分摊和总量不一致');
+});
+
+test('多武器局里每把都有自己的账，加起来等于总量', () => {
+  const w = createWorld(5);
+  w.weapons = [{ id: 'bolt', level: 2, timer: 0 }, { id: 'orbit', level: 2, timer: 0 }, { id: 'mine', level: 2, timer: 0 }];
+  for (let i = 0; i < 60 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) f.active = false;
+  }
+  const keys = Object.keys(w.log.damageBy).sort();
+  assert.deepEqual(keys, ['bolt', 'mine', 'orbit'], `应该三把都有输出：${keys}`);
+  const sum = Object.values(w.log.damageBy).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(sum - w.log.dealt) < 1e-6, `分摊 ${sum} 和总量 ${w.log.dealt} 不一致`);
+});
+
+test('记录的输出不会超过敌人实际掉的血（溢出伤害不算）', () => {
+  const w = createWorld(5);
+  w.weapons = [{ id: 'lance', level: 5, timer: 0 }]; // 高伤武器打低血杂兵，必然溢出
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 999;
+  for (const e of w.enemies) e.active = false;
+  const e = w.enemies[0];
+  e.active = true;
+  e.kind = 'grunt';
+  e.x = 100; e.y = 0; e.r = 10;
+  e.maxHp = e.hp = 10; e.speed = 0; e.dmg = 0; e.gem = 1;
+  e.hitCd = 99; e.orbCd = 0; e.lastBulletId = 0;
+  for (let i = 0; i < 120; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.log.dealt <= 10 + 1e-6, `只该记 10 点（怪的血量），实际记了 ${w.log.dealt}`);
+});
+
+test('承受伤害按来源分类：接触按兵种，弹幕单列', () => {
+  const w = createWorld(5);
+  w.spawnTimer = 999;
+  w.eliteTimer = 999;
+  w.bossTimer = 999;
+  for (const en of w.enemies) en.active = false;
+  const e = w.enemies[0];
+  e.active = true;
+  e.kind = 'tank';
+  e.x = 10; e.y = 0; e.r = 12;
+  e.maxHp = e.hp = 1e9; e.speed = 0; e.dmg = 7; e.gem = 1;
+  e.hitCd = 0; e.orbCd = 99; e.lastBulletId = 0;
+  const b = w.bullets[0];
+  b.active = true; b.id = 777; b.foe = true;
+  b.x = 30; b.y = 0; b.vx = -200; b.vy = 0;
+  b.dmg = 5; b.pierce = 1; b.life = 2; b.r = 6; b.blast = 0; b.flip = -1;
+  for (let i = 0; i < 120 && !w.over; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.log.takenBy.tank > 0, '没记录肉盾的接触伤害');
+  assert.ok(w.log.takenBy.bossBullet > 0, '没记录弹幕伤害');
+  assert.ok(Math.abs(Object.values(w.log.takenBy).reduce((a, b2) => a + b2, 0) - w.log.taken) < 1e-6);
+});
+
+test('每 15 秒击杀分桶之和等于总击杀', () => {
+  const w = createWorld(9);
+  for (let i = 0; i < 80 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    const a = (i / 60) * 1.6;
+    update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) f.active = false;
+  }
+  const sum = w.log.killsPer15s.reduce((a, b) => a + b, 0);
+  assert.equal(sum, w.kills, `分桶合计 ${sum} != 总击杀 ${w.kills}`);
+  assert.ok(w.log.killsPer15s.length >= 2, '至少该有两个时间桶');
+});

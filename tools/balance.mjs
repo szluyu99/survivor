@@ -147,6 +147,32 @@ for (const def of WEAPONS) {
   console.log(pad(def.name, 10), `${killed}/${rs.length} 局打死了第一只`, times.length ? `平均耗时到 ${clock(avg(times))}` : '（一局都没打死）');
 }
 
+console.log('\n=== 局内真实输出占比（三把武器同带，看谁在干活）===');
+{
+  const combos = [
+    ['bolt', 'orbit', 'mine'],
+    ['lance', 'chain', 'boomerang'],
+    ['bolt', 'lance', 'chain'],
+  ];
+  for (const ids of combos) {
+    const total = {};
+    let sum = 0;
+    for (const seed of SEEDS) {
+      const w = createWorld(seed);
+      w.weapons = ids.map((id) => ({ id, level: 2, timer: 0 }));
+      for (let i = 0; i < 90 * 60 && !w.over; i++) {
+        if (w.paused) chooseUpgrade(w, Math.floor(i / 97) % 3);
+        update(w, DT, circling(i));
+        for (const f of w.fx) f.active = false;
+      }
+      for (const [k, v] of Object.entries(w.log.damageBy)) { total[k] = (total[k] || 0) + v; sum += v; }
+    }
+    const parts = Object.entries(total).sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k} ${(v / sum * 100).toFixed(0)}%`);
+    console.log(pad(ids.join('+'), 26), parts.join('  '));
+  }
+}
+
 console.log('\n=== 冲刺对难度的影响（同 seed，其他条件一致）===');
 {
   const pick = (i) => Math.floor(i / 97) % 3;

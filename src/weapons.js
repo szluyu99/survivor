@@ -37,7 +37,7 @@ export const WEAPONS = [
           const ang = base + (i - (n - 1) / 2) * 0.18;
           api.spawnBullet(w, w.player.x, w.player.y, {
             vx: Math.cos(ang) * 480, vy: Math.sin(ang) * 480,
-            dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 1, life: 1.1, r: 5, color: P.bolt,
+            dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 1, life: 1.1, r: 5, color: P.bolt, src: this.id,
           });
         }
       }
@@ -71,7 +71,7 @@ export const WEAPONS = [
         const ox = w.player.x + Math.cos(ang) * rad;
         const oy = w.player.y + Math.sin(ang) * rad;
         api.addOrb(w, ox, oy, this.orbR);
-        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd);
+        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
       }
     },
   },
@@ -103,7 +103,7 @@ export const WEAPONS = [
         for (const a of dirs) {
           api.spawnBullet(w, w.player.x, w.player.y, {
             vx: Math.cos(a) * 700, vy: Math.sin(a) * 700,
-            dmg, pierce: 999, life: 0.9, r: 8, color: P.lance,
+            dmg, pierce: 999, life: 0.9, r: 8, color: P.lance, src: this.id,
           });
         }
       }
@@ -133,7 +133,7 @@ export const WEAPONS = [
           vx: 0, vy: 0,
           dmg: this.dmg(inst.level) * api.dmgMul(w),
           pierce: 1, life: 6, r: 7, color: P.mine,
-          blast: this.blast(inst.level),
+          blast: this.blast(inst.level), src: this.id,
         });
       }
     },
@@ -166,7 +166,7 @@ export const WEAPONS = [
           const ang = base + (i - (n - 1) / 2) * 0.5;
           api.spawnBullet(w, w.player.x, w.player.y, {
             vx: Math.cos(ang) * 340, vy: Math.sin(ang) * 340,
-            dmg, pierce: 999, life: 1.7, flip: 0.85, r: 7, color: P.boomerang,
+            dmg, pierce: 999, life: 1.7, flip: 0.85, r: 7, color: P.boomerang, src: this.id,
           });
         }
       }
@@ -200,7 +200,7 @@ export const WEAPONS = [
         for (const e of list) {
           api.chainFx(w, fx, fy, e.x, e.y);
           fx = e.x; fy = e.y;
-          api.hurtOne(w, e, dmg);
+          api.hurtOne(w, e, dmg, this.id);
         }
       }
     },
@@ -253,7 +253,7 @@ export const EVO_WEAPONS = [
         const oy = w.player.y + Math.sin(a) * rad;
         pts.push([ox, oy]);
         api.addOrb(w, ox, oy, this.orbR);
-        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd);
+        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
       }
       // 相邻光球之间连电弧：沿线取几个采样点做小范围伤害，视觉上也画这条线
       for (let i = 0; i < pts.length; i++) {
@@ -262,7 +262,7 @@ export const EVO_WEAPONS = [
         api.chainFx(w, x1, y1, x2, y2);
         for (let k = 1; k <= 3; k++) {
           const t = k / 4;
-          api.damageArea(w, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 11, arc, this.hitCd);
+          api.damageArea(w, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 11, arc, this.hitCd, this.id);
         }
       }
     },
@@ -294,7 +294,7 @@ export const EVO_WEAPONS = [
         const ang = Math.atan2(target.y - w.player.y, target.x - w.player.x);
         api.spawnBullet(w, w.player.x, w.player.y, {
           vx: Math.cos(ang) * 720, vy: Math.sin(ang) * 720,
-          dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 999, life: 0.95, r: 9, color: P.lance,
+          dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 999, life: 0.95, r: 9, color: P.lance, src: this.id,
         });
         // 顺着弹道埋几颗短命雷，形成一条走廊
         const n = this.mines(inst.level);
@@ -303,7 +303,7 @@ export const EVO_WEAPONS = [
           api.spawnBullet(w, w.player.x + Math.cos(ang) * d, w.player.y + Math.sin(ang) * d, {
             vx: 0, vy: 0,
             dmg: this.blastDmg(inst.level) * api.dmgMul(w),
-            pierce: 1, life: 1.4, r: 7, color: P.mine, blast: this.blast(inst.level),
+            pierce: 1, life: 1.4, r: 7, color: P.mine, blast: this.blast(inst.level), src: this.id,
           });
         }
       }
@@ -340,7 +340,7 @@ export const EVO_WEAPONS = [
           const a = base + (i - (n - 1) / 2) * 0.42;
           api.spawnBullet(w, w.player.x, w.player.y, {
             vx: Math.cos(a) * 320, vy: Math.sin(a) * 320,
-            dmg, pierce: this.pierce(inst.level), life: 2.6, r: 6, color: P.boomerang,
+            dmg, pierce: this.pierce(inst.level), life: 2.6, r: 6, color: P.boomerang, src: this.id,
             homing: this.turn(inst.level),
           });
         }

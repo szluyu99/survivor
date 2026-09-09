@@ -619,28 +619,108 @@ function drawChoices(w) {
   });
 }
 
+const TAKEN_NAME = {
+  grunt: '杂兵接触', rusher: '冲锋兵', tank: '肉盾', elite: '精英',
+  boss: 'Boss 接触/冲撞', bossBullet: 'Boss 弹幕',
+};
+
+// 横条：名字 + 条 + 占比，左右两栏共用
+function statBars(rows, x, y, w0, total, color) {
+  ctx.textAlign = 'left';
+  rows.forEach(([label, value], i) => {
+    const yy = y + i * 24;
+    const ratio = total > 0 ? value / total : 0;
+    ctx.fillStyle = P.bar;
+    ctx.fillRect(x, yy, w0, 14);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, yy, w0 * ratio, 14);
+    ctx.fillStyle = P.text;
+    ctx.font = '12px sans-serif';
+    ctx.fillText(label, x + 6, yy + 11);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = P.dim;
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText(`${Math.round(value)}  ${(ratio * 100).toFixed(0)}%`, x + w0 - 6, yy + 11);
+    ctx.textAlign = 'left';
+  });
+}
+
 function drawGameOver(w) {
   ctx.fillStyle = P.overlayHard;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center';
   ctx.fillStyle = P.hp;
-  ctx.font = 'bold 44px sans-serif';
-  ctx.fillText('阵亡', VIEW_W / 2, VIEW_H / 2 - 40);
+  ctx.font = 'bold 34px sans-serif';
+  ctx.fillText('阵亡', VIEW_W / 2, 52);
+
   ctx.fillStyle = P.text;
-  ctx.font = '20px ui-monospace, monospace';
-  ctx.fillText(`存活 ${clock(w.t)}   击杀 ${w.kills}   Lv.${w.player.level}`, VIEW_W / 2, VIEW_H / 2 + 4);
+  ctx.font = '18px ui-monospace, monospace';
+  ctx.fillText(`存活 ${clock(w.t)}   击杀 ${w.kills}   Lv.${w.player.level}   Boss ${w.bossCount} 只`, VIEW_W / 2, 82);
   if (best) {
     const isNew = Math.abs(best.t - w.t) < 1e-6;
     ctx.fillStyle = isNew ? P.warn : P.dimmer;
-    ctx.font = '16px ui-monospace, monospace';
-    ctx.fillText(isNew ? '新纪录！' : `最好 ${clock(best.t)}   击杀 ${best.kills}   Lv.${best.level}`, VIEW_W / 2, VIEW_H / 2 + 34);
+    ctx.font = '14px ui-monospace, monospace';
+    ctx.fillText(isNew ? '新纪录！' : `最好 ${clock(best.t)} / ${best.kills} 杀`, VIEW_W / 2, 104);
   }
+
+  const L = w.log;
+  // 左栏：哪把武器在干活
+  ctx.textAlign = 'left';
+  ctx.fillStyle = P.accent;
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('伤害来源', 70, 140);
+  const dmgRows = Object.entries(L.damageBy)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, v]) => [WEAPON_NAME[id] || id, v]);
+  if (dmgRows.length) statBars(dmgRows, 70, 152, 330, L.dealt, P.warn);
+  else {
+    ctx.fillStyle = P.faint;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('一滴伤害都没打出来', 70, 168);
+  }
+  if (w.evolved && w.evolved.length) {
+    ctx.fillStyle = P.evo;
+    ctx.font = '12px sans-serif';
+    ctx.fillText(`本局进化：${w.evolved.map((id) => WEAPON_NAME[id] || id).join('、')}`, 70, 152 + dmgRows.length * 24 + 16);
+  }
+
+  // 右栏：血是被谁打掉的
+  ctx.fillStyle = P.accent;
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('承受伤害', 520, 140);
+  const takenRows = Object.entries(L.takenBy)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, v]) => [TAKEN_NAME[id] || id, v]);
+  if (takenRows.length) statBars(takenRows, 520, 152, 330, L.taken, P.hp);
+
+  // 下方：每 15 秒击杀柱图
+  ctx.fillStyle = P.accent;
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('每 15 秒击杀', 70, 372);
+  const buckets = L.killsPer15s;
+  const maxK = Math.max(1, ...buckets);
+  const bw = Math.min(46, Math.floor(780 / Math.max(1, buckets.length)));
+  buckets.forEach((k, i) => {
+    const h = Math.round((k / maxK) * 74);
+    const x = 70 + i * bw;
+    ctx.fillStyle = P.bar;
+    ctx.fillRect(x, 386, bw - 4, 74);
+    ctx.fillStyle = P.xp;
+    ctx.fillRect(x, 386 + (74 - h), bw - 4, h);
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(k), x + (bw - 4) / 2, 472);
+    ctx.fillText(`${(i + 1) * 15}s`, x + (bw - 4) / 2, 484);
+    ctx.textAlign = 'left';
+  });
+
+  ctx.textAlign = 'center';
   ctx.fillStyle = P.dim;
-  ctx.font = '16px sans-serif';
-  ctx.fillText('按空格或点击重开', VIEW_W / 2, VIEW_H / 2 + 72);
+  ctx.font = '15px sans-serif';
+  ctx.fillText('按空格或点击重开', VIEW_W / 2, 516);
 }
 
-// 首屏：新玩家不知道攻击是自动的、不知道要捡蓝球，这三行必须先说清
 function drawTitle() {
   ctx.fillStyle = P.bg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);

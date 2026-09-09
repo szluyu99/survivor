@@ -56,7 +56,7 @@ export function createWorld(seed = 1) {
     enemies: pool(MAX_ENEMIES, () => ({ active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0, speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
       // 只有 Boss 用：行为状态机
       state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0 })),
-    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, color: '' })),
+    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
@@ -70,7 +70,28 @@ export function createWorld(seed = 1) {
     phase: 'normal',
     choices: null,
     evolved: [],
+    // 局内统计：给死亡结算面板用，同时也是我们唯一可靠的"真实 DPS"数据来源
+    log: { damageBy: {}, takenBy: {}, killsPer15s: [], dealt: 0, taken: 0 },
   };
+}
+
+function noteDamage(w, src, amount) {
+  if (!src || !(amount > 0)) return;
+  w.log.damageBy[src] = (w.log.damageBy[src] || 0) + amount;
+  w.log.dealt += amount;
+}
+
+function noteTaken(w, src, amount) {
+  if (!(amount > 0)) return;
+  w.log.takenBy[src] = (w.log.takenBy[src] || 0) + amount;
+  w.log.taken += amount;
+}
+
+function noteKill(w) {
+  const bucket = Math.floor(w.t / 15);
+  const arr = w.log.killsPer15s;
+  while (arr.length <= bucket) arr.push(0);
+  arr[bucket]++;
 }
 
 function emit(w, type, x, y, amount = 0) {
@@ -158,6 +179,7 @@ function dropGem(w, x, y, value = 1) {
 function killEnemy(w, e) {
   e.active = false;
   w.kills++;
+  noteKill(w);
   emit(w, e.kind === 'boss' ? 'bossdead' : 'kill', e.x, e.y, e.r);
   dropGem(w, e.x, e.y, e.gem);
 }
@@ -193,6 +215,7 @@ const api = {
     b.flip = opts.flip ?? -1;    // 剩余寿命低于这个值就反向飞（回旋镖）
     b.homing = opts.homing ?? 0; // >0 表示每秒最多转这么多弧度去追最近的敌人
     b.foe = opts.foe ?? false;   // 敌对子弹只打玩家。漏了这一行 Boss 弹幕会变成玩家子弹去打 Boss 自己
+    b.src = opts.src ?? '';      // 哪把武器打的，死亡结算要按武器分摊伤害
   },
   // 找最近的 n 个敌人，给闪电链这种多目标武器用
   nearestN(w, x, y, n, maxDist) {
@@ -208,22 +231,26 @@ const api = {
     return found.slice(0, n).map((o) => o.e);
   },
   // 单次范围伤害，无视 orbCd（爆炸不该被光环的冷却吃掉）
-  blast(w, x, y, r, dmg) {
+  blast(w, x, y, r, dmg, src = '') {
     emit(w, 'blast', x, y, r);
     for (const e of w.enemies) {
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
       if (dx * dx + dy * dy <= rr * rr) {
+        const real = Math.min(dmg, e.hp);
         e.hp -= dmg;
         e.flash = 0.1;
+        noteDamage(w, src, real);
         emit(w, 'hit', e.x, e.y, dmg);
         if (e.hp <= 0) killEnemy(w, e);
       }
     }
   },
-  hurtOne(w, e, dmg) {
+  hurtOne(w, e, dmg, src = '') {
+    const real = Math.min(dmg, e.hp);
     e.hp -= dmg;
     e.flash = 0.08;
+    noteDamage(w, src, real);
     emit(w, 'hit', e.x, e.y, dmg);
     if (e.hp <= 0) killEnemy(w, e);
   },
@@ -241,14 +268,16 @@ const api = {
     o.x = x; o.y = y; o.r = r;
   },
   // 持续伤害区域：每个敌人有独立冷却，不然一帧能被打十几下
-  damageArea(w, x, y, r, dmg, cd) {
+  damageArea(w, x, y, r, dmg, cd, src = '') {
     for (const e of w.enemies) {
       if (!e.active || e.orbCd > 0) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
       if (dx * dx + dy * dy <= rr * rr) {
+        const real = Math.min(dmg, e.hp);
         e.hp -= dmg;
         e.orbCd = cd;
         e.flash = 0.08;
+        noteDamage(w, src, real);
         emit(w, 'hit', e.x, e.y, dmg);
         if (e.hp <= 0) killEnemy(w, e);
       }
@@ -517,6 +546,7 @@ export function update(w, dt, input) {
     if (d < e.r + p.r && e.hitCd <= 0) {
       e.hitCd = 0.8;
       if (p.invuln > 0) continue; // 冲刺无敌：撞上了也不掉血，但接触冷却照走
+      noteTaken(w, e.kind, Math.min(e.dmg, p.hp));
       p.hp -= e.dmg;
       p.flash = 0.15;
       emit(w, 'hurt', p.x, p.y, e.dmg);
@@ -552,7 +582,7 @@ export function update(w, dt, input) {
       b.flip = -1;
     }
     if (b.life <= 0) {
-      if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg); // 地雷到期自爆
+      if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg, b.src); // 地雷到期自爆
       b.active = false;
       continue;
     }
@@ -563,6 +593,7 @@ export function update(w, dt, input) {
       if (fdx * fdx + fdy * fdy <= rr * rr) {
         b.active = false;
         if (p.invuln <= 0) {
+          noteTaken(w, 'bossBullet', Math.min(b.dmg, p.hp));
           p.hp -= b.dmg;
           p.flash = 0.15;
           emit(w, 'hurt', p.x, p.y, b.dmg);
@@ -577,13 +608,15 @@ export function update(w, dt, input) {
       const ddx = e.x - b.x, ddy = e.y - b.y;
       if (ddx * ddx + ddy * ddy <= rr * rr) {
         if (b.blast > 0) {
-          api.blast(w, b.x, b.y, b.blast, b.dmg);
+          api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
           b.active = false;
           break;
         }
+        const real = Math.min(b.dmg, e.hp);
         e.hp -= b.dmg;
         e.flash = 0.08;
         e.lastBulletId = b.id;
+        noteDamage(w, b.src, real);
         emit(w, 'hit', e.x, e.y, b.dmg);
         // 击退：沿子弹方向推一小段，让命中有"接触感"
         const bl = Math.hypot(b.vx, b.vy) || 1;
