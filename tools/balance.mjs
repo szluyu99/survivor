@@ -176,6 +176,34 @@ console.log('\n=== 局内真实输出占比（三把武器同带，看谁在干�
   }
 }
 
+console.log('\n=== 主动技能：会用 vs 不会用 ===');
+{
+  // 技能靠玩家手动放，脚本这里的策略是"一好了就放"，属于下限打法
+  function playWithSkills(seed, useSkills) {
+    const w = createWorld(seed);
+    for (let i = 0; i < 600 * 60 && !w.over; i++) {
+      if (w.paused) {
+        // 优先学技能，其余轮换
+        const k = w.choices.findIndex((c) => c.skill);
+        chooseUpgrade(w, k >= 0 ? k : Math.floor(i / 97) % 3);
+      }
+      let slot = null;
+      if (useSkills) {
+        const ready = w.skills.findIndex((s2) => s2.cd <= 0);
+        if (ready >= 0) slot = ready;
+      }
+      update(w, DT, { ...circling(i), dash: w.player.dashCd <= 0, skill: slot });
+      for (const f of w.fx) f.active = false;
+    }
+    return { t: w.t, kills: w.kills, skills: w.skills.map((s2) => `${s2.id}${s2.level}`).join('/') };
+  }
+  const on = SEEDS.map((s2) => playWithSkills(s2, true));
+  const off = SEEDS.map((s2) => playWithSkills(s2, false));
+  console.log(pad('一好就放', 10), `平均存活 ${clock(avg(on.map((r) => r.t)))}  平均击杀 ${avg(on.map((r) => r.kills)).toFixed(0)}`);
+  console.log(pad('学了不放', 10), `平均存活 ${clock(avg(off.map((r) => r.t)))}  平均击杀 ${avg(off.map((r) => r.kills)).toFixed(0)}`);
+  console.log(pad('', 10), `典型技能组合：${on.map((r) => r.skills || '无').slice(0, 3).join('，')}`);
+}
+
 console.log('\n=== 地图元素：贪宝箱 vs 不管宝箱 ===');
 {
   // 宝箱要走过去才能开，等于用清怪时间换一张免费卡，值不值得只能实测

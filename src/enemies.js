@@ -8,7 +8,7 @@ export function makeEnemy() {
   return {
     active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0,
     speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
-    state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0,
+    state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0,
   };
 }
 
@@ -68,6 +68,7 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   e.volley = 0;
   e.plan = '';
   e.rage = 0;
+  e.stun = 0;
   return e;
 }
 
@@ -79,7 +80,7 @@ const BOSS = {
 };
 
 function tickBoss(w, e, dt, ctx) {
-  const p = w.player;
+  const p = targetOf(w);
   const toP = Math.atan2(p.y - e.y, p.x - e.x);
   e.stateT -= dt;
 
@@ -188,8 +189,13 @@ export function tickWave(w, dt, ctx) {
 // 冲刺参数：0.16 秒冲出去，期间 0.3 秒无敌（比冲刺本身长一点，穿怪才不会刚出来就被贴脸）
 
 // 各兵种的行为分派。普通兵种就是直线追人，射手和召唤者有自己的小逻辑，Boss 走状态机
+// 敌人追的目标：有诱饵就追诱饵，否则追玩家
+function targetOf(w) {
+  return w.decoy && w.decoy.active ? w.decoy : w.player;
+}
+
 export function tickEnemy(w, e, dt, ctx) {
-  const p = w.player;
+  const p = targetOf(w);
   const ex = p.x - e.x, ey = p.y - e.y;
   const d = Math.hypot(ex, ey) || 1;
 

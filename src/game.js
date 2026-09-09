@@ -5,7 +5,7 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit } from './layout.js';
 import { createHud } from './hud.js';
 
 
@@ -55,8 +55,9 @@ const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, WEAPON_NA
 
 let world = createWorld(Date.now() & 0xffff);
 const keys = new Set();
-const input = { dx: 0, dy: 0, dash: false };
-let dashQueued = false; // 冲刺是边沿触发，按住不会连续冲
+const input = { dx: 0, dy: 0, dash: false, skill: null };
+let dashQueued = false;   // 冲刺是边沿触发，按住不会连续冲
+let skillQueued = null;   // 待释放的技能槽位，同样是边沿触发
 let mutedHint = false;
 let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
@@ -80,6 +81,11 @@ addEventListener('keydown', (e) => {
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') && started && !world.over && !world.paused && !uiPaused) {
     if (!e.repeat) dashQueued = true;
   }
+  // Q / E 放技能，边沿触发
+  if (!e.repeat && started && !world.over && !world.paused && !uiPaused) {
+    if (e.code === 'KeyQ') skillQueued = 0;
+    if (e.code === 'KeyE') skillQueued = 1;
+  }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
   if (world.paused && world.choices) {
@@ -92,7 +98,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 
 // 切窗口时 keyup 会丢，回来后角色会一直朝一个方向跑，必须清空
-addEventListener('blur', () => { keys.clear(); pointer = null; stick.active = false; dashQueued = false; });
+addEventListener('blur', () => { keys.clear(); pointer = null; stick.active = false; dashQueued = false; skillQueued = null; });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { keys.clear(); pointer = null; stick.active = false; }
 });
@@ -109,6 +115,12 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointer = viewPos(e);
   if (!wasStarted) { pointer = null; return; } // 首屏那一下只用来开始
+  const sb = skillBtnHit(pointer.x, pointer.y);
+  if (sb >= 0 && !world.over && !world.paused && !uiPaused) {
+    skillQueued = sb;
+    pointer = null;
+    return;
+  }
   if (inPauseBtn(pointer.x, pointer.y) && !world.over && !world.paused) {
     uiPaused = !uiPaused;
     pointer = null;
@@ -172,7 +184,9 @@ function readInput() {
   input.dx = dx;
   input.dy = dy;
   input.dash = dashQueued;
+  input.skill = skillQueued;
   dashQueued = false;
+  skillQueued = null;
   return input;
 }
 
@@ -287,6 +301,26 @@ function render(w) {
     }
     drawEntity('grunt', b.x - camX, b.y - camY, b.r, b.foe ? P.foeBullet : (b.color || P.bolt), 0, 1.5);
   }
+  // 诱饵：菱形轮廓 + 呼吸感，敌人会去打它
+  if (w.decoy.active) {
+    ctx.strokeStyle = P.decoy;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5 + 0.5 * Math.min(1, w.decoy.t);
+    shapePath('elite', w.decoy.x - camX, w.decoy.y - camY, 16, 0);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // 技能的扩散圆环
+  for (const o of fx.rings) {
+    if (!o.active) continue;
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = Math.max(0, o.life / 0.45);
+    ctx.beginPath();
+    ctx.arc(o.x - camX, o.y - camY, o.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   // 闪电链：一段一段的折线
   ctx.strokeStyle = P.chain;
   ctx.lineWidth = 2;
@@ -347,6 +381,10 @@ function render(w) {
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  if (w.slowT > 0) {
+    ctx.fillStyle = P.slowTint;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
   drawVignette();
 
   if (fxState.flash > 0) {

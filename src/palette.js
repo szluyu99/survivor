@@ -47,6 +47,13 @@ export const P = {
   blastSpark: '#ffc08a',  // 原来和冲锋兵同色，炸开时分不清是爆炸还是来怪
   levelSpark: '#b8f0ff',
 
+  // 主动技能
+  shock: '#a8f0ff',
+  slowTint: 'rgba(80, 140, 255, 0.10)',
+  decoy: '#ffd166',
+  skillReady: '#8ee89a',
+  skillCd: '#39415a',
+
   // 地图元素
   rock: '#2b3244',
   rockEdge: '#3d4760',

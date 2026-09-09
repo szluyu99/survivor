@@ -13,4 +13,18 @@ function cardHit(x, y) {
   return -1;
 }
 
-export { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn };
+// 右下角两个技能按钮，手机上要能点；键盘对应 Q / E
+const SKILL_BTN = [
+  { x: VIEW_W - 150, y: VIEW_H - 78, w: 62, h: 62, key: 'Q' },
+  { x: VIEW_W - 80, y: VIEW_H - 78, w: 62, h: 62, key: 'E' },
+];
+
+function skillBtnHit(x, y) {
+  for (let i = 0; i < SKILL_BTN.length; i++) {
+    const b = SKILL_BTN[i];
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return i;
+  }
+  return -1;
+}
+
+export { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit };

@@ -6,7 +6,8 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN } from './layout.js';
+import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 
 const WEAPON_NAME = Object.fromEntries(ALL_WEAPONS.map((x) => [x.id, x.name]));
 
@@ -110,6 +111,46 @@ export function createHud(ctx, deps) {
     ctx.fillStyle = P.dimmer;
     ctx.font = '12px sans-serif';
     ctx.fillText(uiPaused() ? '继续（ESC）' : '暂停/详情（ESC）', PAUSE_BTN.x + 10, PAUSE_BTN.y + 18);
+    drawSkillSlots(w);
+  }
+
+  // 技能槽：冷却用扇形扣掉，就绪时描边变亮
+  function drawSkillSlots(w) {
+    for (let i = 0; i < MAX_SKILL_SLOTS; i++) {
+      const b = SKILL_BTN[i];
+      const inst = w.skills[i];
+      const def = inst ? findSkill(inst.id) : null;
+      const ready = inst && inst.cd <= 0;
+      ctx.fillStyle = P.card;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      if (inst) {
+        const ratio = ready ? 0 : inst.cd / def.cd(inst.level);
+        ctx.fillStyle = P.skillCd;
+        ctx.fillRect(b.x, b.y, b.w, b.h * ratio); // 冷却从上往下退
+      }
+      ctx.strokeStyle = ready ? P.skillReady : P.btnLine;
+      ctx.lineWidth = ready ? 2 : 1;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.textAlign = 'center';
+      if (inst) {
+        ctx.fillStyle = ready ? P.text : P.dimmer;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(def.name, b.x + b.w / 2, b.y + 26);
+        ctx.font = '11px ui-monospace, monospace';
+        ctx.fillStyle = P.dimmer;
+        ctx.fillText(ready ? b.key : `${inst.cd.toFixed(1)}s`, b.x + b.w / 2, b.y + 46);
+        if (inst.level > 1) {
+          ctx.fillStyle = P.warn;
+          ctx.fillText(`Lv.${inst.level}`, b.x + b.w / 2, b.y + 58);
+        }
+      } else {
+        ctx.fillStyle = P.faint;
+        ctx.font = '11px sans-serif';
+        ctx.fillText('空', b.x + b.w / 2, b.y + 30);
+        ctx.fillText(b.key, b.x + b.w / 2, b.y + 46);
+      }
+      ctx.textAlign = 'left';
+    }
   }
 
   // 暂停面板：把装备和属性一次全摊开，不用猜
@@ -150,7 +191,30 @@ export function createHud(ctx, deps) {
         ctx.fillText(`下一级：${def.desc[inst.level]}`, 48, y);
       }
     }
-    const missing = WEAPONS.filter((d) => !w.weapons.some((x) => x.id === d.id));
+    // 技能
+  y += 30;
+  ctx.fillStyle = P.accent;
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText(`主动技能（${w.skills.length}/${MAX_SKILL_SLOTS}）`, 48, y);
+  if (!w.skills.length) {
+    y += 20;
+    ctx.fillStyle = P.faint;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('还没有技能，升级时可能出现「技能 · xx」', 48, y);
+  }
+  for (const inst of w.skills) {
+    const def = findSkill(inst.id);
+    y += 22;
+    ctx.fillStyle = P.skillReady;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`${def.name} Lv.${inst.level}/${def.maxLevel}`, 48, y);
+    y += 16;
+    ctx.fillStyle = P.dim;
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillText(def.info(inst.level), 48, y);
+  }
+
+  const missing = WEAPONS.filter((d) => !w.weapons.some((x) => x.id === d.id));
     if (missing.length && w.weapons.length < MAX_SLOTS) {
       y += 30;
       ctx.fillStyle = P.faint;
@@ -377,6 +441,7 @@ export function createHud(ctx, deps) {
       '攻击是自动的，你只需要走位',
       '捡蓝色经验球升级，每次升级三选一',
       'Shift / 空格 / 右键冲刺，短暂无敌可以穿怪（手机双击）',
+    'Q / E 放主动技能（升级时可以学，手机点右下角按钮）',
     ];
     lines.forEach((t, i) => ctx.fillText(t, cx, 280 + i * 26));
 

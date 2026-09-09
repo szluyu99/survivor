@@ -123,8 +123,8 @@ export const WEAPONS = [
     maxLevel: 5,
     desc: ['在脚下埋雷，触碰或到期爆炸', '爆炸范围 +22%', '伤害 +45%', '攻速 +30%', '范围 +18% 伤害 +35%'],
     dmg: T([36, 36, 52, 52, 70]),
-    rate: T([0.6, 0.6, 0.6, 0.8, 0.8]),
-    blast: T([46, 56, 56, 56, 66]),
+    rate: T([0.9, 0.9, 0.9, 1.2, 1.2]),
+    blast: T([56, 66, 66, 66, 78]),
     info(lv, w) {
       return [
         `爆炸 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)} 伤害，范围 ${this.blast(lv)}`,

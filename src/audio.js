@@ -104,6 +104,13 @@ export const sfx = {
     [440, 330, 220, 110].forEach((f, i) => tone({ freq: f, to: f * 0.6, type: 'square', dur: 0.3, gain: 0.22, delay: i * 0.11 }));
     noise({ dur: 0.8, gain: 0.22, hp: 150 });
   },
+  shock() {
+    tone({ freq: 320, to: 90, type: 'sawtooth', dur: 0.4, gain: 0.3 });
+    noise({ dur: 0.35, gain: 0.2, hp: 400 });
+  },
+  slow() { tone({ freq: 700, to: 180, type: 'triangle', dur: 0.6, gain: 0.2 }); },
+  magnet() { tone({ freq: 300, to: 900, type: 'triangle', dur: 0.3, gain: 0.16 }); },
+  decoy() { tone({ freq: 500, to: 260, type: 'square', dur: 0.2, gain: 0.16 }); },
   chest() {
     // 上行三音，和升级的琶音区分：这是"捡到东西"而不是"变强了"
     [659, 880, 1175].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.14, gain: 0.16, delay: i * 0.06 }));

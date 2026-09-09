@@ -4,6 +4,7 @@ import { findWeapon } from './weapons.js';
 import { rollChoices, TRAITS, CURSES } from './upgrades.js';
 import { KINDS, tickEnemy, tickSpawns, splitOnDeath, makeEnemy } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
+import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
 
 export { VIEW_W, VIEW_H };
@@ -14,6 +15,7 @@ export { TRAITS, CURSES };
 // 兵种表定义在 enemies.js，同样转出去
 export { KINDS };
 export { TERRAIN };
+export { SKILLS, MAX_SKILL_SLOTS };
 
 
 // 各种池子的上限。池满就丢弃新实体，宁可少生成也不动态扩容
@@ -67,6 +69,9 @@ export function createWorld(seed = 1) {
     choices: null,
     evolved: [],
     chests: 0,
+    skills: [],            // 手动释放的技能，最多 MAX_SKILL_SLOTS 个
+    slowT: 0, slowMul: 1,  // 时缓：全场敌人减速
+    decoy: { active: false, x: 0, y: 0, t: 0 }, // 诱饵：敌人改追它
     // 局内统计：给死亡结算面板用，同时也是我们唯一可靠的"真实 DPS"数据来源
     log: { damageBy: {}, takenBy: {}, killsPer15s: [], dealt: 0, taken: 0 },
   };
@@ -268,6 +273,12 @@ const enemyCtx = {
   spawnBullet: (w, x, y, opts) => api.spawnBullet(w, x, y, opts),
 };
 
+// 技能 use 拿到的能力集合：和 enemyCtx 一样，避免 skills.js 反向 import sim.js
+const skillCtx = {
+  emit,
+  blast: (w, x, y, r, dmg, src) => api.blast(w, x, y, r, dmg, src),
+};
+
 export const DASH = { time: 0.16, speed: 780, invuln: 0.3, cd: 3 };
 
 export function update(w, dt, input) {
@@ -277,6 +288,27 @@ export function update(w, dt, input) {
 
   if (p.dashCd > 0) p.dashCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
+
+  // 技能冷却与释放。input.skill 是槽位下标，边沿触发由渲染层负责
+  for (const inst of w.skills) if (inst.cd > 0) inst.cd -= dt;
+  if (input.skill !== undefined && input.skill !== null) {
+    const inst = w.skills[input.skill];
+    if (inst && inst.cd <= 0) {
+      const def = findSkill(inst.id);
+      def.use(w, inst.level, skillCtx);
+      inst.cd = def.cd(inst.level);
+    }
+  }
+
+  // 时缓与诱饵的倒计时
+  if (w.slowT > 0) {
+    w.slowT -= dt;
+    if (w.slowT <= 0) w.slowMul = 1;
+  }
+  if (w.decoy.active) {
+    w.decoy.t -= dt;
+    if (w.decoy.t <= 0) w.decoy.active = false;
+  }
 
   // 玩家移动
   let dx = input.dx, dy = input.dy;
@@ -326,13 +358,21 @@ export function update(w, dt, input) {
     if (!e.active) continue;
     const ex = p.x - e.x, ey = p.y - e.y;
     const d = Math.hypot(ex, ey) || 1;
+    if (e.stun > 0) {
+      // 眩晕期间不动也不咬人：震荡波的价值就在这个"解围窗口"
+      e.stun -= dt;
+      if (e.flash > 0) e.flash -= dt;
+      if (e.hitCd > 0) e.hitCd -= dt;
+      if (e.orbCd > 0) e.orbCd -= dt;
+      continue;
+    }
     const before = { x: e.x, y: e.y };
     tickEnemy(w, e, dt, enemyCtx);
-    // 泥地：把这一帧的位移按倍率折回去，效果等于减速
-    const emud = slowFactor(w, e.x, e.y);
-    if (emud < 1) {
-      e.x = before.x + (e.x - before.x) * emud;
-      e.y = before.y + (e.y - before.y) * emud;
+    // 泥地和时缓都是"把这一帧的位移按倍率折回去"，两者叠乘
+    const emul = slowFactor(w, e.x, e.y) * (w.slowT > 0 ? w.slowMul : 1);
+    if (emul < 1) {
+      e.x = before.x + (e.x - before.x) * emul;
+      e.y = before.y + (e.y - before.y) * emul;
     }
     resolveBlock(w, e, e.r);
     if (e.flash > 0) e.flash -= dt;
@@ -381,8 +421,27 @@ export function update(w, dt, input) {
       b.active = false;
       continue;
     }
-    // 撞到岩块：子弹被吃掉（敌对子弹同样被挡，所以岩块可以当掩体用）
-    if (bulletHitTerrain(w, b)) {
+    // 撞到岩块：子弹被吃掉（敌对子弹同样被挡，所以岩块可以当掩体用）。
+    // 但埋在地上的雷（速度为 0 的爆炸物）不算撞——它们是躺在地上的，
+    // 否则挨着岩块埋的雷一生成就被判定为撞墙引爆，地雷流派直接废掉
+    const laid = b.blast > 0 && b.vx === 0 && b.vy === 0;
+    if (laid) {
+      // 埋好的雷改成"接近就引爆"：靠子弹半径去碰的话，跑动中的玩家留下的雷
+      // 基本没有敌人会正好踩上（实测 20 秒只炸出 3 个击杀）
+      const trigger = b.blast * 0.5;
+      let boom = false;
+      for (const e of w.enemies) {
+        if (!e.active) continue;
+        const dx = e.x - b.x, dy = e.y - b.y, rr = trigger + e.r;
+        if (dx * dx + dy * dy <= rr * rr) { boom = true; break; }
+      }
+      if (boom) {
+        api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
+        b.active = false;
+        continue;
+      }
+    }
+    if (!laid && bulletHitTerrain(w, b)) {
       if (b.blast > 0) api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
       b.active = false;
       continue;

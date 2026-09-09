@@ -321,3 +321,19 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
   assert.ok(Math.abs(a - b) <= 1, `同样 5 秒真实时间，稳定帧推进 ${a}s、抖动帧推进 ${b}s`);
   assert.ok(a >= 4, `推进量看起来不对：${a}s`);
 });
+
+test('Q/E 和右下角按钮都能放技能，HUD 画出技能槽', () => {
+  fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+  runFrames(3);
+  calls.length = 0;
+  fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
+  runFrames(3);
+  fire(handlers.window, 'keydown', { code: 'KeyE', preventDefault() {} });
+  runFrames(3);
+  // 手机上点右下角按钮（坐标取第一个技能槽的中心）
+  fire(handlers.canvas, 'pointerdown', { pointerId: 21, pointerType: 'touch', clientX: 841, clientY: 493 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 21, pointerType: 'touch' });
+  runFrames(5);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('Q') && texts.includes('E'), `HUD 上没画技能槽键位：${texts.slice(0, 16)}`);
+});

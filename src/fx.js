@@ -11,6 +11,15 @@ export function createFx({ onDeath } = {}) {
   const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false }));
   const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
   const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn };
+  // 技能用的扩散圆环（震荡波、磁吸都用它）
+  const rings = Array.from({ length: 8 }, () => ({ active: false, x: 0, y: 0, r: 0, max: 0, life: 0, color: '#fff' }));
+
+  function ring(x, y, max, color) {
+    const o = take(rings);
+    if (!o) return;
+    o.active = true;
+    o.x = x; o.y = y; o.r = 0; o.max = max; o.life = 0.45; o.color = color;
+  }
 
   function take(list) {
     for (const o of list) if (!o.active) return o;
@@ -166,7 +175,13 @@ export function createFx({ onDeath } = {}) {
       b.life -= dt;
       if (b.life <= 0) b.active = false;
     }
-    if (fxState.shake > 0) fxState.shake = Math.max(0, fxState.shake - dt * 22);
+    for (const o of rings) {
+    if (!o.active) continue;
+    o.life -= dt;
+    if (o.life <= 0) { o.active = false; continue; }
+    o.r += (o.max - o.r) * Math.min(1, dt * 9); // 快速扩张后减速，像冲击波
+  }
+  if (fxState.shake > 0) fxState.shake = Math.max(0, fxState.shake - dt * 22);
     if (fxState.flash > 0) fxState.flash = Math.max(0, fxState.flash - dt * 1.6);
     if (fxState.warn > 0) fxState.warn = Math.max(0, fxState.warn - dt);
   }
@@ -175,10 +190,11 @@ export function createFx({ onDeath } = {}) {
     for (const p of particles) p.active = false;
     for (const n of numbers) n.active = false;
     for (const b of bolts) b.active = false;
+    for (const o of rings) o.active = false;
     fxState.shake = 0;
     fxState.flash = 0;
     fxState.warn = 0;
   }
 
-  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts };
+  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts, rings };
 }

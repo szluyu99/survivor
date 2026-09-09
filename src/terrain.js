@@ -24,7 +24,9 @@ export function makeTerrain() {
 
 // 宝箱要限量：一次只允许场上有一个，而且要过冷却。
 // 实测不加限制时，一个专门去捡箱子的玩家 120 秒能开 37 个——等于每 3 秒白送一张卡
-const CHEST_COOLDOWN = 20;
+// 冷却从 20 拉到 32：宝箱给的是"免费一张卡"，而卡池扩大后卡本身变稀缺，
+// 专门捡箱子的打法一局能拿 20 张，直接滚到 400 秒
+const CHEST_COOLDOWN = 32;
 
 // 岩块和泥地是"填充物"，宝箱走单独的名额（见 tickTerrain 里的说明）
 function pickFiller(w) {

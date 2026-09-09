@@ -627,13 +627,13 @@ test('素材达标后能抽到进化卡，选了就合成并腾出槽位', () =>
   assert.equal(findEvolution(w).length, 1, '应该刚好有一项可进化');
   // 进化卡只是权重高，不是必出（卡池里还有 9 词条 + 3 诅咒 + 武器升级），所以多抽几次
   let k = -1;
-  for (let round = 0; round < 6 && k < 0; round++) {
+  for (let round = 0; round < 10 && k < 0; round++) {
     const cards = rollUntilChoices(w);
     assert.ok(cards, '没能升级');
     k = cards.findIndex((c) => c.evo);
     if (k < 0) chooseUpgrade(w, cards.length - 1);
   }
-  assert.ok(k >= 0, '连抽 6 次都没出现进化卡，权重可能太低');
+  assert.ok(k >= 0, '连抽 10 次都没出现进化卡，权重可能太低');
   const slotsBefore = w.weapons.length;
   chooseUpgrade(w, k);
   const ids = w.weapons.map((x) => x.id);
@@ -649,14 +649,14 @@ test('三条进化线的素材配方都能走通', () => {
     const w = forceMaterials(7, evo.from);
     // 进化卡只是权重更高，不是必出，所以最多试 6 次升级
     let picked = false;
-    for (let round = 0; round < 6 && !picked; round++) {
+    for (let round = 0; round < 10 && !picked; round++) {
       const cards = rollUntilChoices(w);
       assert.ok(cards, `${evo.id} 第 ${round + 1} 次都没升级`);
       const k = cards.findIndex((c) => c.evo);
       if (k >= 0) { chooseUpgrade(w, k); picked = true; }
       else chooseUpgrade(w, cards.length - 1);
     }
-    assert.ok(picked, `${evo.id} 连续 6 次升级都没抽到进化卡，权重可能太低`);
+    assert.ok(picked, `${evo.id} 连续 10 次升级都没抽到进化卡，权重可能太低`);
     assert.ok(w.weapons.some((x) => x.id === evo.id), `${evo.id} 合成结果不对：${w.weapons.map((x) => x.id)}`);
   }
 });
@@ -1157,4 +1157,149 @@ test('TERRAIN 配置表里每种元素都有合法的半径区间', () => {
     assert.ok(Array.isArray(def.r) && def.r.length === 2, `${id} 的半径区间不对`);
     assert.ok(def.r[0] > 0 && def.r[1] >= def.r[0], `${id} 的半径区间不合法`);
   }
+});
+
+// ---- 主动技能 ----
+import { SKILLS, MAX_SKILL_SLOTS } from '../src/sim.js';
+import { findSkill } from '../src/skills.js';
+
+function withSkill(seed, id, level = 1) {
+  const w = createWorld(seed);
+  w.skills = [{ id, level, cd: 0 }];
+  return w;
+}
+
+function putEnemy(w, kind, x, y, extra = {}) {
+  const e = w.enemies.find((en) => !en.active);
+  Object.assign(e, {
+    active: true, kind, x, y, r: 12, maxHp: 1e9, hp: 1e9,
+    speed: 60, dmg: 6, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
+    state: 'chase', stateT: 0, volley: 0, plan: '', rage: 0, stun: 0, ...extra,
+  });
+  return e;
+}
+
+test('技能卡会进卡池，且槽位满了就不再出新技能', () => {
+  const w = createWorld(3);
+  let sawSkillCard = false;
+  for (let round = 0; round < 12 && w.skills.length < MAX_SKILL_SLOTS; round++) {
+    for (let i = 0; i < 300 * 60 && !w.paused && !w.over; i++) {
+      const a = (i / 60) * 1.6;
+      update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
+    }
+    if (!w.choices) break;
+    const k = w.choices.findIndex((c) => c.skill);
+    if (k >= 0) { sawSkillCard = true; chooseUpgrade(w, k); } else chooseUpgrade(w, 0);
+  }
+  assert.ok(sawSkillCard, '卡池里一直没出现技能卡');
+  assert.ok(w.skills.length <= MAX_SKILL_SLOTS, `技能槽超了：${w.skills.length}`);
+});
+
+test('震荡波把敌人推开并眩晕，眩晕期间不动也不咬人', () => {
+  const w = withSkill(5, 'shock');
+  w.weapons = []; // 卸掉武器：命中有击退，会把"眩晕期间不动"这条测糊
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  w.terrainTimer = 1e9;
+  for (const t of w.terrain) t.active = false;
+  for (const e of w.enemies) e.active = false;
+  const e = putEnemy(w, 'grunt', 40, 0, { dmg: 20 });
+  const hp0 = w.player.hp;
+  update(w, DT, { dx: 0, dy: 0, skill: 0 });
+  const dAfter = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+  assert.ok(dAfter > 150, `没被推开：距离只有 ${dAfter.toFixed(0)}px`);
+  assert.ok(e.stun > 0, '没有眩晕');
+  const posAtStun = { x: e.x, y: e.y };
+  for (let i = 0; i < 30; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(Math.hypot(e.x - posAtStun.x, e.y - posAtStun.y) < 1, '眩晕期间还在移动');
+  assert.equal(w.player.hp, hp0, '眩晕期间还在掉血');
+});
+
+test('时缓让敌人这段时间走得更少', () => {
+  function advance(useSkill) {
+    const w = withSkill(5, 'slow');
+    w.spawnTimer = 1e9;
+    w.eliteTimer = 1e9;
+    w.bossTimer = 1e9;
+    w.terrainTimer = 1e9;
+    for (const t of w.terrain) t.active = false;
+    for (const e of w.enemies) e.active = false;
+    const e = putEnemy(w, 'grunt', 300, 0, { dmg: 0, hitCd: 1e9 });
+    const x0 = e.x;
+    for (let i = 0; i < 60; i++) update(w, DT, { dx: 0, dy: 0, skill: useSkill && i === 0 ? 0 : null });
+    return x0 - e.x; // 朝玩家（原点）移动的距离
+  }
+  const normal = advance(false);
+  const slowed = advance(true);
+  assert.ok(slowed < normal * 0.5, `时缓没生效：正常走 ${normal.toFixed(0)}px，减速后 ${slowed.toFixed(0)}px`);
+});
+
+test('磁吸把场上经验球收进来', () => {
+  const w = withSkill(5, 'magnet');
+  w.spawnTimer = 1e9;
+  for (const g of w.gems) g.active = false;
+  for (let i = 0; i < 5; i++) {
+    const g = w.gems[i];
+    Object.assign(g, { active: true, x: 400 + i * 30, y: 0, r: 4, value: 1 });
+  }
+  const xp0 = w.player.xp;
+  update(w, DT, { dx: 0, dy: 0, skill: 0 });
+  for (let i = 0; i < 10; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.player.xp > xp0 || w.paused, '经验球没有被收走');
+  assert.equal(w.gems.filter((g) => g.active).length, 0, '还有球留在场上');
+});
+
+test('诱饵会把敌人的注意力引过去', () => {
+  const w = withSkill(5, 'decoy');
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 1e9;
+  w.terrainTimer = 1e9;
+  for (const t of w.terrain) t.active = false;
+  for (const e of w.enemies) e.active = false;
+  const e = putEnemy(w, 'grunt', 0, -300, { dmg: 0, hitCd: 1e9 });
+  // 先把诱饵放在玩家脚下，然后玩家跑远，敌人应该继续追诱饵
+  update(w, DT, { dx: 0, dy: 0, skill: 0 });
+  assert.equal(w.decoy.active, true, '诱饵没放出来');
+  for (let i = 0; i < 90; i++) update(w, DT, { dx: 1, dy: 0 });
+  const toDecoy = Math.hypot(e.x - w.decoy.x, e.y - w.decoy.y);
+  const toPlayer = Math.hypot(e.x - w.player.x, e.y - w.player.y);
+  assert.ok(toDecoy < toPlayer, `敌人没去追诱饵：离诱饵 ${toDecoy.toFixed(0)}，离玩家 ${toPlayer.toFixed(0)}`);
+});
+
+test('技能有冷却，连按只生效一次', () => {
+  const w = withSkill(5, 'shock');
+  w.spawnTimer = 1e9;
+  for (const e of w.enemies) e.active = false;
+  let casts = 0;
+  for (let i = 0; i < 4 * 60; i++) {
+    update(w, DT, { dx: 0, dy: 0, skill: 0 }); // 每帧都按
+    for (const f of w.fx) { if (f.active && f.type === 'shock') casts++; f.active = false; }
+  }
+  assert.equal(casts, 1, `4 秒内放了 ${casts} 次，冷却没起作用`);
+  assert.ok(w.skills[0].cd > 0);
+});
+
+test('技能等级不会超过 maxLevel，且每级都有文案', () => {
+  for (const def of SKILLS) {
+    assert.equal(def.desc.length, def.maxLevel, `${def.id} 的 desc 条数和 maxLevel 不一致`);
+    for (let lv = 1; lv <= def.maxLevel; lv++) {
+      const line = def.info(lv);
+      assert.ok(line && !line.includes('undefined') && !line.includes('NaN'), `${def.id} Lv.${lv} 面板文案有问题：${line}`);
+      assert.ok(def.cd(lv) > 0, `${def.id} Lv.${lv} 冷却不合法`);
+    }
+  }
+});
+
+test('冷却结束后可以再放', () => {
+  const w = withSkill(5, 'magnet');
+  const def = findSkill('magnet');
+  update(w, DT, { dx: 0, dy: 0, skill: 0 });
+  assert.ok(w.skills[0].cd > 0);
+  for (let i = 0; i < Math.ceil(def.cd(1) * 60) + 5; i++) update(w, DT, { dx: 0, dy: 0 });
+  assert.ok(w.skills[0].cd <= 0, '冷却没走完');
+  for (const f of w.fx) f.active = false;
+  update(w, DT, { dx: 0, dy: 0, skill: 0 });
+  assert.ok(w.fx.some((f) => f.active && f.type === 'magnet'), '冷却结束后放不出来');
 });
