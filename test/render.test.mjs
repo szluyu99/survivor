@@ -383,3 +383,13 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
   fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(5);
 });
+
+test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没声没画面）', async () => {
+  const { FX_EVENTS } = await import('../src/fx-events.js');
+  const { createFx } = await import('../src/fx.js');
+  const fx = createFx({});
+  const missing = FX_EVENTS.filter((t) => typeof fx.handlers[t] !== 'function');
+  assert.deepEqual(missing, [], `这些事件没有表现层处理：${missing.join(', ')}`);
+  const extra = Object.keys(fx.handlers).filter((t) => !FX_EVENTS.includes(t));
+  assert.deepEqual(extra, [], `这些处理没有对应的登记项（可能是改名后的残留）：${extra.join(', ')}`);
+});

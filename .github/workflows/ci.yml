@@ -17,7 +17,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 跑测试（逻辑层 + 渲染层烟测）
+      - name: 跑测试（逻辑层 + 渲染层烟测 + 内容契约）
         run: npm test
+      - name: 内容表校验
+        run: npm run validate
       - name: 平衡回归报告（只输出，不做断言）
         run: npm run balance

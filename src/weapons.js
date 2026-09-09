@@ -457,6 +457,9 @@ export function findEvolution(w) {
   }));
 }
 
+// 建索引而不是每次 Array.find：findWeapon 在热路径上（每帧对每把武器查一次）
+const BY_ID = new Map(ALL_WEAPONS.map((d) => [d.id, d]));
+
 export function findWeapon(id) {
-  return ALL_WEAPONS.find((x) => x.id === id);
+  return BY_ID.get(id);
 }

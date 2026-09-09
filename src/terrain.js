@@ -2,21 +2,23 @@
 // 地图是无限的，所以这些东西不是"关卡摆好的"，而是围着玩家动态生成、走远了回收。
 // 和 enemies.js 一样，这个模块不 import sim.js，需要的能力由 ctx 注入。
 
+import { TERRAIN_TUNING as T } from './tuning.js';
+
 export const TERRAIN = {
   rock: { name: '岩块', r: [26, 44], blocks: true },
   // 宝箱不挡任何东西：玩家走上去就开。之前设成实心 + 需要打伤害，
   // 但自动攻击只锁敌人，玩家根本没法主动瞄宝箱，结果一局都开不了
   chest: { name: '宝箱', r: [17, 17], blocks: false },
-  mud: { name: '泥地', r: [55, 95], blocks: false, slow: 0.55 },
+  mud: { name: '泥地', r: [55, 95], blocks: false, slow: T.mudSlow },
 };
 
 // 生成环：在玩家周围这个距离带上生成，走出回收半径就回收。
 // 宝箱要生成得近一些——屏幕半宽是 480，太远的话玩家根本看不见，也就不会为它绕路
-const SPAWN_MIN = 420;
-const SPAWN_MAX = 760;
-const CHEST_SPAWN = [300, 470];
-const RECYCLE = 1100;
-const MAX_LIVE = 26;
+const SPAWN_MIN = T.spawnMin;
+const SPAWN_MAX = T.spawnMax;
+const CHEST_SPAWN = [T.chestSpawnMin, T.chestSpawnMax];
+const RECYCLE = T.recycle;
+const MAX_LIVE = T.maxFillers;
 
 export function makeTerrain() {
   return { active: false, kind: 'rock', x: 0, y: 0, r: 30, hp: 0, maxHp: 0, seed: 0 };
@@ -26,11 +28,11 @@ export function makeTerrain() {
 // 实测不加限制时，一个专门去捡箱子的玩家 120 秒能开 37 个——等于每 3 秒白送一张卡
 // 冷却从 20 拉到 32：宝箱给的是"免费一张卡"，而卡池扩大后卡本身变稀缺，
 // 专门捡箱子的打法一局能拿 20 张，直接滚到 400 秒
-const CHEST_COOLDOWN = 32;
+const CHEST_COOLDOWN = T.chestCooldown;
 
 // 岩块和泥地是"填充物"，宝箱走单独的名额（见 tickTerrain 里的说明）
 function pickFiller(w) {
-  return w.rng() < 0.68 ? 'rock' : 'mud';
+  return w.rng() < T.rockShare ? 'rock' : 'mud';
 }
 
 function spawnTerrain(w, ctx, kind) {
@@ -71,7 +73,7 @@ export function tickTerrain(w, dt, ctx) {
   // 填充物按间隔补充，保持场上密度
   w.terrainTimer -= dt;
   if (w.terrainTimer <= 0) {
-    w.terrainTimer += 0.45;
+    w.terrainTimer += T.fillerInterval;
     if (fillers < MAX_LIVE) spawnTerrain(w, ctx, pickFiller(w));
   }
 }

@@ -55,52 +55,142 @@ export function createFx({ onDeath } = {}) {
   }
 
   // 消费逻辑层这一帧登记的事件，转成画面和声音
-  function consumeFx(w) {
-    for (const f of w.fx) {
-      if (!f.active) continue;
-      if (f.type === 'crit') {
-        burst(f.x, f.y, 6, P.warn, 130, 2.5);
-        popNumber(f.x, f.y - 14, `${Math.round(f.amount)}!`, true);
-        sfx.crit();
-      } else if (f.type === 'hit') {
-        burst(f.x, f.y, 3, P.hitSpark, 90, 2);
-        popNumber(f.x, f.y - 12, Math.round(f.amount));
-        sfx.hit();
-      } else if (f.type === 'kill') {
-        burst(f.x, f.y, 10, P.killSpark, 170, 3);
-        fxState.shake = Math.max(fxState.shake, 1.6);
-        sfx.kill();
-      } else if (f.type === 'hurt') {
-        burst(f.x, f.y, 8, P.hp, 130, 3);
-        fxState.shake = Math.max(fxState.shake, 5);
-        sfx.hurt();
-      } else if (f.type === 'levelup') {
-        burst(f.x, f.y, 20, P.levelSpark, 220, 3);
-        fxState.flash = 0.22;
-        sfx.levelup();
-      } else if (f.type === 'dead') {
-        burst(f.x, f.y, 40, P.hitFlash, 260, 4);
-        fxState.shake = 14;
-        sfx.dead();
-        if (onDeath) onDeath(w);
-      } else if (f.type === 'dash') {
-        burst(f.x, f.y, 12, P.playerRing, 150, 2.5);
-        sfx.dash();
-      } else if (f.type === 'boss') {
-        fxState.warn = 1.8;
-        fxState.warnText = 'BOSS 出现';
-        fxState.warnColor = P.enemy.boss;
-        fxState.shake = Math.max(fxState.shake, 8);
-        sfx.boss();
-      } else if (f.type === 'bosstell') {
-        sfx.bossTell();
-      } else if (f.type === 'bossshoot') {
-        burst(f.x, f.y, 8, P.foeBullet, 120, 3);
-        sfx.bossShoot();
-      } else if (f.type === 'bosssummon') {
-        burst(f.x, f.y, 16, P.enemy.rusher, 200, 3);
-        sfx.bossShoot();
-      } else if (f.type === 'interrupt') {
+  // 事件 → 表现的处理表。用表而不是 if/else 链，是为了能被测试检查"有没有漏接"
+  const handlers = {
+    hit: (f) => {
+      burst(f.x, f.y, 3, P.hitSpark, 90, 2);
+      popNumber(f.x, f.y - 12, Math.round(f.amount));
+      sfx.hit();
+    },
+    crit: (f) => {
+      burst(f.x, f.y, 6, P.warn, 130, 2.5);
+      popNumber(f.x, f.y - 14, `${Math.round(f.amount)}!`, true);
+      sfx.crit();
+    },
+    kill: (f) => {
+      burst(f.x, f.y, 10, P.killSpark, 170, 3);
+      fxState.shake = Math.max(fxState.shake, 1.6);
+      sfx.kill();
+    },
+    hurt: (f) => {
+      burst(f.x, f.y, 8, P.hp, 130, 3);
+      fxState.shake = Math.max(fxState.shake, 5);
+      sfx.hurt();
+    },
+    levelup: (f) => {
+      burst(f.x, f.y, 20, P.levelSpark, 220, 3);
+      fxState.flash = 0.22;
+      sfx.levelup();
+    },
+    dead: (f, w) => {
+      burst(f.x, f.y, 40, P.hitFlash, 260, 4);
+      fxState.shake = 14;
+      sfx.dead();
+      if (onDeath) onDeath(w);
+    },
+    blast: (f) => {
+      burst(f.x, f.y, 14, P.blastSpark, 220, 3);
+      fxState.shake = Math.max(fxState.shake, 3);
+      sfx.blast();
+    },
+    chain: (f) => {
+      const b = take(bolts);
+      if (b) {
+        b.active = true;
+        b.x1 = f.x; b.y1 = f.y; b.x2 = f.x2; b.y2 = f.y2;
+        b.life = 0.14;
+      }
+      sfx.chain();
+    },
+
+    // 玩家动作
+    dash: (f) => {
+      burst(f.x, f.y, 12, P.playerRing, 150, 2.5);
+      sfx.dash();
+    },
+    shock: (f) => {
+      ring(f.x, f.y, f.amount, P.shock);
+      burst(f.x, f.y, 24, P.shock, 260, 3);
+      fxState.shake = Math.max(fxState.shake, 8);
+      sfx.shock();
+    },
+    slow: () => {
+      fxState.flash = 0.12;
+      sfx.slow();
+    },
+    magnet: (f) => {
+      ring(f.x, f.y, 260, P.gem);
+      sfx.magnet();
+    },
+    decoy: (f) => {
+      burst(f.x, f.y, 14, P.decoy, 150, 3);
+      sfx.decoy();
+    },
+
+    // 敌人与波次
+    elite: () => {
+      fxState.warn = 1.2;
+      fxState.warnText = '精英出现';
+      fxState.warnColor = P.warn;
+      sfx.elite();
+    },
+    surge: () => {
+      fxState.warn = 1.4;
+      fxState.warnText = '冲锋来袭';
+      fxState.warnColor = P.danger;
+      fxState.shake = Math.max(fxState.shake, 6);
+      sfx.surge();
+    },
+    calm: () => { /* 喘息期只在 HUD 上标注，不需要额外表现 */ },
+    split: (f) => {
+      burst(f.x, f.y, 14, P.enemy.splitter, 190, 3);
+      sfx.hit();
+    },
+    shoot: (f) => {
+      burst(f.x, f.y, 4, P.foeBullet, 90, 2);
+      sfx.bossShoot();
+    },
+    summon: (f) => {
+      burst(f.x, f.y, 10, P.enemy.summoner, 150, 3);
+      sfx.bossShoot();
+    },
+
+    // Boss
+    boss: () => {
+      fxState.warn = 1.8;
+      fxState.warnText = 'BOSS 出现';
+      fxState.warnColor = P.enemy.boss;
+      fxState.shake = Math.max(fxState.shake, 8);
+      sfx.boss();
+    },
+    bosstell: () => sfx.bossTell(),
+    bossshoot: (f) => {
+      burst(f.x, f.y, 8, P.foeBullet, 120, 3);
+      sfx.bossShoot();
+    },
+    bosssummon: (f) => {
+      burst(f.x, f.y, 16, P.enemy.rusher, 200, 3);
+      sfx.bossShoot();
+    },
+    bossrage: (f) => {
+      burst(f.x, f.y, 26, P.bossRage, 240, 4);
+      fxState.shake = Math.max(fxState.shake, 9);
+      fxState.flash = 0.22;
+      fxState.warn = 1.4;
+      fxState.warnText = 'BOSS 狂暴';
+      fxState.warnColor = P.bossRage;
+      sfx.bossRage();
+    },
+    bossdead: (f) => {
+      burst(f.x, f.y, 46, P.enemy.boss, 300, 4.5);
+      fxState.shake = Math.max(fxState.shake, 12);
+      fxState.flash = 0.3;
+      fxState.warn = 1.4;
+      fxState.warnText = 'BOSS 倒下';
+      fxState.warnColor = P.warn;
+      sfx.bossDead();
+    },
+    interrupt: (f) => {
       ring(f.x, f.y, f.amount * 3, P.interrupt);
       burst(f.x, f.y, 26, P.interrupt, 240, 3);
       fxState.shake = Math.max(fxState.shake, 7);
@@ -109,55 +199,21 @@ export function createFx({ onDeath } = {}) {
       fxState.warnText = '打断！';
       fxState.warnColor = P.interrupt;
       sfx.interrupt();
-    } else if (f.type === 'bossrage') {
-        burst(f.x, f.y, 26, P.bossRage, 240, 4);
-        fxState.shake = Math.max(fxState.shake, 9);
-        fxState.flash = 0.22;
-        fxState.warn = 1.4;
-        fxState.warnText = 'BOSS 狂暴';
-        fxState.warnColor = P.bossRage;
-        sfx.bossRage();
-      } else if (f.type === 'bossdead') {
-        burst(f.x, f.y, 46, P.enemy.boss, 300, 4.5);
-        fxState.shake = Math.max(fxState.shake, 12);
-        fxState.flash = 0.3;
-        fxState.warn = 1.4;
-        fxState.warnText = 'BOSS 倒下';
-        fxState.warnColor = P.warn;
-        sfx.bossDead();
-      } else if (f.type === 'split') {
-        burst(f.x, f.y, 14, P.enemy.splitter, 190, 3);
-        sfx.hit();
-      } else if (f.type === 'shoot') {
-        burst(f.x, f.y, 4, P.foeBullet, 90, 2);
-        sfx.bossShoot();
-      } else if (f.type === 'summon') {
-        burst(f.x, f.y, 10, P.enemy.summoner, 150, 3);
-        sfx.bossShoot();
-      } else if (f.type === 'elite') {
-        fxState.warn = 1.2;
-        fxState.warnText = '精英出现';
-        fxState.warnColor = P.warn;
-        sfx.elite();
-      } else if (f.type === 'surge') {
-        fxState.warn = 1.4;
-        fxState.warnText = '冲锋来袭';
-        fxState.warnColor = P.danger;
-        fxState.shake = Math.max(fxState.shake, 6);
-        sfx.surge();
-      } else if (f.type === 'blast') {
-        burst(f.x, f.y, 14, P.blastSpark, 220, 3);
-        fxState.shake = Math.max(fxState.shake, 3);
-        sfx.blast();
-      } else if (f.type === 'chain') {
-        const b = take(bolts);
-        if (b) {
-          b.active = true;
-          b.x1 = f.x; b.y1 = f.y; b.x2 = f.x2; b.y2 = f.y2;
-          b.life = 0.14;
-        }
-        sfx.chain();
-      }
+    },
+
+    // 地图
+    chest: (f) => {
+      burst(f.x, f.y, 22, P.chest, 200, 3);
+      fxState.flash = 0.18;
+      sfx.chest();
+    },
+  };
+
+  function consumeFx(w) {
+    for (const f of w.fx) {
+      if (!f.active) continue;
+      const h = handlers[f.type];
+      if (h) h(f, w);
       f.active = false;
     }
   }
@@ -205,5 +261,5 @@ export function createFx({ onDeath } = {}) {
     fxState.warn = 0;
   }
 
-  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts, rings };
+  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts, rings, handlers };
 }

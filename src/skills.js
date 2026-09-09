@@ -98,6 +98,8 @@ export const SKILLS = [
   },
 ];
 
+const BY_ID = new Map(SKILLS.map((d) => [d.id, d]));
+
 export function findSkill(id) {
-  return SKILLS.find((s) => s.id === id);
+  return BY_ID.get(id);
 }

@@ -2,6 +2,7 @@
 // 逻辑层的其他部分只通过 rollChoices / chooseUpgrade 和这里打交道。
 import { WEAPONS, MAX_SLOTS, findWeapon, findEvolution } from './weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
+import { CARDS } from './tuning.js';
 
 export const TRAITS = [
   { id: 'damage', name: '狠', desc: '全体伤害 +25%', apply: (w) => { w.stats.damageMul *= 1.25; } },
@@ -64,7 +65,7 @@ export function rollChoices(w) {
       // 武器升级放两份：卡池扩到 ~25 项之后，核心成长曲线被稀释得太狠——
       // 实测一局 8 次升级下来武器常常还停在 1-2 级，平均存活从 118s 掉到 73s
       const card = { key: `weapon:${def.id}`, name: `${def.name} Lv.${inst.level + 1}`, desc: def.desc[inst.level], apply: (x) => upgradeWeapon(x, def.id) };
-      bag.push(card, card);
+      for (let n = 0; n < CARDS.weaponCopies; n++) bag.push(card);
     }
   }
   if (w.weapons.length < MAX_SLOTS) {
@@ -79,7 +80,7 @@ export function rollChoices(w) {
     const card = { key: `evo:${evo.id}`, name: `进化 · ${def.name}`, desc: `${parts} → ${def.name}`, evo: true, apply: (x) => evolveWeapon(x, evo) };
     // 放六份：卡池已经涨到 ~25 项（9 词条 + 3 诅咒 + 4 技能 + 武器升级/新武器），
     // 份数不跟着涨就会经常整局抽不到，而进化本该是一局里的高光时刻
-    bag.push(card, card, card, card);
+    for (let n = 0; n < CARDS.evoCopies; n++) bag.push(card);
   }
   // 主动技能：没学过的（槽位没满时）和已学的升级
   for (const inst of w.skills) {

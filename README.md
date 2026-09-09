@@ -16,7 +16,7 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层测试 + 渲染层烟测（106 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约（115 个）
 npm run balance    # 平衡回归报告：武器强度、局长、兵种出场、帧率敏感度、单帧耗时
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 ```
@@ -37,6 +37,12 @@ node tools/make-og.mjs   # 重新生成分享卡片图 og.png
   能力由 sim 通过 ctx 注入。
 - `src/terrain.js` —— 地图元素：岩块、泥地、宝箱。地图是无限的，所以它们围着玩家动态
   生成、走远回收；同样不 import sim.js，能力由 ctx 注入。
+- `src/tuning.js` —— **所有可调数值集中在这里**（玩家属性、冲刺、经验曲线、刷怪与难度、
+  波次、Boss 行为、地形、选卡次数）。改任何一个都可能动平衡，改完跑 `npm run balance` 对比。
+- `src/validate.js` —— 内容表校验：desc 条数对不上 maxLevel、缺 `info()`/`tick()`、
+  进化配方指向不存在的武器等，都在这里一次性报出来。
+- `src/fx-events.js` —— fx 事件类型的唯一登记表。`emit()` 会校验类型，
+  测试会检查每种事件都有渲染层处理。
 - `src/pool.js` —— 对象池与确定性随机。
 - `src/view.js` —— 逻辑视野尺寸常量，单独成文件避免循环 import。
 
@@ -51,6 +57,15 @@ node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 
 主循环用**固定步长**（逻辑恒定 1/60，渲染用真实 dt）。之前是变步长，同一个 seed 在
 30/60/144fps 下能跑出 441s / 113s / 77s 三种结果，平衡数据完全不可比。
+
+## 加内容的约定
+
+- 加武器 / 技能 / 兵种 / 地形：往对应模块的表里加一项即可，不用改 `sim.js`
+- 调数值：只改 `tuning.js`，然后 `npm run balance` 对比前后
+- 新增 fx 事件：先加进 `fx-events.js` 的登记表，否则 `emit()` 会直接抛错；
+  再去 `fx.js` 的 `handlers` 里加处理，否则契约测试会失败
+- 写测试：用 `test/fixtures.mjs` 里的 `labWorld` / `putEnemy` / `putTerrain` / `run`，
+  不要再各写一遍造实体的代码
 
 ## 玩法
 

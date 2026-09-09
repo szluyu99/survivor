@@ -2,6 +2,7 @@
 // 这个模块不 import sim.js——需要的能力（生成子弹、登记 fx 事件、从池里取对象）
 // 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
 import { VIEW_W, VIEW_H } from './view.js';
+import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
 
 // 敌人对象的形状。只有 Boss 会用到后面那几个状态机字段
 export function makeEnemy() {
@@ -23,18 +24,19 @@ export const KINDS = {
   boss: { name: 'Boss', hp: 32, speed: 0.55, dmg: 2.6, r: 4.2, gem: 24, unlock: 45, weight: 0 },
 };
 
-export function pickKind(w) {
+export // 兵种表转成数组缓存一次：pickKind 每次刷怪都要遍历，for...in 每次都要枚举键
+const KIND_LIST = Object.entries(KINDS).map(([id, k]) => ({ id, ...k }));
+
+function pickKind(w) {
   let total = 0;
-  for (const id in KINDS) {
-    const k = KINDS[id];
+  for (const k of KIND_LIST) {
     if (k.weight > 0 && w.t >= k.unlock) total += k.weight;
   }
   let r = w.rng() * total;
-  for (const id in KINDS) {
-    const k = KINDS[id];
+  for (const k of KIND_LIST) {
     if (k.weight <= 0 || w.t < k.unlock) continue;
     r -= k.weight;
-    if (r <= 0) return id;
+    if (r <= 0) return k.id;
   }
   return 'grunt';
 }
@@ -46,25 +48,25 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   const k = KINDS[id];
   // 在视野外一圈随机位置刷怪
   const ang = angle === null ? w.rng() * Math.PI * 2 : angle;
-  const dist = Math.max(VIEW_W, VIEW_H) * 0.62;
-  const wave = w.t / 55; // 每 55 秒强化一档
+  const dist = Math.max(VIEW_W, VIEW_H) * SPAWN.ringFactor;
+  const wave = w.t / SPAWN.waveSeconds;
   e.active = true;
   e.kind = id;
   e.x = w.player.x + Math.cos(ang) * dist;
   e.y = w.player.y + Math.sin(ang) * dist;
   // 玩家 dps 是复合成长（武器等级 × 词条倍率），敌人血量必须超线性，否则后期必然无敌
-  e.maxHp = (10 + wave * 9 + wave * wave * 7) * k.hp * w.stats.enemyHpMul;
+  e.maxHp = (SPAWN.hpBase + wave * SPAWN.hpLinear + wave * wave * SPAWN.hpQuad) * k.hp * w.stats.enemyHpMul;
   e.hp = e.maxHp;
-  e.speed = (55 + wave * 7 + w.rng() * 20) * k.speed * w.stats.enemySpeedMul;
-  e.dmg = (6 + wave * 1.5) * k.dmg;
-  e.r = (9 + Math.min(6, wave)) * k.r;
+  e.speed = (SPAWN.speedBase + wave * SPAWN.speedLinear + w.rng() * SPAWN.speedJitter) * k.speed * w.stats.enemySpeedMul;
+  e.dmg = (SPAWN.dmgBase + wave * SPAWN.dmgLinear) * k.dmg;
+  e.r = (SPAWN.rBase + Math.min(SPAWN.rGrowthCap, wave)) * k.r;
   e.gem = k.gem;
   e.hitCd = 0;
   e.orbCd = 0;
   e.lastBulletId = 0;
   e.flash = 0;
   e.state = 'chase';
-  e.stateT = id === 'boss' ? 2.5 : id === 'shooter' ? 1.2 : id === 'summoner' ? 3 : 0;
+  e.stateT = id === 'boss' ? BOSS.think : id === 'shooter' ? 1.2 : id === 'summoner' ? 3 : 0;
   e.volley = 0;
   e.plan = '';
   e.rage = 0;
@@ -75,17 +77,9 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
 
 // Boss 行为：追人 2.5 秒 → 预警 0.8 秒 → 随机放一个技能 → 回到追人。
 // 预警必须有，否则冲撞完全没法躲，只会让人觉得是随机掉血。
-const BOSS = {
-  think: 2.5, telegraph: 0.8, charge: 0.62, chargeMul: 3.4,
-  volleys: 3, volleyGap: 0.26, shots: 10, shotSpeed: 190, minions: 4,
-  // 打断：预警期间打掉这个比例的最大生命就能中止这一招，Boss 进入硬直
-  interruptFrac: 0.08,
-  stagger: 1.6,
-};
-
 // 预警期间打断需要的伤害量。狂暴后要求更高，否则二阶段会被无脑打断
 export function interruptNeed(e) {
-  return e.maxHp * BOSS.interruptFrac * (e.rage ? 1.6 : 1);
+  return e.maxHp * BOSS.interruptFrac * (e.rage ? BOSS.interruptRageMul : 1);
 }
 
 function tickBoss(w, e, dt, ctx) {
@@ -96,16 +90,16 @@ function tickBoss(w, e, dt, ctx) {
   // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
   if (!e.rage && e.hp <= e.maxHp * 0.5) {
     e.rage = 1;
-    e.speed *= 1.25;
+    e.speed *= BOSS.rageSpeedMul;
     e.state = 'chase';
     e.stateT = 0.7;
     ctx.emit(w, 'bossrage', e.x, e.y, e.r);
   }
-  const think = e.rage ? BOSS.think * 0.55 : BOSS.think;
-  const shots = e.rage ? BOSS.shots + 4 : BOSS.shots;
-  const volleys = e.rage ? BOSS.volleys + 1 : BOSS.volleys;
-  const chargeMul = e.rage ? BOSS.chargeMul * 1.25 : BOSS.chargeMul;
-  const minions = e.rage ? BOSS.minions + 3 : BOSS.minions;
+  const think = e.rage ? BOSS.think * BOSS.rageThink : BOSS.think;
+  const shots = e.rage ? BOSS.shots + BOSS.rageShots : BOSS.shots;
+  const volleys = e.rage ? BOSS.volleys + BOSS.rageVolleys : BOSS.volleys;
+  const chargeMul = e.rage ? BOSS.chargeMul * BOSS.rageChargeMul : BOSS.chargeMul;
+  const minions = e.rage ? BOSS.minions + BOSS.rageMinions : BOSS.minions;
 
   if (e.state === 'chase') {
     e.x += Math.cos(toP) * e.speed * dt;
@@ -114,7 +108,7 @@ function tickBoss(w, e, dt, ctx) {
       const roll = w.rng();
       e.plan = roll < 0.45 ? 'charge' : roll < 0.8 ? 'shoot' : 'summon';
       e.state = 'telegraph';
-      e.stateT = e.rage ? BOSS.telegraph * 0.75 : BOSS.telegraph;
+      e.stateT = e.rage ? BOSS.telegraph * BOSS.rageTelegraph : BOSS.telegraph;
       e.tellDmg = 0;
       e.moveX = Math.cos(toP);
       e.moveY = Math.sin(toP);
@@ -181,7 +175,7 @@ function tickBoss(w, e, dt, ctx) {
 }
 
 // 波次周期：常规 22s → 冲锋 4s → 喘息 4s
-const CYCLE = { surge: 22, calm: 26, end: 30 };
+const CYCLE = { surge: WAVE.surgeAt, calm: WAVE.calmAt, end: WAVE.cycle };
 
 function phaseOf(cycleT) {
   if (cycleT < CYCLE.surge) return 'normal';
@@ -191,11 +185,11 @@ function phaseOf(cycleT) {
 
 // 冲锋开始时从四面八方等距围一圈，形成"被包住"的压迫感
 function surgeBurst(w, ctx) {
-  const wave = w.t / 45;
-  const n = Math.min(34, Math.round(10 + wave * 4));
+  const wave = w.t / WAVE.burstWaveSeconds;
+  const n = Math.min(WAVE.burstMax, Math.round(WAVE.burstBase + wave * WAVE.burstPerWave));
   const base = w.rng() * Math.PI * 2;
   for (let i = 0; i < n; i++) {
-    const kind = w.t >= KINDS.rusher.unlock && w.rng() < 0.7 ? 'rusher' : 'grunt';
+    const kind = w.t >= KINDS.rusher.unlock && w.rng() < WAVE.rusherShare ? 'rusher' : 'grunt';
     spawnEnemy(w, ctx, kind, base + (i / n) * Math.PI * 2);
   }
 }
@@ -291,25 +285,25 @@ export function splitOnDeath(w, e, ctx) {
 export function tickSpawns(w, dt, ctx) {
   tickWave(w, dt, ctx);
 
-  const base = Math.max(0.08, 1.1 - w.t * 0.009);
+  const base = Math.max(SPAWN.intervalMin, SPAWN.intervalBase - w.t * SPAWN.intervalDecay);
   if (w.phase === 'calm') {
     w.spawnTimer = base; // 喘息期完全不刷
   } else {
     w.spawnTimer -= dt;
-    const interval = w.phase === 'surge' ? base * 0.5 : base;
+    const interval = w.phase === 'surge' ? base * WAVE.surgeRateMul : base;
     while (w.spawnTimer <= 0) { spawnEnemy(w, ctx); w.spawnTimer += interval; }
   }
 
   w.bossTimer -= dt;
   if (w.bossTimer <= 0) {
-    w.bossTimer += 55;
+    w.bossTimer += SPAWN_TIMERS.bossEvery;
     const b = spawnEnemy(w, ctx, 'boss');
     if (b) { w.bossCount++; ctx.emit(w, 'boss', w.player.x, w.player.y); }
   }
 
   w.eliteTimer -= dt;
   if (w.eliteTimer <= 0) {
-    w.eliteTimer += 40;
+    w.eliteTimer += SPAWN_TIMERS.eliteEvery;
     spawnEnemy(w, ctx, 'elite');
     ctx.emit(w, 'elite', w.player.x, w.player.y);
   }

@@ -1438,3 +1438,27 @@ test('排除次数用完后不再生效', () => {
   assert.equal(w.banishes, 0);
   assert.equal(banish(w, 0), false, '次数用完还能排除');
 });
+
+// ---- fx 事件契约 ----
+import { FX_EVENTS, isFxEvent } from '../src/fx-events.js';
+
+test('emit 只接受登记过的事件类型', () => {
+  const w = createWorld(1);
+  // 逻辑层里所有 emit 都走同一个校验，随便挑一处触发：手动造一次未登记的类型
+  assert.equal(isFxEvent('hit'), true);
+  assert.equal(isFxEvent('nope'), false);
+  // 跑一局，确认没有任何 emit 抛出（也就是所有实际用到的类型都登记了）
+  for (let i = 0; i < 120 * 60 && !w.over; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    const a = (i / 60) * 1.6;
+    const slot = w.skills.findIndex((s2) => s2.cd <= 0);
+    assert.doesNotThrow(() => update(w, DT, {
+      dx: Math.cos(a), dy: Math.sin(a), dash: w.player.dashCd <= 0, skill: slot >= 0 ? slot : null,
+    }));
+    for (const f of w.fx) f.active = false;
+  }
+});
+
+test('登记表里没有重复项', () => {
+  assert.equal(new Set(FX_EVENTS).size, FX_EVENTS.length, '登记表有重复的事件类型');
+});

@@ -9,6 +9,8 @@ import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitT
 
 export { VIEW_W, VIEW_H };
 import { mulberry32, pool, alloc } from './pool.js';
+import { isFxEvent } from './fx-events.js';
+import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
 
 // 词条与诅咒的定义在 upgrades.js，这里转出去，外部（UI/测试）不用关心分了几个文件
 export { TRAITS, CURSES };
@@ -35,16 +37,16 @@ export function createWorld(seed = 1) {
     kills: 0,
     bulletSeq: 1,
     player: {
-      x: 0, y: 0, r: 12,
-      hp: 100, maxHp: 100,
-      speed: 200,
-      level: 1, xp: 0, xpNext: 4,
+      x: 0, y: 0, r: PLAYER.r,
+      hp: PLAYER.hp, maxHp: PLAYER.hp,
+      speed: PLAYER.speed,
+      level: 1, xp: 0, xpNext: XP.first,
       flash: 0,
       // 冲刺：dashT 是剩余冲刺时间，invuln 是剩余无敌时间，faceX/Y 是站着不动时的冲刺朝向
       dashT: 0, dashCd: 0, invuln: 0, dashX: 1, dashY: 0, faceX: 1, faceY: 0,
     },
     stats: {
-      damageMul: 1, rateMul: 1, pickupRange: 90,
+      damageMul: 1, rateMul: 1, pickupRange: PLAYER.pickupRange,
       critChance: 0, critMul: 2, lifeOnKill: 0, xpMul: 1, gemBlast: 0,
       enemyHpMul: 1, enemySpeedMul: 1, // 诅咒卡用
     },
@@ -55,13 +57,13 @@ export function createWorld(seed = 1) {
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
     terrain: pool(MAX_TERRAIN, makeTerrain),
     terrainTimer: 0,
-    chestTimer: 8, // 第一个宝箱 8 秒后才可能出现
+    chestTimer: TERRAIN_TUNING.firstChest,
 
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
     fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0 })),
     spawnTimer: 0,
-    eliteTimer: 30, // 第一只精英 30 秒到，之后每 40 秒一只
-    bossTimer: 45,  // 第一只 Boss 45 秒，之后每 55 秒一只（一局约 100 秒，这样通常能碰到两只）
+    eliteTimer: SPAWN_TIMERS.firstElite,
+    bossTimer: SPAWN_TIMERS.firstBoss,
     bossCount: 0,
     // 波次节奏：22 秒常规 → 5 秒冲锋 → 3 秒喘息，循环
     cycleT: 0,
@@ -70,8 +72,8 @@ export function createWorld(seed = 1) {
     evolved: [],
     chests: 0,
     // 选卡时的两个交互：重抽和排除。排除掉的卡这一局不再出现
-    rerolls: 2,
-    banishes: 1,
+    rerolls: CARDS.rerolls,
+    banishes: CARDS.banishes,
     banned: [],
     skills: [],            // 手动释放的技能，最多 MAX_SKILL_SLOTS 个
     slowT: 0, slowMul: 1,  // 时缓：全场敌人减速
@@ -122,6 +124,9 @@ function noteKill(w) {
 }
 
 function emit(w, type, x, y, amount = 0) {
+  // 类型必须在登记表里：拼错或者新增事件忘了登记，会在这里立刻炸出来，
+  // 而不是变成"游戏照常跑但那个动作没声没画面"
+  if (!isFxEvent(type)) throw new Error(`未登记的 fx 事件类型：${type}`);
   const f = alloc(w.fx);
   if (!f) return;
   f.active = true;
@@ -286,7 +291,7 @@ const skillCtx = {
   blast: (w, x, y, r, dmg, src) => api.blast(w, x, y, r, dmg, src),
 };
 
-export const DASH = { time: 0.16, speed: 780, invuln: 0.3, cd: 3 };
+export const DASH = DASH_TUNING;
 
 export function update(w, dt, input) {
   if (w.over || w.paused) return;
@@ -386,7 +391,7 @@ export function update(w, dt, input) {
     if (e.hitCd > 0) e.hitCd -= dt;
     if (e.orbCd > 0) e.orbCd -= dt;
     if (d < e.r + p.r && e.hitCd <= 0) {
-      e.hitCd = 0.8;
+      e.hitCd = SPAWN.contactCd;
       if (p.invuln > 0) continue; // 冲刺无敌：撞上了也不掉血，但接触冷却照走
       noteTaken(w, e.kind, Math.min(e.dmg, p.hp));
       p.hp -= e.dmg;
@@ -496,13 +501,13 @@ export function update(w, dt, input) {
     const gx = p.x - g.x, gy = p.y - g.y;
     const d = Math.hypot(gx, gy) || 1;
     if (d < w.stats.pickupRange) {
-      const pull = 260 * (1 - d / w.stats.pickupRange) + 60;
+      const pull = XP.pullExtra * (1 - d / w.stats.pickupRange) + XP.pullBase;
       g.x += (gx / d) * pull * dt;
       g.y += (gy / d) * pull * dt;
     } else {
       // 远处的球缓慢漂过来：不然射程外的击杀有八成经验收不回来
-      g.x += (gx / d) * 26 * dt;
-      g.y += (gy / d) * 26 * dt;
+      g.x += (gx / d) * XP.gemDrift * dt;
+      g.y += (gy / d) * XP.gemDrift * dt;
     }
     if (d < p.r + g.r + 4) {
       g.active = false;
@@ -512,7 +517,7 @@ export function update(w, dt, input) {
       p.xp += g.value * w.stats.xpMul;
       if (p.xp >= p.xpNext) {
         p.xp -= p.xpNext;
-        p.xpNext = Math.round(p.xpNext * 1.25 + 1);
+        p.xpNext = Math.round(p.xpNext * XP.growth + XP.flat);
         w.paused = true;
         w.choices = rollChoices(w);
         emit(w, 'levelup', p.x, p.y);
