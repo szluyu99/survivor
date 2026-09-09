@@ -17,7 +17,9 @@ npm run serve      # 等价于 python3 -m http.server 8080
 
 ```bash
 npm test           # 逻辑层 + 渲染层烟测 + 内容契约（115 个）
-npm run balance    # 平衡回归报告：武器强度、局长、兵种出场、帧率敏感度、单帧耗时
+npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
+npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 14 秒
+npm run validate   # 内容表结构校验
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 ```
 
@@ -61,11 +63,25 @@ node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 ## 加内容的约定
 
 - 加武器 / 技能 / 兵种 / 地形：往对应模块的表里加一项即可，不用改 `sim.js`
-- 调数值：只改 `tuning.js`，然后 `npm run balance` 对比前后
+- 调数值：只改 `tuning.js`，然后 `npm run check`（断言）+ `npm run balance`（看具体数字）
 - 新增 fx 事件：先加进 `fx-events.js` 的登记表，否则 `emit()` 会直接抛错；
   再去 `fx.js` 的 `handlers` 里加处理，否则契约测试会失败
 - 写测试：用 `test/fixtures.mjs` 里的 `labWorld` / `putEnemy` / `putTerrain` / `run`，
   不要再各写一遍造实体的代码
+
+## 平衡断言在拦什么
+
+`npm run check` 把这个项目里真实踩过的坑写成了硬规则，CI 里不通过就不许合入：
+
+1. 内容表结构校验（`validate.js`）
+2. **每一级升级都得有用**：单体台架或群体台架至少一项提升 2%。
+   两个台架都要有，因为"弹道 +1""目标 +1""爆炸范围 +"这类升级在单体上完全看不出变化
+3. 满级武器必须既能打到贴身（21px，敌人会压到这个距离）也能打到远处之一
+4. 进化不该明显弱于素材双持
+5. 一局必须会结束（5 个 seed 都要在 400 秒内），且平均长度在 40–260 秒之间
+6. 所有兵种都要在 5 局里露过面（防解锁时间/权重写错）
+7. 帧率无关性：30 / 60 / 144fps 走同一套累加器，结果必须一致
+8. 单帧逻辑耗时 < 2ms
 
 ## 玩法
 

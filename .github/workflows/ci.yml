@@ -21,5 +21,7 @@ jobs:
         run: npm test
       - name: 内容表校验
         run: npm run validate
+      - name: 平衡回归断言（每级升级必须有用、一局必须结束、帧率无关性等）
+        run: npm run check
       - name: 平衡回归报告（只输出，不做断言）
         run: npm run balance

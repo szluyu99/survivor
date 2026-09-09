@@ -239,8 +239,10 @@ export const EVO_WEAPONS = [
     maxLevel: 3,
     desc: ['光球绕身旋转，球与球之间连出电弧', '光球 +1，伤害 +30%', '半径 +20%，伤害 +30%'],
     orbs: T([4, 5, 5]),
-    radius: T([58, 58, 70]),
-    orbR: 22,
+    // 半径缓涨 + 光球变大：半径升到 70 时贴身那一圈（怪会压到约 21px）就漏掉了，
+    // 满级反而打不到人。这是基础光环踩过的同一个坑
+    radius: T([46, 50, 54]),
+    orbRBy: T([26, 29, 32]),
     dmg: T([30, 39, 48]),
     arcDmg: T([22, 28, 35]),
     hitCd: 0.24,
@@ -256,14 +258,15 @@ export const EVO_WEAPONS = [
       const rad = this.radius(inst.level);
       const dmg = this.dmg(inst.level) * api.dmgMul(w);
       const arc = this.arcDmg(inst.level) * api.dmgMul(w);
+      const orbR = this.orbRBy(inst.level);
       const pts = [];
       for (let i = 0; i < n; i++) {
         const a = inst.timer + (i / n) * Math.PI * 2;
         const ox = w.player.x + Math.cos(a) * rad;
         const oy = w.player.y + Math.sin(a) * rad;
         pts.push([ox, oy]);
-        api.addOrb(w, ox, oy, this.orbR);
-        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
+        api.addOrb(w, ox, oy, orbR);
+        api.damageArea(w, ox, oy, orbR, dmg, this.hitCd, this.id);
       }
       // 相邻光球之间连电弧：沿线取几个采样点做小范围伤害，视觉上也画这条线
       for (let i = 0; i < pts.length; i++) {
@@ -405,8 +408,8 @@ export const EVO_WEAPONS = [
     maxLevel: 3,
     desc: ['光球轨道上不断留下地雷', '光球 +1，爆炸范围 +20%', '伤害 +45%，攻速 +30%'],
     orbs: T([3, 4, 4]),
-    radius: T([64, 64, 74]),
-    orbR: 18,
+    radius: T([48, 52, 56]),
+    orbRBy: T([24, 27, 30]),
     orbDmg: T([20, 20, 28]),
     mineDmg: T([46, 46, 64]),
     blast: T([52, 62, 62]),
@@ -423,12 +426,13 @@ export const EVO_WEAPONS = [
       const n = this.orbs(inst.level);
       const rad = this.radius(inst.level);
       const dmg = this.orbDmg(inst.level) * api.dmgMul(w);
+      const orbR = this.orbRBy(inst.level);
       for (let i = 0; i < n; i++) {
         const a = inst.timer + (i / n) * Math.PI * 2;
         const ox = w.player.x + Math.cos(a) * rad;
         const oy = w.player.y + Math.sin(a) * rad;
-        api.addOrb(w, ox, oy, this.orbR);
-        api.damageArea(w, ox, oy, this.orbR, dmg, this.hitCd, this.id);
+        api.addOrb(w, ox, oy, orbR);
+        api.damageArea(w, ox, oy, orbR, dmg, this.hitCd, this.id);
       }
       // 光球轨道上周期性掉雷：站在原地也能靠雷场清场
       inst.mineT = (inst.mineT || 0) - dt * api.rateMul(w);
