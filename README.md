@@ -16,12 +16,26 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约（115 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放（127 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 14 秒
 npm run validate   # 内容表结构校验
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 ```
+
+## 固定种子与录像
+
+世界是确定性的（固定步长 + 可导出状态的随机数），所以同一个种子加同一串输入必然重演同一局。
+
+- 分享同一局：URL 加 `?seed=1234`，死亡后重开也用同一个种子。不带参数就随机。
+- 录一局机器人对局，改完数值再重放，直接看行为差异（比看平均值靠谱）：
+
+```bash
+npm run record -- 7 120 run.json   # seed 7，录 120 秒，写到 run.json
+npm run replay -- run.json         # 重放并核对 { 时长, 击杀, 等级, 是否结束 }
+```
+
+`src/replay.js` 还提供 `snapshot(w)` / `restore(snap)`，把世界存成纯 JSON 再读回来（存档就靠这个）。
 
 ## 代码结构
 
@@ -45,7 +59,8 @@ node tools/make-og.mjs   # 重新生成分享卡片图 og.png
   进化配方指向不存在的武器等，都在这里一次性报出来。
 - `src/fx-events.js` —— fx 事件类型的唯一登记表。`emit()` 会校验类型，
   测试会检查每种事件都有渲染层处理。
-- `src/pool.js` —— 对象池与确定性随机。
+- `src/pool.js` —— 对象池与确定性随机（随机数状态可导出/灌回，快照和回放靠它）。
+- `src/replay.js` —— 世界快照（存档）与输入流回放（seed 分享、录像、数值改动前后对比）。
 - `src/view.js` —— 逻辑视野尺寸常量，单独成文件避免循环 import。
 
 渲染层：

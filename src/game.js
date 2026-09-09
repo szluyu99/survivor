@@ -53,7 +53,18 @@ const hud = createHud(ctx, {
 });
 const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, WEAPON_NAME, clock } = hud;
 
-let world = createWorld(Date.now() & 0xffff);
+// ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
+// 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
+function urlSeed() {
+  const raw = globalThis.location ? new URLSearchParams(globalThis.location.search).get('seed') : null;
+  if (raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n >>> 0 : null;
+}
+const FIXED_SEED = urlSeed();
+const newSeed = () => (FIXED_SEED === null ? Date.now() & 0xffff : FIXED_SEED);
+
+let world = createWorld(newSeed());
 globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
@@ -69,7 +80,7 @@ function beginGame() {
 }
 
 function restart() {
-  world = createWorld(Date.now() & 0xffff);
+  world = createWorld(newSeed());
   globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;

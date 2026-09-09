@@ -57,7 +57,8 @@ export function upgradeWeapon(w, id) {
 }
 
 // 抽三张：已有武器的升级、没拿过的新武器、通用词条混在一起
-export function rollChoices(w) {
+// 建卡池（不抽卡）。抽卡和"按 key 找回一张卡"都基于它
+function buildBag(w) {
   const bag = [];
   for (const inst of w.weapons) {
     const def = findWeapon(inst.id);
@@ -110,6 +111,12 @@ export function rollChoices(w) {
   for (const t of TRAITS) bag.push({ key: `trait:${t.id}`, name: t.name, desc: t.desc, apply: t.apply });
   for (const c of CURSES) bag.push({ key: `curse:${c.id}`, name: `诅咒 · ${c.name}`, desc: c.desc, curse: true, apply: c.apply });
 
+  return bag;
+}
+
+// 抽三张：已有武器的升级、没拿过的新武器、技能、词条、诅咒、进化混在一起
+export function rollChoices(w) {
+  const bag = buildBag(w);
   // 被"排除"掉的卡这一局不再出现
   const usable = w.banned && w.banned.length ? bag.filter((c) => !w.banned.includes(c.key)) : bag;
   const out = [];
@@ -121,6 +128,12 @@ export function rollChoices(w) {
   return out;
 }
 
+
+// 按 key 找回一张卡。恢复存档时用：卡片带函数没法 JSON 化，
+// 只能存 key，再从当前卡池里按 key 重建（不消耗随机数）
+export function cardByKey(w, key) {
+  return buildBag(w).find((c) => c.key === key) || null;
+}
 
 // 重抽：花掉一次次数，重新发三张
 export function rerollChoices(w) {

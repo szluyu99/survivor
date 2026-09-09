@@ -30,6 +30,7 @@ const MAX_TERRAIN = 40;
 
 export function createWorld(seed = 1) {
   return {
+    seed,                 // 记下来：快照和回放都要靠它复现同一局
     rng: mulberry32(seed),
     t: 0,
     over: false,

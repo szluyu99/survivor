@@ -5,9 +5,11 @@
   "type": "module",
   "description": "色块幸存者 —— 纯静态 Web 割草原型，零依赖零构建",
   "scripts": {
-    "test": "node --test test/sim.test.mjs test/render.test.mjs test/content.test.mjs",
+    "test": "node --test test/sim.test.mjs test/render.test.mjs test/content.test.mjs test/replay.test.mjs",
     "balance": "node tools/balance.mjs",
     "check": "node tools/balance-check.mjs",
+    "record": "node tools/replay.mjs record",
+    "replay": "node tools/replay.mjs verify",
     "validate": "node -e \"import('./src/validate.js').then(m=>{const e=m.validateContent();if(e.length){console.error(e.join(String.fromCharCode(10)));process.exit(1);}console.log('内容表校验通过');})\"",
     "serve": "python3 -m http.server 8080"
   }
