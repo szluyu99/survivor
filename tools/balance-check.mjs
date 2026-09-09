@@ -7,7 +7,8 @@
 
 import { createWorld, update, chooseUpgrade, HEROES, BOSS_KINDS } from '../src/sim.js';
 import { PERKS, earnShards, heroCost } from '../src/meta.js';
-import { ZONES } from '../src/zones.js';
+import { ZONES, ZONE_SECONDS } from '../src/zones.js';
+import { DIFFICULTIES } from '../src/difficulty.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
@@ -87,8 +88,8 @@ function crowdDps(ids, levels, seconds = 12) {
 }
 
 // ---- 跑一整局 ----
-function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3, hero, perks } = {}) {
-  const w = createWorld(seed, hero, perks);
+function play(seed, { maxSeconds = 400, pick = (i) => Math.floor(i / 97) % 3, hero, perks, difficulty } = {}) {
+  const w = createWorld(seed, hero, perks, difficulty);
   const firstSeen = {};
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
     if (w.paused) chooseUpgrade(w, pick(i));
@@ -300,6 +301,24 @@ console.log('== 10. 每个 Boss 原型都要能打死，且不能变成消耗战
       check(avg < 130, `${arch.name} 平均要打 ${avg.toFixed(0)}s，变成消耗战了`);
     }
   }
+}
+
+console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
+{
+  const maxed = {};
+  for (const p of PERKS) maxed[p.id] = p.maxLevel;
+  const need = ZONE_SECONDS * (ZONES.length - 1);   // 走到最后一个区域至少要活这么久
+  const buffed = SEEDS.map((seed) => play(seed, { perks: maxed }).w.t);
+  const best = Math.max(...buffed);
+  console.log(`  通关需要活到 ${need}s（走进最后一个区域）；满级强化下最长一局 ${best.toFixed(0)}s`);
+  check(best >= need, `满级强化下最长也只活了 ${best.toFixed(0)}s，通关（需要 ${need}s）根本摸不到`);
+
+  const normalAvg = avgOf(SEEDS.map((seed) => play(seed).w.t));
+  const hard = DIFFICULTIES.find((d) => d.requiresWin);
+  const hardAvg = avgOf(SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
+  console.log(`  普通 ${normalAvg.toFixed(0)}s → ${hard.name} ${hardAvg.toFixed(0)}s（${(hardAvg / normalAvg).toFixed(2)} 倍）`);
+  check(hardAvg < normalAvg * 0.95, `${hard.name}难度平均 ${hardAvg.toFixed(0)}s，和普通的 ${normalAvg.toFixed(0)}s 差不多，难度倍率没起作用`);
+  check(hardAvg > 25, `${hard.name}难度平均只活 ${hardAvg.toFixed(0)}s，太劝退了`);
 }
 
 console.log('');

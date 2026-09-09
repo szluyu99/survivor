@@ -5,10 +5,11 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN, inDiffBtn, inHelpBtn } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer } from './replay.js';
-import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS } from './meta.js';
+import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
@@ -57,7 +58,7 @@ function resize() {
 resize();
 window.addEventListener('resize', resize);
 
-const fx = createFx({ onDeath: (w) => saveBest(w) });
+const fx = createFx({ onDeath: (w) => saveBest(w), onWin: (w) => finishRun(w) });
 const { consumeFx, stepFx, state: fxState, particles, numbers, bolts } = fx;
 const hud = createHud(ctx, {
   shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain },
@@ -67,9 +68,11 @@ const hud = createHud(ctx, {
   getPaused: () => uiPaused,
   getHero: () => heroId,
   getMeta: () => meta,
+  getDifficulty: () => difficulty,
+  getHelpOpen: () => helpOpen,
   getReplayReady: () => !!lastReplay,
 });
-const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, WEAPON_NAME, clock } = hud;
+const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, drawWinPanel, WEAPON_NAME, clock } = hud;
 
 // ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
 // 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
@@ -121,7 +124,32 @@ function pickOrUnlockHero(id) {
 // 没解锁的角色不能带进对局：存档被清掉或手改过时兜一层
 const activeHero = () => (isUnlocked(meta, heroId) ? heroId : DEFAULT_HERO);
 
-let world = createWorld(newSeed(), activeHero(), meta.perks);
+// 难度：首屏切换，记在 localStorage 里。没解锁的难度同样兜一层
+const DIFF_KEY = 'survivor.difficulty';
+let difficulty = loadDifficulty();
+let helpOpen = false;     // 首屏的操作说明浮层
+let winPanel = false;     // 通关那一刻的面板（选继续无尽还是重开）
+function loadDifficulty() {
+  try {
+    const id = findDifficulty(localStorage.getItem(DIFF_KEY)).id;
+    return difficultyUnlocked(meta, id) ? id : DEFAULT_DIFFICULTY;
+  } catch { return DEFAULT_DIFFICULTY; }
+}
+function cycleDifficulty() {
+  // 只在已解锁的难度之间轮转
+  const open = DIFFICULTIES.filter((d) => difficultyUnlocked(meta, d.id));
+  const i = open.findIndex((d) => d.id === difficulty);
+  difficulty = open[(i + 1) % open.length].id;
+  try { localStorage.setItem(DIFF_KEY, difficulty); } catch { /* 无痕模式会抛，忽略 */ }
+}
+// 通关：记进存档（解锁下一档难度），弹面板。世界本身不结束，继续打就是无尽模式
+function finishRun(w) {
+  const next = noteWin(meta, w.difficulty);
+  if (next) saveMeta(next);
+  winPanel = true;
+}
+
+let world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
 globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
@@ -132,7 +160,7 @@ let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
 
 // ---- 录像：这一局的每帧输入都记下来，死了就能回放 ----
-let recorder = createRecorder(world.seed, world.hero, world.perks);
+let recorder = createRecorder(world.seed, world.hero, world.perks, world.difficulty);
 let lastReplay = null;    // 上一局的录像，死亡后生成
 let player = null;        // 非 null 表示正在看回放
 // 选卡/重抽/排除排队到下一个逻辑步再执行。
@@ -174,14 +202,15 @@ function beginGame() {
 }
 
 function restart() {
-  world = createWorld(newSeed(), activeHero(), meta.perks);
+  world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
   globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;
   fx.reset();
-  recorder = createRecorder(world.seed, world.hero, world.perks);
+  recorder = createRecorder(world.seed, world.hero, world.perks, world.difficulty);
   lastReplay = null;
   player = null;
+  winPanel = false;
   queuedActions.length = 0;
 }
 
@@ -191,6 +220,13 @@ addEventListener('keydown', (e) => {
   if (!started) {
     unlock(); // 音频必须在用户手势里启动，这一步不代表开局
     keys.add(e.code);
+    // 帮助浮层开着时先处理关闭，别让下面的开局分支抢走按键
+    if (helpOpen) {
+      if (e.code === 'KeyH' || e.code === 'Escape' || e.code === 'Enter') helpOpen = false;
+      return;
+    }
+    if (e.code === 'KeyH') { helpOpen = true; return; }
+    if (e.code === 'KeyD') { cycleDifficulty(); return; }
     const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
     if (hi >= 0 && hi < HERO_CARD.count) {
       // 没解锁的按一下是"花残片买下来"，买完停在首屏，再按一次才开局
@@ -214,6 +250,12 @@ addEventListener('keydown', (e) => {
   }
   keys.add(e.code);
   if (e.code === 'KeyM') mutedHint = toggleMute();
+  // 通关面板：回车继续无尽，空格重开。其他键先别放进游戏
+  if (winPanel) {
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') winPanel = false;
+    if (e.code === 'Space') { restart(); e.preventDefault(); }
+    return;
+  }
   // 回放中只认三个键：退出、重开、静音
   if (player) {
     if (e.code === 'Escape' || e.code === 'KeyP' || e.code === 'KeyR') exitReplay();
@@ -260,6 +302,9 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!started) {
     unlock();
     const at = viewPos(e);
+    if (helpOpen) { helpOpen = false; pointer = null; return; }
+    if (inHelpBtn(at.x, at.y)) { helpOpen = true; pointer = null; return; }
+    if (inDiffBtn(at.x, at.y)) { cycleDifficulty(); pointer = null; return; }
     const pi = perkBtnHit(at.x, at.y);
     if (pi >= 0 && pi < PERK_BTN.count) {
       const next = buyPerk(meta, PERKS[pi].id);
@@ -277,6 +322,8 @@ canvas.addEventListener('pointerdown', (e) => {
   beginGame();
   canvas.setPointerCapture(e.pointerId);
   pointer = viewPos(e);
+  // 通关面板：点一下继续无尽
+  if (winPanel) { winPanel = false; pointer = null; return; }
   // 回放中：点一下就退出回放，回到死亡结算
   if (player) { exitReplay(); pointer = null; return; }
   const sb = skillBtnHit(pointer.x, pointer.y);
@@ -669,6 +716,7 @@ function render(w) {
   drawStick();
   if (uiPaused) drawPausePanel(w);
   if (w.paused && w.choices) drawChoices(w);
+  if (winPanel) drawWinPanel(w);
   if (w.over) drawGameOver(w);
 }
 
@@ -717,7 +765,8 @@ function frame(now) {
         render(player.world);
         drawReplayBadge(player.world, player.progress);
       } else {
-        if (!uiPaused) {
+        // 通关面板期间世界暂停：让人看完战绩再决定继续还是重开
+        if (!uiPaused && !winPanel) {
           acc += dt;
           let steps = 0;
           while (acc >= STEP && steps < MAX_CATCHUP) {

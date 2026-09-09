@@ -68,6 +68,7 @@ const { HEROES } = await import('../src/heroes.js');
 const { ALL_WEAPONS } = await import('../src/weapons.js');
 const { PERKS } = await import('../src/meta.js');
 const { ZONES, ZONE_SECONDS } = await import('../src/zones.js');
+const { DIFFICULTIES } = await import('../src/difficulty.js');
 
 function runFrames(n, startMs = 0, stepMs = 16.7) {
   for (let i = 0; i < n; i++) {
@@ -85,20 +86,48 @@ test('game.js 能正常 import 并起主循环', () => {
   assert.ok(calls.length > 0, '第一帧之前就该有 resize 的 setTransform');
 });
 
-test('开始前是首屏，操作说明、角色卡和形状图例都在', () => {
+test('开始前是首屏：目标、角色卡、强化、难度都在', () => {
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('色块幸存者'), '标题没画');
-  assert.ok(texts.some((t) => t.includes('攻击是自动的')), '没说明攻击是自动的');
+  assert.ok(texts.some((t) => t.includes('通关')), '没写清这一局的目标');
   assert.ok(texts.some((t) => t.includes('开始')), '没有开始提示');
-  assert.ok(texts.includes('冲锋兵'), '形状图例没画');
   assert.ok(texts.some((t) => t.includes('选择角色')), '角色选择区没画');
   assert.ok(texts.some((t) => t.includes('残片')), '没显示残片余额');
   for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
   // 新存档只有基准角色，其余三张卡要标价格
   assert.ok(texts.filter((t) => t.includes('需要') && t.includes('片')).length >= 3, '没解锁的角色卡没标价');
   for (const p of PERKS) assert.ok(texts.some((t) => t.includes(p.name)), `永久强化「${p.name}」没画`);
+  assert.ok(texts.some((t) => t.includes('难度')), '难度按钮没画');
+  // 操作说明和兵种图例收进帮助浮层了，首屏不该再有
+  assert.ok(!texts.includes('冲锋兵'), '兵种图例应该只在帮助浮层里');
+});
+
+test('首屏按 H 开帮助浮层：操作说明和兵种图例在里面，再按 H 关掉', () => {
+  fire(handlers.window, 'keydown', { code: 'KeyH', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('操作说明'), '帮助浮层没打开');
+  assert.ok(texts.some((t) => t.includes('攻击是自动的')), '帮助里没有操作说明');
+  assert.ok(texts.includes('冲锋兵'), '帮助里没有兵种图例');
+  // 浮层开着时按 H 只是关闭，不该开局
+  fire(handlers.window, 'keydown', { code: 'KeyH', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(!texts.includes('操作说明'), '帮助浮层没关掉');
+  assert.ok(texts.some((t) => t.includes('选择角色')), '关掉帮助后应该回到首屏，而不是开局');
+});
+
+test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {
+  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.some((t) => t.includes(`难度：${DIFFICULTIES[0].name}`)), `新存档只该有基准难度：${texts.slice(0, 14)}`);
+  assert.ok(texts.some((t) => t.includes('选择角色')), '按 D 不该开局');
 });
 
 test('首屏不会误触：按无关的键、点空白处都不开局', () => {
@@ -412,6 +441,53 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
   } finally {
     w.player.maxHp = realMaxHp;
     w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
+test('通关时弹通关面板，回车继续无尽', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  try {
+    // 把世界摆到"最后一个区域 + 一只快死的 Boss"，让它自然打死并触发通关
+    w.zoneIndex = ZONES.length - 1;
+    w.zoneT = 0;
+    w.bossTimer = 0.01;
+    let ok = false;
+    for (let i = 0; i < 60 * 60 && !ok; i++) {
+      // 不选卡的话世界会停在选卡界面，时间不走、Boss 也不会出现
+      if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+      w.zoneIndex = ZONES.length - 1;
+      if (w.bossTimer > 1) w.bossTimer = 0.01;
+      const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
+      if (boss) { boss.hp = 1; boss.shielded = 0; }
+      runFrames(1, 3.5e6 + i * 17, 0);
+      ok = w.won;
+    }
+    assert.ok(ok, '没触发通关');
+    calls.length = 0;
+    runFrames(3);
+    let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.ok(texts.some((t) => t.includes('通关')), `通关面板没画：${texts.slice(0, 14)}`);
+    assert.ok(texts.some((t) => t.includes('继续无尽')), '没给继续无尽的提示');
+    // 回车关掉面板，世界继续跑
+    fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
+    calls.length = 0;
+    runFrames(5);
+    texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.ok(!texts.some((t) => t.includes('继续无尽')), '回车之后面板还在');
+    // 通关记录要写进存档，噩梦难度随之解锁
+    const meta = JSON.parse(store.get('survivor.meta'));
+    assert.ok(meta.beaten.includes('normal'), `通关没写进存档：${store.get('survivor.meta')}`);
+  } finally {
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+    // 把通关标记清掉：留着的话后面测死亡结算的用例会看到"通关"而不是"阵亡"
+    w.won = false;
+    w.wonAt = 0;
+    // 顺手把血压到 1：通关这一局练出来的 build 很强，靠自然死亡会活过后面用例给的 200 秒，
+    // 那个用例就会时好时坏
+    w.player.hp = 1;
   }
 });
 

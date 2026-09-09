@@ -14,9 +14,12 @@ import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TU
 import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
 import { applyPerks, PERKS, earnShards } from './meta.js';
 import { ZONES, ZONE_SECONDS, currentZone, tickZone } from './zones.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, applyDifficulty, WIN_BONUS } from './difficulty.js';
 
 // 区域表定义在 zones.js，这里转出去
 export { ZONES, ZONE_SECONDS, currentZone };
+// 难度表定义在 difficulty.js，同样转出去
+export { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS };
 
 // 角色表定义在 heroes.js，这里转出去
 export { HEROES, findHero, DEFAULT_HERO };
@@ -41,12 +44,15 @@ const MAX_ORBS = 8;
 const MAX_FX = 64;
 const MAX_TERRAIN = 40;
 
-export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null) {
+export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, difficulty = DEFAULT_DIFFICULTY) {
   const hero = findHero(heroId);
   const w = {
     seed,                 // 记下来：快照和回放都要靠它复现同一局
     hero: hero.id,        // 同理：角色决定起始武器和属性，不记下来就重演不出同一局
     perks,                // 永久强化同理，它改的是初始属性
+    difficulty: findDifficulty(difficulty).id,  // 难度改敌人数值，同样必须记下来
+    won: false,           // 打完最后一个区域的 Boss 就算通关，之后可以选择继续无尽
+    wonAt: 0,
     rng: mulberry32(seed),
     t: 0,
     over: false,
@@ -105,6 +111,8 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null) {
   hero.apply(w);
   // 永久强化排在角色之后：它是"存档带来的加成"，叠在这一局的起点上
   applyPerks(w, perks);
+  // 难度最后生效：它只改敌人侧的倍率，不受角色和强化影响
+  applyDifficulty(w, w.difficulty);
   return w;
 }
 
@@ -211,6 +219,12 @@ function killEnemy(w, e) {
   // 裂变者死了会裂成两只小 Boss，这时不该报"BOSS 倒下"（它还没真的倒下）
   const fissioned = kind === 'boss' && bossFissionOnDeath(w, e, enemyCtx);
   emit(w, kind === 'boss' ? (fissioned ? 'kill' : 'bossdead') : 'kill', x, y, r);
+  // 通关：在最后一个区域打死 Boss。裂变者裂出的子体还没清完时不算
+  if (kind === 'boss' && !fissioned && !w.won && w.zoneIndex === ZONES.length - 1) {
+    w.won = true;
+    w.wonAt = w.t;
+    emit(w, 'win', x, y, r);
+  }
   dropGem(w, x, y, gem);
 }
 

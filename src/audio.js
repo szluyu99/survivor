@@ -121,6 +121,10 @@ export const sfx = {
     // 上行三音，和升级的琶音区分：这是"捡到东西"而不是"变强了"
     [659, 880, 1175].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.14, gain: 0.16, delay: i * 0.06 }));
   },
+  win() {
+    // 上行大三和弦琶音，比升级的三音更长更亮：这是一局的终点
+    [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.5, gain: 0.2, delay: i * 0.12 }));
+  },
   zone() {
     // 进入新区域：下行两音 + 一层闷噪声，和宝箱的上行三音区分开——这是"换地方了"
     [523, 392].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.26, gain: 0.18, delay: i * 0.13 }));

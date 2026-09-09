@@ -7,12 +7,15 @@
 // 关键约束：默认状态（没有任何永久强化）必须和"没有这套系统"时完全一致，
 // 否则所有平衡阈值都会跟着玩家的存档漂移。
 import { HEROES, DEFAULT_HERO } from './heroes.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
 
-// 结算公式：存活时长为主，击杀为辅。
-// 刻意做得"钝"一些——一局 90 秒 170 杀大约 19 片，解锁第二个角色要两三局，
-// 太快就没有积累感，太慢就变成刷。
+// 结算公式：存活时长为主，击杀为辅，再乘难度倍率、加通关奖励。
+// 刻意做得"钝"一些——普通难度一局 90 秒 170 杀大约 19 片，解锁第二个角色要两三局，
+// 太快就没有积累感，太慢就变成刷。通关给的比苟活多，让"打通"明显更划算
 export function earnShards(w) {
-  return Math.floor(w.t / 8) + Math.floor(w.kills / 20);
+  const base = Math.floor(w.t / 8) + Math.floor(w.kills / 20);
+  const mul = findDifficulty(w.difficulty).shardMul;
+  return Math.floor(base * mul) + (w.won ? WIN_BONUS : 0);
 }
 
 // 角色解锁价：基准角色免费，后面的越来越贵
@@ -49,7 +52,7 @@ export function perkCost(perk, level) {
 }
 
 export function defaultMeta() {
-  return { shards: 0, unlocked: [DEFAULT_HERO], perks: {} };
+  return { shards: 0, unlocked: [DEFAULT_HERO], perks: {}, beaten: [] };
 }
 
 // 从 localStorage 读回来的东西什么都可能是：手改过的、旧版本的、被截断的 JSON。
@@ -69,7 +72,25 @@ export function normalizeMeta(raw) {
       if (Number.isFinite(lv) && lv > 0) meta.perks[p.id] = Math.min(p.maxLevel, Math.floor(lv));
     }
   }
+  if (Array.isArray(raw.beaten)) {
+    for (const id of raw.beaten) {
+      if (DIFFICULTIES.some((d) => d.id === id) && !meta.beaten.includes(id)) meta.beaten.push(id);
+    }
+  }
   return meta;
+}
+
+// 难度解锁：requiresWin 指向的难度通关过才能选
+export function difficultyUnlocked(meta, id) {
+  const d = findDifficulty(id);
+  return !d.requiresWin || meta.beaten.includes(d.requiresWin);
+}
+
+// 通关入账：记下"这个难度已通关"，解锁后面的难度
+export function noteWin(meta, difficulty) {
+  const id = findDifficulty(difficulty).id;
+  if (meta.beaten.includes(id)) return null;
+  return { ...meta, beaten: [...meta.beaten, id] };
 }
 
 export const isUnlocked = (meta, id) => heroCost(id) === 0 || meta.unlocked.includes(id);

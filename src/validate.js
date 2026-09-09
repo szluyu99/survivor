@@ -16,6 +16,7 @@ import { HERO_CARD, PERK_BTN } from './layout.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
+import { DIFFICULTIES, WIN_BONUS } from './difficulty.js';
 import { TERRAIN_TUNING } from './tuning.js';
 
 function checkWeapon(def, errors) {
@@ -214,6 +215,27 @@ export function validateContent() {
       }
     }
   }
+
+  // 难度：基准难度必须是"什么都不改"，否则历史平衡阈值全部失效
+  if (!DIFFICULTIES.length) errors.push('难度表是空的');
+  const diffIds = DIFFICULTIES.map((d) => d.id);
+  if (new Set(diffIds).size !== diffIds.length) errors.push('难度 id 有重复');
+  const base = DIFFICULTIES[0];
+  if (base.enemyHpMul !== 1 || base.enemySpeedMul !== 1 || base.shardMul !== 1 || base.requiresWin) {
+    errors.push('第一个难度必须是基准难度（三个倍率都是 1、无解锁条件）');
+  }
+  for (const d of DIFFICULTIES) {
+    const at = `难度 ${d.id || '?'}`;
+    if (!d.id || !d.name || !d.hint) errors.push(`${at}：缺 id/name/hint`);
+    for (const field of ['enemyHpMul', 'enemySpeedMul', 'shardMul']) {
+      if (!(d[field] > 0)) errors.push(`${at}：${field} 不合法`);
+    }
+    if (d.requiresWin && !DIFFICULTIES.some((x) => x.id === d.requiresWin)) {
+      errors.push(`${at}：解锁条件指向不存在的难度 ${d.requiresWin}`);
+    }
+    if (d.requiresWin === d.id) errors.push(`${at}：解锁条件指向自己，永远解不开`);
+  }
+  if (!(WIN_BONUS > 0)) errors.push('通关奖励必须为正数，否则打通没有收益');
 
   // 槽位数得放得下东西，否则玩法直接失效
   if (!(MAX_SLOTS >= 1)) errors.push('武器槽位数不合法');

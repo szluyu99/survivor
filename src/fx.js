@@ -5,8 +5,8 @@ import { P } from './palette.js';
 import { sfx } from './audio.js';
 import { currentZone } from './zones.js';
 
-// onDeath 由 game.js 传进来（用来写最好成绩），fx 模块自己不碰 localStorage
-export function createFx({ onDeath } = {}) {
+// onDeath / onWin 由 game.js 传进来（写最好成绩、记通关解锁），fx 模块自己不碰 localStorage
+export function createFx({ onDeath, onWin } = {}) {
   // ---- 表现层状态：粒子、跳字、震屏、闪白。全部对象池，不在帧里 new ----
   const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
   const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false }));
@@ -225,6 +225,17 @@ export function createFx({ onDeath } = {}) {
       fxState.warnColor = P.accent;
       fxState.shake = Math.max(fxState.shake, 5);
       sfx.zone();
+    },
+    // 通关：打完最后一个区域的 Boss。面板由 game.js 画，这里只负责"这一刻"的表现
+    win: (f, w) => {
+      burst(f.x, f.y, 60, P.calm, 340, 5);
+      fxState.flash = 0.4;
+      fxState.shake = Math.max(fxState.shake, 10);
+      fxState.warn = 2.4;
+      fxState.warnText = '通关！';
+      fxState.warnColor = P.calm;
+      sfx.win();
+      if (onWin) onWin(w);
     },
   };
 

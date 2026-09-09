@@ -6,10 +6,11 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, PERK_BTN, perkBtnX, DIFF_BTN, HELP_BTN } from './layout.js';
 import { HEROES } from './heroes.js';
-import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards } from './meta.js';
-import { currentZone, ZONE_SECONDS } from './zones.js';
+import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked } from './meta.js';
+import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
 import { findBossKind } from './bosses.js';
@@ -400,9 +401,10 @@ export function createHud(ctx, deps) {
     ctx.fillStyle = P.overlayHard;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     ctx.textAlign = 'center';
-    ctx.fillStyle = P.hp;
+    // 通关过的这一局，标题换成"通关"——死在无尽阶段也仍然是通关了
+    ctx.fillStyle = w.won ? P.calm : P.hp;
     ctx.font = 'bold 34px sans-serif';
-    ctx.fillText('阵亡', VIEW_W / 2, 52);
+    ctx.fillText(w.won ? '通关' : '阵亡', VIEW_W / 2, 52);
 
     ctx.fillStyle = P.text;
     ctx.font = '18px ui-monospace, monospace';
@@ -416,7 +418,12 @@ export function createHud(ctx, deps) {
     // 本局赚到的残片：结算时才结账，所以这里直接按公式显示
     ctx.fillStyle = P.calm;
     ctx.font = '14px ui-monospace, monospace';
-    ctx.fillText(`本局 +${earnShards(w)} 残片　共 ${meta().shards} 片`, VIEW_W / 2, 124);
+    const diff = findDifficulty(w.difficulty);
+    const bonus = w.won ? `（含通关 +${WIN_BONUS}）` : '';
+    ctx.fillText(
+      `${diff.name}难度　本局 +${earnShards(w)} 残片${bonus}　共 ${meta().shards} 片`,
+      VIEW_W / 2, 124,
+    );
 
     const L = w.log;
     // 左栏：哪把武器在干活
@@ -486,6 +493,51 @@ export function createHud(ctx, deps) {
     }
   }
 
+  // 通关面板：打完最后一个区域的 Boss 那一刻弹出来，选继续无尽还是重开
+  function drawWinPanel(w) {
+    ctx.fillStyle = P.overlayHard;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.calm;
+    ctx.font = 'bold 38px sans-serif';
+    ctx.fillText('通关！', VIEW_W / 2, 150);
+
+    ctx.fillStyle = P.text;
+    ctx.font = '17px ui-monospace, monospace';
+    ctx.fillText(
+      `${findDifficulty(w.difficulty).name}难度　用时 ${clock(w.wonAt)}　击杀 ${w.kills}　Lv.${w.player.level}`,
+      VIEW_W / 2, 196,
+    );
+    ctx.fillStyle = P.dim;
+    ctx.font = '14px sans-serif';
+    ctx.fillText(`走完了 ${ZONES.map((z) => z.name).join(' → ')}，并打倒了最后一个区域的 Boss`, VIEW_W / 2, 224);
+    ctx.fillStyle = P.calm;
+    ctx.font = '14px ui-monospace, monospace';
+    ctx.fillText(`通关奖励 +${WIN_BONUS} 残片`, VIEW_W / 2, 252);
+
+    // 本局的 build，让人知道自己是靠什么打通的
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('本局装备', VIEW_W / 2, 292);
+    ctx.fillStyle = P.dim;
+    ctx.font = '13px sans-serif';
+    ctx.fillText(w.weapons.map((x) => `${WEAPON_NAME[x.id] || x.id} Lv.${x.level}`).join('　'), VIEW_W / 2, 316);
+
+    const next = DIFFICULTIES.find((d) => d.requiresWin === w.difficulty);
+    if (next) {
+      ctx.fillStyle = P.danger;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`已解锁「${next.name}」难度：${next.hint}`, VIEW_W / 2, 360);
+    }
+
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText('回车 / 点击继续无尽模式', VIEW_W / 2, 420);
+    ctx.fillStyle = P.faint;
+    ctx.font = '13px sans-serif';
+    ctx.fillText('空格直接重开一局　区域会继续循环，难度继续上涨', VIEW_W / 2, 446);
+  }
+
   // 回放中的角标：说明"这不是你在玩"，外加进度条和退出提示
   function drawReplayBadge(w, progress) {
     ctx.textAlign = 'center';
@@ -519,19 +571,84 @@ export function createHud(ctx, deps) {
     ctx.textAlign = 'center';
     ctx.fillStyle = P.text;
     ctx.font = 'bold 32px sans-serif';
-    ctx.fillText('色块幸存者', cx, 112);
+    ctx.fillText('色块幸存者', cx, 108);
 
-    ctx.fillStyle = P.dim;
+    // 目标写在最上面：一局有终点这件事得让人一眼看到
+    ctx.fillStyle = P.calm;
     ctx.font = '13px sans-serif';
-    ctx.fillText('移动 = WASD / 方向键 / 按住屏幕　攻击是自动的，你只需要走位　Q / E 放技能', cx, 136);
+    ctx.fillText(`目标：走完 ${ZONES.map((z) => z.name).join(' → ')}，打倒最后一个区域的 Boss 即通关`, cx, 134);
 
     ctx.fillStyle = P.accent;
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText(`选择角色　　残片 ${meta().shards}`, cx, 152);
+    const beaten = meta().beaten.length
+      ? `　已通关：${meta().beaten.map((id) => findDifficulty(id).name).join('、')}`
+      : '';
+    ctx.fillText(`选择角色　　残片 ${meta().shards}${beaten}`, cx, 166);
     drawHeroCards();
     drawPerks();
+    drawTitleButtons();
 
-    // 图例：把各兵种的形状先亮一遍
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 464);
+    ctx.fillStyle = P.faint;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('← → 换选中　回车开始　D 换难度　H 看操作说明　只有这几个操作会开局', cx, 486);
+    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 506);
+    if (deps.getHelpOpen && deps.getHelpOpen()) drawHelp();
+  }
+
+  // 难度 / 帮助两个按钮。说明和图例收进帮助浮层，首屏才放得下难度选择
+  function drawTitleButtons() {
+    const cur = findDifficulty(deps.getDifficulty ? deps.getDifficulty() : DEFAULT_DIFFICULTY);
+    const locked = !difficultyUnlocked(meta(), cur.id);
+    ctx.fillStyle = P.card;
+    ctx.fillRect(DIFF_BTN.x, DIFF_BTN.y, DIFF_BTN.w, DIFF_BTN.h);
+    ctx.strokeStyle = cur.id === DEFAULT_DIFFICULTY ? P.cardLine : P.danger;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(DIFF_BTN.x, DIFF_BTN.y, DIFF_BTN.w, DIFF_BTN.h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = locked ? P.faint : (cur.id === DEFAULT_DIFFICULTY ? P.text : P.danger);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`难度：${cur.name}`, DIFF_BTN.x + DIFF_BTN.w / 2, DIFF_BTN.y + 14);
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '11px sans-serif';
+    ctx.fillText(cur.hint, DIFF_BTN.x + DIFF_BTN.w / 2, DIFF_BTN.y + 27);
+
+    ctx.fillStyle = P.card;
+    ctx.fillRect(HELP_BTN.x, HELP_BTN.y, HELP_BTN.w, HELP_BTN.h);
+    ctx.strokeStyle = P.cardLine;
+    ctx.strokeRect(HELP_BTN.x, HELP_BTN.y, HELP_BTN.w, HELP_BTN.h);
+    ctx.fillStyle = P.text;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('操作说明 H', HELP_BTN.x + HELP_BTN.w / 2, HELP_BTN.y + 21);
+  }
+
+  // 帮助浮层：以前占了首屏五行的操作说明 + 一整排兵种图例，都挪到这里
+  function drawHelp() {
+    const cx = VIEW_W / 2;
+    ctx.fillStyle = P.overlayHard;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('操作说明', cx, 60);
+
+    ctx.fillStyle = P.dim;
+    ctx.font = '14px sans-serif';
+    [
+      'WASD / 方向键移动，鼠标按住朝指针走，手机按住屏幕拖出摇杆',
+      '攻击是自动的，你只需要走位；捡蓝色经验球升级，每次升级三选一',
+      'Shift / 空格 / 右键冲刺，期间短暂无敌可以穿怪（手机双击）',
+      'Q / E 放主动技能（升级时可以学，手机点右下角按钮）',
+      '选卡界面：R 重抽，Shift + 数字排除这张卡',
+      'ESC / P 暂停并查看全部装备与属性，M 静音',
+      '阵亡结算里按 R 可以回看这一局的完整回放',
+    ].forEach((t, i) => ctx.fillText(t, cx, 100 + i * 26));
+
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('兵种（形状比颜色好认，也对色盲友好）', cx, 310);
     const legend = [
       ['grunt', '杂兵'], ['rusher', '冲锋兵'], ['tank', '肉盾'],
       ['shooter', '射手'], ['splitter', '分裂'], ['summoner', '召唤'],
@@ -540,19 +657,24 @@ export function createHud(ctx, deps) {
     const startX = cx - (legend.length - 1) * 78 / 2;
     legend.forEach(([kind, name], i) => {
       const x = startX + i * 78;
-      drawEntity(kind, x, 396, 12, P.enemy[kind], -Math.PI / 2);
+      drawEntity(kind, x, 350, 13, P.enemy[kind], -Math.PI / 2);
       ctx.fillStyle = P.dimmer;
       ctx.font = '12px sans-serif';
-      ctx.fillText(name, x, 420);
+      ctx.fillText(name, x, 376);
+    });
+
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('区域', cx, 412);
+    ctx.fillStyle = P.dim;
+    ctx.font = '12px sans-serif';
+    ZONES.forEach((z, i) => {
+      ctx.fillText(`${z.name}：${z.hint}`, cx, 434 + i * 20);
     });
 
     ctx.fillStyle = P.warn;
-    ctx.font = 'bold 17px sans-serif';
-    ctx.fillText('点一张角色卡开始（或按 1–4）', cx, 452);
-    ctx.fillStyle = P.faint;
-    ctx.font = '12px sans-serif';
-    ctx.fillText('← → 换选中，回车开始　只有这几个操作会开局，不怕误触　残片靠每局存活时长和击杀获得', cx, 474);
-    if (best()) ctx.fillText(`你的最好成绩：存活 ${clock(best().t)}，击杀 ${best().kills}`, cx, 494);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('H / ESC / 点击任意处关闭', cx, 512);
   }
 
   // 永久强化：点一下买一级。幅度很小，作用是给残片一个去处
@@ -643,5 +765,5 @@ export function createHud(ctx, deps) {
     if (line) ctx.fillText(line, cx2, ly);
   }
 
-  return { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, statBars, WEAPON_NAME, clock };
+  return { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, drawWinPanel, statBars, WEAPON_NAME, clock };
 }

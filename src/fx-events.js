@@ -15,6 +15,8 @@ export const FX_EVENTS = [
   'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
   // 地图
   'chest', 'zone',
+  // 通关
+  'win',
 ];
 
 const FX_SET = new Set(FX_EVENTS);

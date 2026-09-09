@@ -115,3 +115,112 @@ test('applyPerks 传 null / 空对象都不炸', () => {
   applyPerks(w, {});
   assert.equal(w.player.maxHp, hp);
 });
+
+// ---- 难度与通关 ----
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from '../src/difficulty.js';
+import { difficultyUnlocked, noteWin } from '../src/meta.js';
+import { ZONES } from '../src/zones.js';
+import { update, chooseUpgrade } from '../src/sim.js';
+
+test('基准难度什么都不改（历史平衡数据的锚点）', () => {
+  const base = createWorld(3);
+  const explicit = createWorld(3, DEFAULT_HERO, null, DEFAULT_DIFFICULTY);
+  assert.equal(base.difficulty, DEFAULT_DIFFICULTY);
+  assert.deepEqual(explicit.stats, base.stats);
+  assert.equal(findDifficulty(DEFAULT_DIFFICULTY).shardMul, 1);
+});
+
+test('噩梦难度只改敌人侧倍率，走的是诅咒卡同一组字段', () => {
+  const d = DIFFICULTIES[1];
+  const w = createWorld(3, DEFAULT_HERO, null, d.id);
+  assert.equal(w.difficulty, d.id);
+  assert.ok(Math.abs(w.stats.enemyHpMul - d.enemyHpMul) < 1e-9);
+  assert.ok(Math.abs(w.stats.enemySpeedMul - d.enemySpeedMul) < 1e-9);
+  // 玩家侧不该被动到
+  const base = createWorld(3);
+  assert.equal(w.player.maxHp, base.player.maxHp);
+  assert.equal(w.stats.damageMul, base.stats.damageMul);
+});
+
+test('难度要先通关才解锁，通关记录会写进存档', () => {
+  const m = defaultMeta();
+  assert.ok(difficultyUnlocked(m, DEFAULT_DIFFICULTY), '基准难度必须一开始就能选');
+  const locked = DIFFICULTIES.find((d) => d.requiresWin);
+  assert.ok(locked, '至少要有一个需要通关解锁的难度');
+  assert.ok(!difficultyUnlocked(m, locked.id));
+
+  const after = noteWin(m, locked.requiresWin);
+  assert.ok(after, '第一次通关应该写进存档');
+  assert.ok(difficultyUnlocked(after, locked.id), '通关后没解锁下一档难度');
+  assert.equal(noteWin(after, locked.requiresWin), null, '同一难度重复通关不该重复记录');
+  assert.deepEqual(m.beaten, [], '不该原地改传进来的存档');
+});
+
+test('残片按难度倍率结算，通关另外给奖励', () => {
+  const run = { t: 90, kills: 170, difficulty: DEFAULT_DIFFICULTY, won: false };
+  const plain = earnShards(run);
+  const nightmare = DIFFICULTIES[1];
+  const harder = earnShards({ ...run, difficulty: nightmare.id });
+  assert.equal(harder, Math.floor(plain * nightmare.shardMul));
+  assert.equal(earnShards({ ...run, won: true }), plain + WIN_BONUS);
+});
+
+test('脏存档里的通关记录会被洗掉', () => {
+  const m = normalizeMeta({ beaten: ['normal', 'normal', '不存在的难度'] });
+  assert.deepEqual(m.beaten, ['normal']);
+});
+
+test('在最后一个区域打死 Boss 就算通关，并登记 win 事件', () => {
+  const w = createWorld(4);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.zoneIndex = ZONES.length - 1;     // 直接站在最后一个区域
+  w.t = 60;
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 0.01;
+  w.weapons = [{ id: 'bolt', level: 5, timer: 0 }, { id: 'chain', level: 3, timer: 0 }];
+  let wins = 0;
+  let seen = 0;
+  for (let i = 0; i < 200 * 60 && !w.won; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    w.zoneIndex = ZONES.length - 1;   // 钉住，别让它循环过去
+    w.zoneT = 0;
+    const a = (i / 60) * 1.6;
+    update(w, 1 / 60, { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) {
+      if (f.active && f.type === 'boss') seen++;
+      if (f.active && f.type === 'win') wins++;
+      f.active = false;
+    }
+    if (seen > 0) w.bossTimer = 1e9;
+  }
+  assert.ok(w.won, '打死最后一个区域的 Boss 之后没有判定通关');
+  assert.equal(wins, 1, `win 事件应该只登记一次，实际 ${wins}`);
+  assert.ok(w.wonAt > 0 && w.wonAt <= w.t);
+  assert.ok(earnShards(w) > 0);
+});
+
+test('不在最后一个区域打死 Boss 不算通关', () => {
+  const w = createWorld(4);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.t = 60;
+  w.spawnTimer = 1e9;
+  w.eliteTimer = 1e9;
+  w.bossTimer = 0.01;
+  w.weapons = [{ id: 'bolt', level: 5, timer: 0 }, { id: 'chain', level: 3, timer: 0 }];
+  let kills = 0;
+  for (let i = 0; i < 200 * 60 && kills === 0; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    w.zoneIndex = 0;                  // 第一个区域
+    w.zoneT = 0;
+    const a = (i / 60) * 1.6;
+    update(w, 1 / 60, { dx: Math.cos(a), dy: Math.sin(a) });
+    for (const f of w.fx) {
+      if (f.active && f.type === 'bossdead') kills++;
+      f.active = false;
+    }
+    w.bossTimer = Math.min(w.bossTimer, 1e9);
+  }
+  assert.equal(kills, 1, '第一个区域的 Boss 没被打死，这条测试的前提就不成立');
+  assert.equal(w.won, false, '第一个区域打死 Boss 不该算通关');
+});
