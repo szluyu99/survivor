@@ -600,6 +600,72 @@ test('密集场面下绘制调用不随敌人数量线性增长（同色实体�
   }
 });
 
+test('子弹按武器分形状，高速弹带拖尾', async () => {
+  const { P } = await import('../src/palette.js');
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  try {
+    // 手工摆三种子弹：穿透枪（长条）、回旋镖（菱形）、地雷（方块）
+    const specs = [
+      { src: 'lance', vx: 700, vy: 0, r: 6 },
+      { src: 'boomerang', vx: 0, vy: 340, r: 7 },
+      { src: 'mine', vx: 0, vy: 0, r: 7, blast: 50 },
+    ];
+    let n = 0;
+    for (const b of w.bullets) {
+      if (n >= specs.length) break;
+      if (b.active) continue;
+      Object.assign(b, {
+        active: true, id: 70000 + n, x: w.player.x + 40 + n * 30, y: w.player.y,
+        life: 5, dmg: 1, pierce: 1, blast: 0, fuse: 0, flip: -1, foe: false, homing: 0,
+        color: P.bolt, ...specs[n],
+      });
+      n++;
+    }
+    calls.length = 0;
+    runFrames(2);
+    // 长条是四边形（moveTo + 3×lineTo + closePath），菱形也走 closePath，方块走 rect
+    assert.ok(calls.some(([m]) => m === 'rect'), '地雷没画成方块');
+    assert.ok(calls.some(([m]) => m === 'closePath'), '长条/菱形没画出来');
+    // 拖尾：高速弹会画 moveTo + lineTo 的短线段
+    const lines = calls.filter(([m]) => m === 'lineTo').length;
+    assert.ok(lines > 3, `高速弹没画拖尾（lineTo 只有 ${lines} 次）`);
+  } finally {
+    for (const b of w.bullets) if (b.id >= 70000) b.active = false;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
+test('血量低会出现红边，满血时不画', () => {
+  const w = globalThis.__survivorWorld;
+  const realHp = w.player.hp;
+  const realMax = w.player.maxHp;
+  try {
+    w.player.maxHp = 100;
+    w.player.hp = 100;
+    calls.length = 0;
+    runFrames(2);
+    const fullGrads = calls.filter(([m]) => m === 'createRadialGradient').length;
+    w.player.hp = 12; // 12%
+    calls.length = 0;
+    runFrames(2);
+    const lowFills = calls.filter(([m]) => m === 'fillRect').length;
+    assert.ok(lowFills > 0, '低血量时没画全屏覆盖');
+    // 红边的渐变只建一次并缓存，所以这里只验"低血量比满血多了一层全屏 fillRect"
+    w.player.hp = 100;
+    calls.length = 0;
+    runFrames(2);
+    const fullFills = calls.filter(([m]) => m === 'fillRect').length;
+    assert.ok(lowFills > fullFills, `低血量应该多画一层红边：低血 ${lowFills} 次 vs 满血 ${fullFills} 次`);
+    assert.ok(fullGrads >= 0);
+  } finally {
+    w.player.maxHp = realMax;
+    w.player.hp = realHp;
+  }
+});
+
 test('玩家有朝向和挤压：内环偏心、移动时形状被拉长', () => {
   const w = globalThis.__survivorWorld;
   const realMaxHp = w.player.maxHp;
@@ -619,9 +685,13 @@ test('玩家有朝向和挤压：内环偏心、移动时形状被拉长', () =>
     assert.ok(sx < 1.3 && sy > 0.7, `挤压幅度太夸张：scale(${sx}, ${sy})`);
     // 内环偏心：朝右跑时环心应该在玩家中心的右边
     assert.ok(w.player.faceX > 0.5, '前提不成立：玩家没在朝右走');
+    // 相机现在有前瞻，玩家不再永远在正中心：拿 translate 的落点当参照
+    const at = calls.filter(([m]) => m === 'translate').map(([, a]) => a).pop();
+    assert.ok(at, '玩家没走 translate（挤压那段没执行）');
+    const [pcx, pcy] = at;
     const arcs = calls.filter(([m]) => m === 'arc').map(([, a]) => a);
-    const eye = arcs.find(([x, y, r]) => Math.abs(y - 270) < 2 && x > 481 && r < w.player.r);
-    assert.ok(eye, `内环没有朝右偏心：${JSON.stringify(arcs.slice(0, 6))}`);
+    const eye = arcs.find(([x, y, r]) => Math.abs(y - pcy) < 3 && x > pcx + 1 && r < w.player.r);
+    assert.ok(eye, `内环没有朝右偏心（玩家在 ${pcx.toFixed(0)},${pcy.toFixed(0)}）：${JSON.stringify(arcs.slice(0, 6))}`);
   } finally {
     w.player.maxHp = realMaxHp;
     w.player.hp = Math.min(w.player.hp, realMaxHp);

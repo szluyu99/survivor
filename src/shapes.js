@@ -91,6 +91,7 @@ export function createShapes(ctx) {
 
   // 暗角：把视线收到中心，顺便压掉边缘的网格噪声。渐变对象建一次就够
   let vignette = null;
+  let dangerVignette = null;
   function drawVignette() {
     if (!vignette) {
       vignette = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.35, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.78);
@@ -99,6 +100,22 @@ export function createShapes(ctx) {
     }
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+
+  // 低血量的红边：血越少越明显，还带一点呼吸。
+  // 血条在左上角，混战时根本没空看；边缘变红是余光里也能察觉的信号。
+  // strength 由调用方按血量算（0 = 不画）
+  function drawDangerEdge(strength, pulse) {
+    if (strength <= 0) return;
+    if (!dangerVignette) {
+      dangerVignette = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.72);
+      dangerVignette.addColorStop(0, 'rgba(0,0,0,0)');
+      dangerVignette.addColorStop(1, P.dangerEdge);
+    }
+    ctx.globalAlpha = Math.min(1, strength * (0.72 + 0.28 * pulse));
+    ctx.fillStyle = dangerVignette;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.globalAlpha = 1;
   }
 
   // 地图元素：岩块用 seed 生成固定的不规则轮廓，泥地是半透明水洼，宝箱是个小箱子
@@ -178,5 +195,5 @@ export function createShapes(ctx) {
     ctx.globalAlpha = 1;
   }
 
-  return { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain, edgeMarker };
+  return { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker };
 }

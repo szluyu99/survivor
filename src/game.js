@@ -34,7 +34,7 @@ function saveBest(w) {
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain, edgeMarker } = createShapes(ctx);
+const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = createShapes(ctx);
 
 // 批量绘制用的分组桶：key 是颜色（都是 palette 里的常量字符串，不产生新字符串），
 // value 是复用的数组。每帧只把长度清零、不重建，热循环里零分配
@@ -872,6 +872,15 @@ function drawGems(w, camX, camY, color, big) {
   if (n) { ctx.fillStyle = color; ctx.fill(); }
 }
 
+// 子弹形状表：key 是武器 id（子弹的 src），值是 shapes.js 里的形状名。
+// 'lance' 是这里特有的"拉长胶囊"，在绘制处单独处理。
+// 只在渲染层查表，所以加武器不改这里也不会崩（默认圆点）
+const BULLET_SHAPE = {
+  lance: 'lance', blastlance: 'lance', arclance: 'lance', sunspear: 'lance', thunderstorm: 'lance',
+  boomerang: 'elite', homing: 'elite', swarm: 'elite',   // 菱形：会拐弯/往返的
+  mine: 'tank', minefield: 'tank',                       // 方块：埋在地上的
+};
+
 // 玩家速度的渲染层估算：拿相邻两帧的位置差算，只用来做挤压拉伸的幅度。
 // 逻辑层不存速度字段，这里也不该为了一个视觉效果去改它
 let playerSpeedGuess = 0;
@@ -895,11 +904,26 @@ function sampleDashGhost(w) {
   if (ghostTick === 0) pushGhost(w.player.x, w.player.y, w.player.r);
 }
 
+// 相机的前瞻与阻尼：镜头朝移动方向探出一点，并且软着陆。
+// 死锁在玩家中心时画面很"硬"，前瞻方向正好和玩家朝向的表达一致。
+// 全在渲染层：虚拟摇杆和屏幕外指示都是拿这里的 camX/camY 换算的，跟着一起走
+const CAM_LOOKAHEAD = 46;
+let camLeadX = 0, camLeadY = 0;
+function camLead(w) {
+  const want = w.player.dashT > 0 ? 1 : Math.min(1, playerSpeedGuess / PLAYER.speed);
+  const tx = w.player.faceX * CAM_LOOKAHEAD * want;
+  const ty = w.player.faceY * CAM_LOOKAHEAD * want;
+  // 阻尼跟随：突然掉头时镜头不会跳过去
+  camLeadX += (tx - camLeadX) * 0.08;
+  camLeadY += (ty - camLeadY) * 0.08;
+}
+
 function render(w) {
-  const camX = w.player.x - VIEW_W / 2;
-  const camY = w.player.y - VIEW_H / 2;
   sampleDashGhost(w);
   samplePlayerSpeed(w, 1 / 60);
+  camLead(w);
+  const camX = w.player.x - VIEW_W / 2 + camLeadX;
+  const camY = w.player.y - VIEW_H / 2 + camLeadY;
   ctx.fillStyle = P.bg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
@@ -964,6 +988,45 @@ function render(w) {
   // --- 经验球：两种大小各攒一条路径 ---
   drawGems(w, camX, camY, P.gem, false);
   drawGems(w, camX, camY, P.gemBig, true);
+
+  // 敌人脚下的阴影：玩家一直有、敌人一个都没有，所以玩家像站在地上、怪像浮着。
+  // 所有椭圆攒进一条路径，一次 fill 画完（几百只怪也只多一次调用）
+  ctx.fillStyle = P.shadow;
+  ctx.beginPath();
+  let shadows = 0;
+  for (const e of w.enemies) {
+    if (!e.active) continue;
+    ctx.moveTo(e.x - camX + e.r * 0.9, e.y - camY + e.r * 0.85);
+    ctx.ellipse(e.x - camX, e.y - camY + e.r * 0.85, e.r * 0.9, e.r * 0.34, 0, 0, Math.PI * 2);
+    shadows++;
+  }
+  if (shadows) ctx.fill();
+
+  // 进入拾取范围的经验球拉一条短拖尾：球被吸走前是瞬间消失的，没有"被吸过来"的感觉。
+  // 一条路径一次 stroke，和磁吸那条尾迹同一套写法
+  {
+    const range = w.stats.pickupRange;
+    ctx.beginPath();
+    let tails = 0;
+    for (const g of w.gems) {
+      if (!g.active) continue;
+      const dx = w.player.x - g.x, dy = w.player.y - g.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > range * range || d2 < 1) continue;
+      const d = Math.sqrt(d2);
+      const len = Math.min(18, d * 0.5);
+      ctx.moveTo(g.x - camX, g.y - camY);
+      ctx.lineTo(g.x - camX - (dx / d) * len, g.y - camY - (dy / d) * len);
+      tails++;
+    }
+    if (tails) {
+      ctx.strokeStyle = P.gem;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // --- 敌人：按填充色分组，一色一次 fill + 一次 stroke ---
   // 逐个 drawEntity 时 500 只怪就是 500 次 fill + 500 次 stroke，
@@ -1136,6 +1199,32 @@ function render(w) {
     ctx.globalAlpha = 1;
   }
 
+  // 高速弹的拖尾：沿速度方向拉一小段线。同色攒一条路径，几十颗子弹也只多一次 stroke。
+  // 之前所有投射物都是一样大小的圆点，一屏几十颗完全读不出谁是谁、往哪飞
+  bucketReset();
+  for (const b of w.bullets) {
+    if (!b.active) continue;
+    const sp2 = b.vx * b.vx + b.vy * b.vy;
+    if (sp2 < 300 * 300) continue; // 慢的（地雷、埋在地上的）不拖尾
+    bucketPush(b.foe ? P.foeBullet : (b.color || P.bolt), b);
+  }
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.45;
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    ctx.beginPath();
+    for (const b of list) {
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      const tail = Math.min(26, sp * 0.035);
+      ctx.moveTo(b.x - camX, b.y - camY);
+      ctx.lineTo(b.x - camX - (b.vx / sp) * tail, b.y - camY - (b.vy / sp) * tail);
+    }
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // 弹体：形状按发射它的武器来（b.src 是武器 id，渲染层自己查表，逻辑层不用多存字段）
   bucketReset();
   for (const b of w.bullets) {
     if (b.active) bucketPush(b.foe ? P.foeBullet : (b.color || P.bolt), b);
@@ -1145,7 +1234,26 @@ function render(w) {
   for (const [color, list] of buckets) {
     if (!list.length) continue;
     ctx.beginPath();
-    for (const b of list) subPath('grunt', b.x - camX, b.y - camY, b.r, 0);
+    for (const b of list) {
+      const shape = BULLET_SHAPE[b.src] || 'grunt';
+      // 长条形（穿透枪/激光）和回旋镖要跟着速度方向转，圆点无所谓
+      const rot = shape === 'grunt' ? 0 : Math.atan2(b.vy, b.vx);
+      if (shape === 'lance') {
+        // 拉长的胶囊：用一个细长四边形近似，比圆点更像"一发穿透弹"
+        const sp = Math.hypot(b.vx, b.vy) || 1;
+        const ux = b.vx / sp, uy = b.vy / sp;
+        const nx = -uy * b.r * 0.55, ny = ux * b.r * 0.55;
+        const half = b.r * 2.1;
+        const bx = b.x - camX, by = b.y - camY;
+        ctx.moveTo(bx + ux * half + nx, by + uy * half + ny);
+        ctx.lineTo(bx - ux * half + nx, by - uy * half + ny);
+        ctx.lineTo(bx - ux * half - nx, by - uy * half - ny);
+        ctx.lineTo(bx + ux * half - nx, by + uy * half - ny);
+        ctx.closePath();
+      } else {
+        subPath(shape, b.x - camX, b.y - camY, b.r, rot);
+      }
+    }
     ctx.fillStyle = color;
     ctx.fill();
     ctx.stroke();
@@ -1242,7 +1350,7 @@ function render(w) {
 
   // 玩家：脚下阴影 + 朝向偏心的内环 + 移动时的挤压拉伸，
   // 保证一百只怪里也能立刻找到自己，并且看得出"我朝哪边走 / 刚才往哪冲"
-  const pcx = VIEW_W / 2, pcy = VIEW_H / 2;
+  const pcx = w.player.x - camX, pcy = w.player.y - camY;
   ctx.fillStyle = P.shadow;
   ctx.beginPath();
   ctx.ellipse(pcx, pcy + w.player.r * 0.9, w.player.r * 0.95, w.player.r * 0.4, 0, 0, Math.PI * 2);
@@ -1331,6 +1439,11 @@ function render(w) {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   drawVignette();
+  // 低血量红边：低于 40% 开始出现，越低越明显，还带一点呼吸
+  const hpRatio = w.player.hp / w.player.maxHp;
+  if (hpRatio < 0.4) {
+    drawDangerEdge(1 - hpRatio / 0.4, 0.5 + 0.5 * Math.sin(w.t * 6));
+  }
 
   // 屏幕外的 Boss 和精英：在边缘画箭头指过去。画在暗角之后，否则边缘正好被压暗。
   // 越远越淡，这样"它在那边、大概多远"都不用猜

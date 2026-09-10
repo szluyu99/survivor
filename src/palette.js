@@ -8,6 +8,7 @@ export const P = {
   grid: '#11141d',
   outline: '#06070b',      // 所有实体统一的深色描边，密集时靠它分边界
   vignette: 'rgba(3,4,8,0.6)',
+  dangerEdge: 'rgba(214,36,64,0.55)',   // 低血量时的红边
 
   // 己方
   player: '#7ee081',
