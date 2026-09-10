@@ -6,7 +6,7 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_BTN, menuBtnX, menuBtnY, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN, SANDBOX_ROW, sandboxRowY, SANDBOX_BTN, sandboxBtnY } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_CARD, menuCardRect, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN, SANDBOX_PANEL, SANDBOX_HANDLE, SANDBOX_HANDLE_MIN, SANDBOX_ROW, sandboxRowRect, sandboxMinusRect, sandboxPlusRect, SANDBOX_BTN, sandboxBtnRect } from './layout.js';
 import { HEROES, findHero } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked, ZONE_CLEAR_BONUS } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
@@ -529,62 +529,105 @@ export function createHud(ctx, deps) {
   }
 
   // 武器沙盒的控制面板。ui 由 game.js 组装：
-  // { rows: [{ name, level, maxLevel, group, line }], buttons: [{ label, on }], dps, hint }
-  // 面板只占左边一半，右半边留给实际打斗——不然调完看不到效果
+  // { rows: [{ name, level, maxLevel, group }], buttons: [{ label, on }], dps, hint, open }
+  //
+  // 贴在屏幕底部而不是占左半屏：第一版是左边一条竖栏，把左上角的血条/经验条全挡住了，
+  // 而且没法收起来。现在武器排 3 列 × 6 行，右边放开关和靶子，Tab 或点把手可以折叠
   function drawSandbox(w, ui) {
-    const panelW = SANDBOX_BTN.x + SANDBOX_BTN.w + 14;
+    if (!ui.open) {
+      // 折叠态：只留一条把手，剩下整屏都是战场
+      const h = SANDBOX_HANDLE_MIN;
+      ctx.fillStyle = P.panelBg;
+      ctx.fillRect(h.x, h.y, h.w, h.h);
+      ctx.strokeStyle = P.accent;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(h.x, h.y, h.w, h.h);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = P.accent;
+      ctx.font = '12px sans-serif';
+      ctx.fillText('Tab 展开沙盒面板', h.x + h.w / 2, h.y + 16);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    const p0 = SANDBOX_PANEL;
     ctx.fillStyle = P.panelBg;
-    ctx.fillRect(0, 0, panelW, VIEW_H);
+    ctx.fillRect(p0.x, p0.y, p0.w, p0.h);
     ctx.strokeStyle = P.cardLine;
     ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, panelW, VIEW_H);
+    ctx.strokeRect(p0.x, p0.y, p0.w, p0.h);
+
+    // 折叠把手放在面板上沿，收起来之后它会挪到屏幕最下面
+    const h = SANDBOX_HANDLE;
+    ctx.fillStyle = P.card;
+    ctx.fillRect(h.x, h.y, h.w, h.h);
+    ctx.strokeStyle = P.accent;
+    ctx.strokeRect(h.x, h.y, h.w, h.h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.accent;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Tab 折叠面板', h.x + h.w / 2, h.y + 16);
 
     ctx.textAlign = 'left';
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 17px sans-serif';
-    ctx.fillText('武器沙盒', 14, 30);
-    ctx.fillStyle = P.dimmer;
-    ctx.font = '11px sans-serif';
-    ctx.fillText('点一行 +1 级，Shift 点 / 右键 -1 级　ESC 退出', 14, 48);
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('武器沙盒', 12, p0.y + 22);
     ctx.fillStyle = P.calm;
     ctx.font = '12px ui-monospace, monospace';
-    ctx.fillText(`最近 3 秒输出 ${ui.dps.toFixed(0)}/秒`, 14, 68);
+    ctx.fillText(`最近 3 秒输出 ${ui.dps.toFixed(0)}/秒`, 96, p0.y + 22);
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '11px sans-serif';
+    ctx.fillText('点 [+] [-] 调等级　1-4 放靶子　0 清空　ESC 退出', 274, p0.y + 22);
     if (ui.hint) {
       ctx.fillStyle = P.warn;
-      ctx.fillText(ui.hint, 14, 84);
+      ctx.font = '11px sans-serif';
+      ctx.fillText(ui.hint, 620, p0.y + 22);
     }
 
-    // 左栏：一行一把武器。手上有的高亮，没有的暗着（点一下就装上）
-    ctx.font = '12px sans-serif';
-    ui.rows.forEach((r, i) => {
-      const y = sandboxRowY(i);
-      const held = r.level > 0;
+    // 武器行：手上有的高亮（描边按基础/进化/觉醒分色），没装的暗着
+    ui.rows.forEach((r0, i) => {
+      const r = sandboxRowRect(i);
+      const held = r0.level > 0;
       ctx.fillStyle = held ? P.card : P.panelBg;
-      ctx.fillRect(SANDBOX_ROW.x, y, SANDBOX_ROW.w, SANDBOX_ROW.h);
-      ctx.strokeStyle = held ? (r.group === 'awaken' ? P.evo : r.group === 'evo' ? P.calm : P.cardLine) : P.btnLine;
-      ctx.strokeRect(SANDBOX_ROW.x, y, SANDBOX_ROW.w, SANDBOX_ROW.h);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = held ? (r0.group === 'awaken' ? P.evo : r0.group === 'evo' ? P.calm : P.cardLine) : P.btnLine;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.fillStyle = held ? P.text : P.faint;
-      ctx.fillText(r.name, SANDBOX_ROW.x + 6, y + 15);
-      ctx.textAlign = 'right';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(r0.name, r.x + 6, r.y + 16);
       ctx.fillStyle = held ? P.warn : P.faint;
       ctx.font = '11px ui-monospace, monospace';
-      ctx.fillText(held ? `Lv.${r.level}/${r.maxLevel}` : '未装', SANDBOX_ROW.x + SANDBOX_ROW.w - 6, y + 15);
-      ctx.textAlign = 'left';
-      ctx.font = '12px sans-serif';
+      ctx.fillText(held ? `${r0.level}/${r0.maxLevel}` : '-', r.x + 84, r.y + 16);
+
+      for (const [rect, label, color] of [
+        [sandboxMinusRect(i), '-', held ? P.danger : P.fainter],
+        [sandboxPlusRect(i), '+', r0.level < r0.maxLevel ? P.accent : P.fainter],
+      ]) {
+        ctx.fillStyle = P.panelBg;
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.strokeStyle = color;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = color;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(label, rect.x + rect.w / 2, rect.y + 16);
+        ctx.textAlign = 'left';
+      }
     });
 
-    // 右栏：开关和放靶子
+    // 右侧：开关和靶子
     ui.buttons.forEach((b, i) => {
-      const y = sandboxBtnY(i);
+      const r = sandboxBtnRect(i);
       ctx.fillStyle = b.on ? P.card : P.panelBg;
-      ctx.fillRect(SANDBOX_BTN.x, y, SANDBOX_BTN.w, SANDBOX_BTN.h);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
       ctx.strokeStyle = b.on ? P.accent : P.btnLine;
       ctx.lineWidth = b.on ? 2 : 1;
-      ctx.strokeRect(SANDBOX_BTN.x, y, SANDBOX_BTN.w, SANDBOX_BTN.h);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.lineWidth = 1;
       ctx.fillStyle = b.on ? P.accent : P.dim;
       ctx.font = '12px sans-serif';
-      ctx.fillText(b.label, SANDBOX_BTN.x + 8, y + 17);
+      ctx.fillText(b.label, r.x + 8, r.y + 16);
     });
   }
 
@@ -869,26 +912,26 @@ export function createHud(ctx, deps) {
     ctx.font = '13px sans-serif';
     ctx.fillText(`目标：走完 ${ZONES.map((z) => z.name).join(' → ')}，打倒最后一个区域的 Boss`, cx, 132);
 
+    // 卡片网格：标题一行，说明小字另起一行（竖排按钮时挤在同一行，长一点的说明就会顶到边）
     items.forEach((it, i) => {
-      const x = menuBtnX(), y = menuBtnY(i);
+      const r = menuCardRect(i);
       const on = i === cursor;
       ctx.fillStyle = P.card;
-      ctx.fillRect(x, y, MENU_BTN.w, MENU_BTN.h);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
       ctx.strokeStyle = on ? P.warn : P.cardLine;
       ctx.lineWidth = on ? 2 : 1;
-      ctx.strokeRect(x, y, MENU_BTN.w, MENU_BTN.h);
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.textAlign = 'left';
       ctx.fillStyle = P.dimmer;
       ctx.font = '11px ui-monospace, monospace';
-      ctx.fillText(String(i + 1), x + 12, y + 25);
+      ctx.fillText(String(i + 1), r.x + 12, r.y + 24);
       ctx.fillStyle = it.disabled ? P.faint : (on ? P.warn : P.text);
       ctx.font = 'bold 15px sans-serif';
-      ctx.fillText(it.label, x + 34, y + 25);
+      ctx.fillText(it.label, r.x + 32, r.y + 24);
       if (it.note) {
-        ctx.textAlign = 'right';
         ctx.fillStyle = it.disabled ? P.fainter : P.dimmer;
         ctx.font = '12px sans-serif';
-        ctx.fillText(it.note, x + MENU_BTN.w - 12, y + 25);
+        ctx.fillText(it.note, r.x + 32, r.y + 44);
       }
     });
 

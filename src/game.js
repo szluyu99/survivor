@@ -6,7 +6,7 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuBtnHit, MENU_BTN, inBackBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
@@ -382,6 +382,7 @@ function unlockHeroAt(i) {
 // 它是工具，所以不写存档、不记成就、不录像，也不结算残片。
 const sandbox = {
   on: false,
+  open: true,       // 面板展开着？Tab 折叠（第一版没法收起来，左半屏一直被挡）
   immortal: true,
   freeze: true,     // 冻结自动刷怪（靶子靠手动放）
   lockSlots: true,  // 默认仍然锁 3 个槽位，和实战一致；放开是为了试任意组合
@@ -423,7 +424,8 @@ function sandboxButtons() {
   ];
 }
 
-// 调等级：没装的点一下装上（受槽位限制），装了的 +1 / -1，减到 0 就卸掉
+// 调等级：没装的点一下装上（受槽位限制），装了的 +1 / -1，减到 0 就卸掉。
+// delta 来自 [+] / [-] 按钮；点行的空白处等价于 +1（Shift 点和右键仍然是 -1，留着当快捷方式）
 function sandboxBumpWeapon(i, down) {
   const row = sandboxRows()[i];
   if (!row) return;
@@ -473,6 +475,7 @@ function beginSandbox() {
   world.chestTimer = 1e9;
   for (const t of world.terrain) t.active = false;
   sandbox.on = true;
+  sandbox.open = true;
   sandbox.hint = '';
   sandbox.dpsWindow.length = 0;
   recording = false;           // 工具局不录像、不结算
@@ -577,16 +580,19 @@ addEventListener('keydown', (e) => {
       return; // help 屏只认 ESC / 点击
     }
     // 主菜单
-    if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-      const n = MENU_BTN.count;
-      menuCursor = (menuCursor + (e.code === 'ArrowDown' ? 1 : n - 1)) % n;
+    // 菜单是 2 列的卡片网格：上下跳一行（±列数），左右在同一行里换列
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      const n = MENU_CARD.count, cols = MENU_CARD.cols;
+      const step = e.code === 'ArrowDown' ? cols : e.code === 'ArrowUp' ? n - cols
+        : e.code === 'ArrowRight' ? 1 : n - 1;
+      menuCursor = (menuCursor + step) % n;
       e.preventDefault();
       return;
     }
     if (e.code === 'Enter' || e.code === 'NumpadEnter') { activateMenu(menuCursor); return; }
     // 数字键直达。菜单现在有 8 项（最后一项是武器沙盒），所以列到 Digit8
     const mi = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8'].indexOf(e.code);
-    if (mi >= 0 && mi < MENU_BTN.count) { menuCursor = mi; activateMenu(mi); return; }
+    if (mi >= 0 && mi < MENU_CARD.count) { menuCursor = mi; activateMenu(mi); return; }
     if (e.code === 'KeyH') { screen = 'help'; return; }
     if (e.code === 'KeyD') { cycleDifficulty(); return; }
     if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
@@ -609,6 +615,14 @@ addEventListener('keydown', (e) => {
   }
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') && started && !world.over && !world.paused && !uiPaused) {
     if (!e.repeat) dashQueued = true;
+  }
+  // 沙盒的按键要排在局内那套之前：Tab 在局内是详情浮层、数字键是选卡，
+  // 排在后面的话沙盒永远收不到（折叠面板就是这么失灵的）
+  if (sandbox.on) {
+    if (e.code === 'Escape') { exitSandbox(); return; }
+    if (e.code === 'Tab') { sandbox.open = !sandbox.open; e.preventDefault(); return; }
+    const quick = { Digit1: 'grunt', Digit2: 'ring', Digit3: 'elite', Digit4: 'boss', Digit0: 'clear' }[e.code];
+    if (quick) { sandboxAction(quick); return; }
   }
   // Q / E 放技能，边沿触发
   if (!e.repeat && started && !world.over && !world.paused && !uiPaused) {
@@ -634,12 +648,6 @@ addEventListener('keydown', (e) => {
     infoOpen = !infoOpen;
     e.preventDefault();
     return;
-  }
-  // 沙盒：ESC 退出，数字键放靶子（1 杂兵 / 2 一圈 / 3 精英 / 4 Boss / 0 清空）
-  if (sandbox.on) {
-    if (e.code === 'Escape') { exitSandbox(); return; }
-    const quick = { Digit1: 'grunt', Digit2: 'ring', Digit3: 'elite', Digit4: 'boss', Digit0: 'clear' }[e.code];
-    if (quick) { sandboxAction(quick); return; }
   }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
@@ -673,7 +681,7 @@ canvas.addEventListener('pointerdown', (e) => {
     unlock();
     const at = viewPos(e);
     if (screen === 'menu') {
-      const mi = menuBtnHit(at.x, at.y);
+      const mi = menuCardHit(at.x, at.y);
       if (mi >= 0) { menuCursor = mi; activateMenu(mi); }
     } else if (screen === 'heroes') {
       if (inBackBtn(at.x, at.y)) screen = 'menu';
@@ -704,17 +712,26 @@ canvas.addEventListener('pointerdown', (e) => {
   pointer = viewPos(e);
   // 沙盒面板盖在最上层，先判它：左栏调等级，右栏开关和放靶子
   if (sandbox.on) {
-    const rows = sandboxRows();
-    const ri = sandboxRowHit(pointer.x, pointer.y, rows.length);
-    if (ri >= 0) {
-      // 右键或 Shift 点 = 降一级
-      sandboxBumpWeapon(ri, e.shiftKey || e.button === 2);
+    // 折叠把手：展开时在面板上沿，收起时贴屏幕最下面
+    if (sandbox.open ? inSandboxHandle(pointer.x, pointer.y) : inSandboxHandleMin(pointer.x, pointer.y)) {
+      sandbox.open = !sandbox.open;
       pointer = null;
       return;
     }
-    const btns = sandboxButtons();
-    const bi = sandboxBtnHit(pointer.x, pointer.y, btns.length);
-    if (bi >= 0) { sandboxAction(btns[bi].id); pointer = null; return; }
+    if (sandbox.open) {
+      const rows = sandboxRows();
+      const hitRow = sandboxRowHit(pointer.x, pointer.y, rows.length);
+      if (hitRow) {
+        // delta 是 0 表示点在行上（不是 [+]/[-]），那就按 +1；Shift 点仍然是 -1
+        const down = hitRow.delta < 0 || (hitRow.delta === 0 && e.shiftKey);
+        sandboxBumpWeapon(hitRow.index, down);
+        pointer = null;
+        return;
+      }
+      const btns = sandboxButtons();
+      const bi = sandboxBtnHit(pointer.x, pointer.y, btns.length);
+      if (bi >= 0) { sandboxAction(btns[bi].id); pointer = null; return; }
+    }
   }
   // 通关面板：点一下继续无尽
   if (winPanel) { winPanel = false; pointer = null; return; }
@@ -786,11 +803,10 @@ canvas.addEventListener('pointerup', () => { pointer = null; stick.active = fals
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   // 沙盒里右键是"降一级"，不是冲刺
-  if (sandbox.on) {
+  if (sandbox.on && sandbox.open) {
     const at = viewPos(e);
-    const rows = sandboxRows();
-    const ri = sandboxRowHit(at.x, at.y, rows.length);
-    if (ri >= 0) sandboxBumpWeapon(ri, true);
+    const hitRow = sandboxRowHit(at.x, at.y, sandboxRows().length);
+    if (hitRow) sandboxBumpWeapon(hitRow.index, true);
     return;
   }
   if (started && !world.over && !world.paused && !uiPaused) dashQueued = true;
@@ -1262,6 +1278,7 @@ function frame(now) {
           buttons: sandboxButtons(),
           dps: sandboxDps(world),
           hint: sandbox.hint,
+          open: sandbox.open,
         });
       } else {
         // 通关面板期间世界暂停：让人看完战绩再决定继续还是重开

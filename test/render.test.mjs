@@ -201,9 +201,12 @@ test('说明屏：操作说明、兵种图例、区域说明都在里面，ESC �
 test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async () => {
   const { WEAPONS: BASE, MAX_SLOTS: SLOTS } = await import('../src/weapons.js');
   const ui = globalThis.__survivorUi;
-  const { SANDBOX_ROW, sandboxRowY, SANDBOX_BTN, sandboxBtnY } = await import('../src/layout.js');
-  const rowCenter = (i) => ({ x: SANDBOX_ROW.x + 40, y: sandboxRowY(i) + SANDBOX_ROW.h / 2 });
-  const btnCenter = (i) => ({ x: SANDBOX_BTN.x + 40, y: sandboxBtnY(i) + SANDBOX_BTN.h / 2 });
+  const L = await import('../src/layout.js');
+  const mid = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  const rowCenter = (i) => ({ x: L.sandboxRowRect(i).x + 30, y: L.sandboxRowRect(i).y + 12 });
+  const plusAt = (i) => mid(L.sandboxPlusRect(i));
+  const minusAt = (i) => mid(L.sandboxMinusRect(i));
+  const btnCenter = (i) => mid(L.sandboxBtnRect(i));
   const click = (at, ev = {}) => {
     fire(handlers.canvas, 'pointerdown', { pointerId: 90, clientX: at.x, clientY: at.y, ...ev });
     fire(handlers.canvas, 'pointerup', { pointerId: 90 });
@@ -220,22 +223,25 @@ test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async (
   const w = globalThis.__survivorWorld;
   assert.equal(w.weapons.length, 0, '沙盒应该从空手开始');
 
-  // 点第一行三次：装上 + 升两级
-  click(rowCenter(0));
-  click(rowCenter(0));
-  click(rowCenter(0));
-  assert.equal(w.weapons.length, 1, '点了武器行却没装上');
+  // 点第一行的 [+] 三次：装上 + 升两级（不再需要 Shift 或右键）
+  click(plusAt(0));
+  click(plusAt(0));
+  click(plusAt(0));
+  assert.equal(w.weapons.length, 1, '点 [+] 却没装上武器');
   assert.equal(w.weapons[0].id, BASE[0].id);
   assert.equal(w.weapons[0].level, 3, `等级不对：${w.weapons[0].level}`);
-  // Shift 点 = 降级
-  click(rowCenter(0), { shiftKey: true });
-  assert.equal(w.weapons[0].level, 2, 'Shift 点没降级');
+  // [-] 降级
+  click(minusAt(0));
+  assert.equal(w.weapons[0].level, 2, '点 [-] 没降级');
+  // 点行的空白处等价于 +1
+  click(rowCenter(0));
+  assert.equal(w.weapons[0].level, 3, '点行没升级');
 
   // 槽位锁着时装不上第四把
-  for (let i = 1; i < BASE.length; i++) click(rowCenter(i));
+  for (let i = 1; i < BASE.length; i++) click(plusAt(i));
   assert.equal(w.weapons.length, SLOTS, `锁着槽位却装了 ${w.weapons.length} 把`);
   click(btnCenter(2)); // 放开槽位
-  click(rowCenter(BASE.length - 1));
+  click(plusAt(BASE.length - 1));
   assert.ok(w.weapons.length > SLOTS, '放开槽位之后还是装不上');
 
   // 放靶子：数字键和按钮两条路都要通
@@ -255,6 +261,23 @@ test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async (
   const t0 = w.t;
   runFrames(10);
   assert.ok(w.t > t0, '倍速之后世界不走了');
+
+  // Tab 折叠面板：折叠后左上角的 HUD 不该再被挡住（面板整块消失，只剩把手）
+  fire(handlers.window, 'keydown', { code: 'Tab', preventDefault() {} });
+  calls.length = 0;
+  runFrames(2);
+  let panel = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(panel.some((t) => t.includes('展开沙盒面板')), `折叠后没留把手：${panel.slice(0, 12)}`);
+  assert.ok(!panel.includes('武器沙盒'), '折叠了面板还画着');
+  // 折叠时点原来武器行的位置不该改等级（面板已经不在了）
+  const lv = w.weapons[0].level;
+  click(plusAt(0));
+  assert.equal(w.weapons[0].level, lv, '折叠状态下还能点到面板');
+  fire(handlers.window, 'keydown', { code: 'Tab', preventDefault() {} });
+  calls.length = 0;
+  runFrames(2);
+  panel = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(panel.includes('武器沙盒'), 'Tab 没能重新展开');
 
   // 沙盒里不该被升级卡打断，也不该结算残片
   const metaBefore = JSON.stringify(store.get('survivor.meta') || null);
@@ -294,24 +317,32 @@ test('首屏不会误触：按无关的键、点空白处都不开局', () => {
   assert.ok(texts.some((t) => t.includes('选择角色')), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
 });
 
-test('残片不够时点没解锁的角色卡：不开局、也不扣残片', () => {
+test('残片不够时点没解锁的角色卡：不开局、也不扣残片', async () => {
+  const { heroCardX, HERO_CARD } = await import('../src/layout.js');
+  // 先进角色选择屏（坐标写死会随主菜单布局变化而失灵，所以用数字键直达）
+  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  runFrames(2);
   const before = JSON.stringify(store.get('survivor.meta') || null);
   // 第二张卡（游侠）在新存档里是锁着的
-  fire(handlers.canvas, 'pointerdown', { pointerId: 11, clientX: 480 - 100, clientY: 200 });
+  const at = { x: heroCardX(1) + HERO_CARD.w / 2, y: HERO_CARD.y + HERO_CARD.h / 2 };
+  fire(handlers.canvas, 'pointerdown', { pointerId: 11, clientX: at.x, clientY: at.y });
   fire(handlers.canvas, 'pointerup', { pointerId: 11 });
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes('选择角色')), '锁着的角色卡不该开局');
+  assert.ok(texts.some((t) => t.includes('起手：')), '锁着的角色卡不该开局');
   assert.equal(JSON.stringify(store.get('survivor.meta') || null), before, '残片被扣了');
 });
 
-test('首屏方向键能换选中的角色', () => {
+test('角色选择屏用方向键换选中的卡，不会直接开局', () => {
   fire(handlers.window, 'keydown', { code: 'ArrowRight', preventDefault() {} });
   calls.length = 0;
   runFrames(2);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes('选择角色')), '方向键不该直接开局');
+  assert.ok(texts.some((t) => t.includes('起手：')), '方向键不该直接开局');
+  // 回主菜单，后面的用例从菜单开始
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  runFrames(2);
 });
 
 test('首屏按数字键选角色，开局用的就是那个角色', () => {

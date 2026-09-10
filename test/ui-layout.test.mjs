@@ -169,7 +169,7 @@ const SCREENS = {
   通关面板: () => hud.drawWinPanel(w),
   选卡: () => hud.drawChoices(wc),
   战利品: () => hud.drawLoot(wl),
-  武器沙盒: () => hud.drawSandbox(w, {
+  '武器沙盒（展开）': () => hud.drawSandbox(w, {
     rows: [...WEAPONS, ...EVO_WEAPONS_ALL, ...AWAKEN_ALL].map((d, i) => ({
       id: d.id, name: d.name, group: i < WEAPONS.length ? 'base' : 'evo',
       level: i % 3, maxLevel: d.maxLevel,
@@ -184,7 +184,9 @@ const SCREENS = {
     ],
     dps: 1234,
     hint: '槽位满了（点"锁 3 个槽位"可以放开）',
+    open: true,
   }),
+  '武器沙盒（折叠）': () => hud.drawSandbox(w, { rows: [], buttons: [], dps: 0, hint: '', open: false }),
 };
 
 for (const [name, draw] of Object.entries(SCREENS)) {

@@ -76,18 +76,25 @@ function shopRowHit(x, y, col, count) {
   return -1;
 }
 
-// 主菜单：竖排大按钮。以前所有东西都堆在一屏上（残片 + 4 张角色卡 + 3 个强化 +
-// 难度 + 帮助 + 三行提示），信息太密；现在拆成菜单 → 各功能屏
-// 7 个入口：开始 / 选角色 / 继续 / 局外强化 / 成就与统计 / 难度 / 说明，
-// 再加一个武器沙盒（调武器看效果的工具屏）。
-// 高度和间距压了一点，否则最后一项会撞到底部那三行小字
-const MENU_BTN = { w: 340, h: 34, gap: 5, y0: 126, count: 8 };
-const menuBtnY = (i) => MENU_BTN.y0 + i * (MENU_BTN.h + MENU_BTN.gap);
-const menuBtnX = () => (VIEW_W - MENU_BTN.w) / 2;
-function menuBtnHit(x, y) {
-  if (x < menuBtnX() || x > menuBtnX() + MENU_BTN.w) return -1;
-  for (let i = 0; i < MENU_BTN.count; i++) {
-    if (y >= menuBtnY(i) && y <= menuBtnY(i) + MENU_BTN.h) return i;
+// 主菜单：卡片网格（2 列 × 4 行）。
+// 以前是 7 个竖排大按钮，加到 8 项之后整块占掉 300 多像素、把标题和残片那行挤到边上；
+// 排成两列之后同样的 8 项只占 4 行，右边还能放下更长的说明小字
+const MENU_CARD = { w: 316, h: 58, gapX: 20, gapY: 10, cols: 2, count: 8 };
+const menuGridX = () => (VIEW_W - (MENU_CARD.cols * MENU_CARD.w + (MENU_CARD.cols - 1) * MENU_CARD.gapX)) / 2;
+const MENU_GRID_Y = 148;
+function menuCardRect(i) {
+  const col = i % MENU_CARD.cols, row = Math.floor(i / MENU_CARD.cols);
+  return {
+    x: menuGridX() + col * (MENU_CARD.w + MENU_CARD.gapX),
+    y: MENU_GRID_Y + row * (MENU_CARD.h + MENU_CARD.gapY),
+    w: MENU_CARD.w,
+    h: MENU_CARD.h,
+  };
+}
+function menuCardHit(x, y) {
+  for (let i = 0; i < MENU_CARD.count; i++) {
+    const r = menuCardRect(i);
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
   }
   return -1;
 }
@@ -123,26 +130,61 @@ const EXIT_BTN = { x: VIEW_W / 2 - 90, y: VIEW_H - 52, w: 180, h: 30 };
 const inExitBtn = (x, y) => x >= EXIT_BTN.x && x <= EXIT_BTN.x + EXIT_BTN.w
   && y >= EXIT_BTN.y && y <= EXIT_BTN.y + EXIT_BTN.h;
 
-// 武器沙盒：左栏一行一把武器（点一下 +1 级，Shift/右键 -1 级），
-// 右栏是开关和放靶子的按钮。行高压到 21 是因为武器已经有 17 把（7 基础 + 7 进化 + 3 觉醒），
-// 再高就放不进一屏
-const SANDBOX_ROW = { x: 14, w: 286, h: 21, gap: 2, y0: 92 };
-const sandboxRowY = (i) => SANDBOX_ROW.y0 + i * (SANDBOX_ROW.h + SANDBOX_ROW.gap);
+// 武器沙盒：贴在屏幕底部的一张面板，可以用 Tab 折叠起来。
+// 第一版是左半屏的竖栏，结果把左上角的血条/经验条全挡住了，而且没法收起来。
+// 现在改成底部面板：武器排成 3 列 × 6 行，右边是开关和靶子，折叠后只剩一条把手。
+const SANDBOX_PANEL = { x: 0, y: 330, w: VIEW_W, h: VIEW_H - 330 };
+const SANDBOX_HANDLE = { x: VIEW_W - 210, y: SANDBOX_PANEL.y - 26, w: 196, h: 24 };
+const inSandboxHandle = (x, y) => x >= SANDBOX_HANDLE.x && x <= SANDBOX_HANDLE.x + SANDBOX_HANDLE.w
+  && y >= SANDBOX_HANDLE.y && y <= SANDBOX_HANDLE.y + SANDBOX_HANDLE.h;
+// 折叠状态下的把手贴在屏幕最下面
+const SANDBOX_HANDLE_MIN = { x: VIEW_W - 210, y: VIEW_H - 28, w: 196, h: 24 };
+const inSandboxHandleMin = (x, y) => x >= SANDBOX_HANDLE_MIN.x && x <= SANDBOX_HANDLE_MIN.x + SANDBOX_HANDLE_MIN.w
+  && y >= SANDBOX_HANDLE_MIN.y && y <= SANDBOX_HANDLE_MIN.y + SANDBOX_HANDLE_MIN.h;
+
+// 一行武器：名字 + 等级 + 两个 [-] [+] 按钮（不再逼人用 Shift 或右键）
+const SANDBOX_ROW = { w: 196, h: 24, gapX: 8, gapY: 3, x0: 12, y0: 364, cols: 3, btn: 22 };
+function sandboxRowRect(i) {
+  const col = Math.floor(i / 6), row = i % 6;
+  return {
+    x: SANDBOX_ROW.x0 + col * (SANDBOX_ROW.w + SANDBOX_ROW.gapX),
+    y: SANDBOX_ROW.y0 + row * (SANDBOX_ROW.h + SANDBOX_ROW.gapY),
+    w: SANDBOX_ROW.w,
+    h: SANDBOX_ROW.h,
+  };
+}
+const sandboxMinusRect = (i) => {
+  const r = sandboxRowRect(i);
+  return { x: r.x + r.w - SANDBOX_ROW.btn * 2 - 4, y: r.y + 1, w: SANDBOX_ROW.btn, h: r.h - 2 };
+};
+const sandboxPlusRect = (i) => {
+  const r = sandboxRowRect(i);
+  return { x: r.x + r.w - SANDBOX_ROW.btn - 2, y: r.y + 1, w: SANDBOX_ROW.btn, h: r.h - 2 };
+};
+const inRect = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+// 返回 { index, delta }：点到 [+]/[-] 就带上 ±1，点到行的其它地方 delta 是 0
 function sandboxRowHit(x, y, count) {
-  if (x < SANDBOX_ROW.x || x > SANDBOX_ROW.x + SANDBOX_ROW.w) return -1;
   for (let i = 0; i < count; i++) {
-    if (y >= sandboxRowY(i) && y <= sandboxRowY(i) + SANDBOX_ROW.h) return i;
+    if (inRect(sandboxPlusRect(i), x, y)) return { index: i, delta: 1 };
+    if (inRect(sandboxMinusRect(i), x, y)) return { index: i, delta: -1 };
+    if (inRect(sandboxRowRect(i), x, y)) return { index: i, delta: 0 };
   }
-  return -1;
+  return null;
 }
 
-const SANDBOX_BTN = { x: 312, w: 152, h: 26, gap: 5, y0: 92 };
-const sandboxBtnY = (i) => SANDBOX_BTN.y0 + i * (SANDBOX_BTN.h + SANDBOX_BTN.gap);
+// 右侧的开关与靶子，2 列 × 6 行
+const SANDBOX_BTN = { w: 152, h: 24, gapX: 8, gapY: 3, x0: 640, y0: 364, rows: 6 };
+function sandboxBtnRect(i) {
+  const col = Math.floor(i / SANDBOX_BTN.rows), row = i % SANDBOX_BTN.rows;
+  return {
+    x: SANDBOX_BTN.x0 + col * (SANDBOX_BTN.w + SANDBOX_BTN.gapX),
+    y: SANDBOX_BTN.y0 + row * (SANDBOX_BTN.h + SANDBOX_BTN.gapY),
+    w: SANDBOX_BTN.w,
+    h: SANDBOX_BTN.h,
+  };
+}
 function sandboxBtnHit(x, y, count) {
-  if (x < SANDBOX_BTN.x || x > SANDBOX_BTN.x + SANDBOX_BTN.w) return -1;
-  for (let i = 0; i < count; i++) {
-    if (y >= sandboxBtnY(i) && y <= sandboxBtnY(i) + SANDBOX_BTN.h) return i;
-  }
+  for (let i = 0; i < count; i++) if (inRect(sandboxBtnRect(i), x, y)) return i;
   return -1;
 }
 
@@ -151,8 +193,10 @@ export {
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
   HERO_CARD, heroCardX, heroCardHit,
   SHOP_ROW, shopRowY, shopRowHit,
-  MENU_BTN, menuBtnX, menuBtnY, menuBtnHit, BACK_BTN, inBackBtn,
+  MENU_CARD, menuCardRect, menuCardHit, BACK_BTN, inBackBtn,
   TAB_BTN, tabBtnX, tabBtnHit, INFO_BTN, inInfoBtn,
   EXIT_BTN, inExitBtn,
-  SANDBOX_ROW, sandboxRowY, sandboxRowHit, SANDBOX_BTN, sandboxBtnY, sandboxBtnHit,
+  SANDBOX_PANEL, SANDBOX_HANDLE, inSandboxHandle, SANDBOX_HANDLE_MIN, inSandboxHandleMin,
+  SANDBOX_ROW, sandboxRowRect, sandboxMinusRect, sandboxPlusRect, sandboxRowHit,
+  SANDBOX_BTN, sandboxBtnRect, sandboxBtnHit,
 };
