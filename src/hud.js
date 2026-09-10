@@ -6,7 +6,7 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_CARD, menuCardRect, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN, SANDBOX_PANEL, SANDBOX_HANDLE, SANDBOX_HANDLE_MIN, SANDBOX_ROW, sandboxRowRect, sandboxMinusRect, sandboxPlusRect, SANDBOX_BTN, sandboxBtnRect } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_CARD, menuCardRect, BACK_BTN, START_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN, SANDBOX_PANEL, SANDBOX_HANDLE, SANDBOX_HANDLE_MIN, SANDBOX_ROW, sandboxRowRect, sandboxMinusRect, sandboxPlusRect, SANDBOX_BTN, sandboxBtnRect } from './layout.js';
 import { HEROES, findHero } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked, ZONE_CLEAR_BONUS } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
@@ -950,13 +950,31 @@ export function createHud(ctx, deps) {
   }
 
   // 角色选择屏：一屏只干这一件事，卡片可以铺开
+  // 开局前的配置屏：选角色 + 选难度 + 明确按「开始」。
+  // 以前点卡片直接就开局了，和"首屏只认明确的开局意图"那条自相矛盾
   function drawHeroSelect() {
-    screenFrame('选择角色', '点卡片或按 1–4 开局　没解锁的先在「局外强化」里买');
+    const diff = findDifficulty(deps.getDifficulty ? deps.getDifficulty() : DEFAULT_DIFFICULTY);
+    screenFrame('开始游戏', '点卡片或按 1–4 选角色　没解锁的先在「局外强化」里买');
     drawHeroCards();
     ctx.textAlign = 'center';
+    ctx.fillStyle = P.accent;
+    ctx.font = '13px sans-serif';
+    const others = DIFFICULTIES.filter((d) => difficultyUnlocked(meta(), d.id)).length > 1;
+    ctx.fillText(`难度：${diff.name}　${others ? 'D 切换' : '通关后解锁噩梦'}`, VIEW_W / 2, 392);
     ctx.fillStyle = P.faint;
     ctx.font = '12px sans-serif';
-    ctx.fillText('← → 换选中　回车用选中的角色开局', VIEW_W / 2, 400);
+    ctx.fillText('← → 换选中　回车开始　ESC 返回', VIEW_W / 2, 414);
+
+    // 开始按钮：这一屏唯一会开局的地方
+    ctx.fillStyle = P.card;
+    ctx.fillRect(START_BTN.x, START_BTN.y, START_BTN.w, START_BTN.h);
+    ctx.strokeStyle = P.warn;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(START_BTN.x, START_BTN.y, START_BTN.w, START_BTN.h);
+    ctx.lineWidth = 1;
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('开始（回车）', START_BTN.x + START_BTN.w / 2, START_BTN.y + 21);
     drawBackBtn();
   }
 
@@ -1147,7 +1165,14 @@ export function createHud(ctx, deps) {
       wrapText(h.desc, x + HERO_CARD.w / 2, y + 104, HERO_CARD.w - 24, 20);
       ctx.fillStyle = P.faint;
       ctx.font = '12px sans-serif';
-      ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 40);
+      ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 58);
+      // 这个角色的最长存活：选角色时能看出自己哪个练得最好（数据来自成就墙那套统计）
+      if (owned) {
+        const best = m.stats.heroBest[h.id] || 0;
+        ctx.fillStyle = best > 0 ? P.calm : P.fainter;
+        ctx.font = '12px ui-monospace, monospace';
+        ctx.fillText(best > 0 ? `最长 ${clock(best)}` : '还没玩过', x + HERO_CARD.w / 2, y + HERO_CARD.h - 34);
+      }
       if (!owned) {
         ctx.fillStyle = m.shards >= heroCost(h.id) ? P.calm : P.faint;
         ctx.font = 'bold 13px sans-serif';

@@ -7,7 +7,7 @@ import { P } from './palette.js';
 import { BOSS, PLAYER } from './tuning.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
@@ -333,10 +333,13 @@ globalThis.__survivorUi = {
 // 主菜单的条目。note 是右侧的小字，disabled 的条目点了不响应
 function menuItems() {
   const unlockedHeroes = HEROES.filter((h) => isUnlocked(meta, h.id)).length;
-  const openDiffs = DIFFICULTIES.filter((d) => difficultyUnlocked(meta, d.id)).length;
   return [
-    { id: 'start', label: '开始游戏', note: `角色：${findHero(activeHero()).name}` },
-    { id: 'heroes', label: '选择角色', note: `已解锁 ${unlockedHeroes}/${HEROES.length}` },
+    // 开始游戏 → 角色屏（选角色 + 选难度 + 明确按开始），不再直接开局
+    {
+      id: 'start',
+      label: '开始游戏',
+      note: `${findHero(activeHero()).name} · ${findDifficulty(difficulty).name}（已解锁 ${unlockedHeroes}/${HEROES.length} 角色）`,
+    },
     {
       id: 'resume',
       label: '继续上一局',
@@ -348,12 +351,6 @@ function menuItems() {
       id: 'stats',
       label: '成就与统计',
       note: `${doneCount(meta.stats, meta)}/${ACHIEVEMENTS.length} 成就 · ${meta.stats.runs} 局`,
-    },
-    {
-      id: 'difficulty',
-      label: `难度：${findDifficulty(difficulty).name}`,
-      note: openDiffs > 1 ? '点击切换' : '通关后解锁噩梦',
-      disabled: openDiffs <= 1,
     },
     { id: 'help', label: '操作说明', note: 'H' },
     { id: 'sandbox', label: '武器沙盒', note: '调武器看效果' },
@@ -530,12 +527,10 @@ function sandboxDps(w) {
 function activateMenu(i) {
   const it = menuItems()[i];
   if (!it || it.disabled) return;
-  if (it.id === 'start') beginGame();
-  else if (it.id === 'heroes') screen = 'heroes';
+  if (it.id === 'start') screen = 'heroes';
   else if (it.id === 'resume') resumeSave();
   else if (it.id === 'shop') screen = 'shop';
   else if (it.id === 'stats') screen = 'stats';
-  else if (it.id === 'difficulty') cycleDifficulty();
   else if (it.id === 'help') screen = 'help';
   else if (it.id === 'sandbox') beginSandbox();
 }
@@ -551,12 +546,15 @@ addEventListener('keydown', (e) => {
     if (screen !== 'menu') {
       if (e.code === 'Escape' || e.code === 'Backspace') { screen = 'menu'; return; }
       if (screen === 'heroes') {
+        // 数字键只是"选中"，开局要按回车或点「开始」——这一屏是开局前的配置页
         const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
         if (hi >= 0 && hi < HERO_CARD.count) {
           // 没解锁的角色要去「局外强化」买，这里只提示不扣钱
-          if (isUnlocked(meta, HEROES[hi].id)) { setHero(HEROES[hi].id); beginGame(); }
+          if (isUnlocked(meta, HEROES[hi].id)) setHero(HEROES[hi].id);
           return;
         }
+        // 难度也搬到这一屏：开局前要定的两件事放在一起
+        if (e.code === 'KeyD') { cycleDifficulty(); return; }
         if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
           const cur = HEROES.findIndex((h) => h.id === heroId);
           const n = Math.min(HEROES.length, HERO_CARD.count);
@@ -595,6 +593,7 @@ addEventListener('keydown', (e) => {
     const mi = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8'].indexOf(e.code);
     if (mi >= 0 && mi < MENU_CARD.count) { menuCursor = mi; activateMenu(mi); return; }
     if (e.code === 'KeyH') { screen = 'help'; return; }
+    // 难度的正主在角色屏，主菜单按 D 仍然能切（老习惯，且 note 上就写着当前难度）
     if (e.code === 'KeyD') { cycleDifficulty(); return; }
     if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
     return;
@@ -687,12 +686,10 @@ canvas.addEventListener('pointerdown', (e) => {
     } else if (screen === 'heroes') {
       if (inBackBtn(at.x, at.y)) screen = 'menu';
       else {
+        if (inStartBtn(at.x, at.y)) { beginGame(); pointer = null; return; }
         const hi = heroCardHit(at.x, at.y);
-        // 没解锁的卡点了不开局：解锁要去「局外强化」屏，避免在这里手滑花掉残片
-        if (hi >= 0 && hi < HEROES.length && isUnlocked(meta, HEROES[hi].id)) {
-          setHero(HEROES[hi].id);
-          beginGame();
-        }
+        // 点卡片只是选中；没解锁的卡点了没反应（解锁要去「局外强化」屏，避免在这儿手滑花钱）
+        if (hi >= 0 && hi < HEROES.length && isUnlocked(meta, HEROES[hi].id)) setHero(HEROES[hi].id);
       }
     } else if (screen === 'shop') {
       if (inBackBtn(at.x, at.y)) screen = 'menu';

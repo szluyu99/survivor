@@ -79,7 +79,10 @@ function shopRowHit(x, y, col, count) {
 // 主菜单：卡片网格（2 列 × 4 行）。
 // 以前是 7 个竖排大按钮，加到 8 项之后整块占掉 300 多像素、把标题和残片那行挤到边上；
 // 排成两列之后同样的 8 项只占 4 行，右边还能放下更长的说明小字
-const MENU_CARD = { w: 316, h: 58, gapX: 20, gapY: 10, cols: 2, count: 8 };
+// 6 个入口：开始游戏 / 继续上一局 / 局外强化 / 成就与统计 / 操作说明 / 武器沙盒。
+// "选择角色"和"难度"都挪进了开局前的角色屏——它们本来就是开局配置，
+// 放在主菜单里会和"开始游戏"重复（点哪个都能开局，区别只有"用不用上次的角色"）
+const MENU_CARD = { w: 316, h: 58, gapX: 20, gapY: 10, cols: 2, count: 6 };
 const menuGridX = () => (VIEW_W - (MENU_CARD.cols * MENU_CARD.w + (MENU_CARD.cols - 1) * MENU_CARD.gapX)) / 2;
 const MENU_GRID_Y = 148;
 function menuCardRect(i) {
@@ -98,6 +101,12 @@ function menuCardHit(x, y) {
   }
   return -1;
 }
+
+// 角色屏右下角的「开始」按钮。点卡片只是选中，开局要明确按这里（或回车）——
+// 以前点卡片直接开局，和首屏防误触那条自相矛盾
+const START_BTN = { x: VIEW_W - 190, y: VIEW_H - 46, w: 166, h: 32 };
+const inStartBtn = (x, y) => x >= START_BTN.x && x <= START_BTN.x + START_BTN.w
+  && y >= START_BTN.y && y <= START_BTN.y + START_BTN.h;
 
 // 子屏左下角的返回按钮（ESC 也能返回）
 const BACK_BTN = { x: 24, y: VIEW_H - 44, w: 130, h: 30 };
@@ -193,7 +202,7 @@ export {
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
   HERO_CARD, heroCardX, heroCardHit,
   SHOP_ROW, shopRowY, shopRowHit,
-  MENU_CARD, menuCardRect, menuCardHit, BACK_BTN, inBackBtn,
+  MENU_CARD, menuCardRect, menuCardHit, BACK_BTN, inBackBtn, START_BTN, inStartBtn,
   TAB_BTN, tabBtnX, tabBtnHit, INFO_BTN, inInfoBtn,
   EXIT_BTN, inExitBtn,
   SANDBOX_PANEL, SANDBOX_HANDLE, inSandboxHandle, SANDBOX_HANDLE_MIN, inSandboxHandleMin,

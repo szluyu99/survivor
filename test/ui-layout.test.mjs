@@ -118,12 +118,10 @@ for (let i = 0; i < 200 * 60 && !wl.loot; i++) {
 }
 
 const menuItems = [
-  { id: 'start', label: '开始游戏', note: '角色：新兵' },
-  { id: 'heroes', label: '选择角色', note: '已解锁 2/4' },
+  { id: 'start', label: '开始游戏', note: '术士 · 噩梦（已解锁 3/4 角色）' },
   { id: 'resume', label: '继续上一局', note: '沼泽 2:31 · 术士' },
   { id: 'shop', label: '局外强化', note: '残片 120' },
   { id: 'stats', label: '成就与统计', note: '3/12 成就 · 8 局' },
-  { id: 'difficulty', label: '难度：普通', note: '点击切换' },
   { id: 'help', label: '操作说明', note: 'H' },
   { id: 'sandbox', label: '武器沙盒', note: '调武器看效果' },
 ];

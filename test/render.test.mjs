@@ -117,25 +117,38 @@ test('主菜单只有一排入口，具体内容都在子屏里', () => {
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('色块幸存者'), '标题没画');
-  assert.ok(texts.some((t) => t.includes('通关')), '没写清这一局的目标');
-  for (const label of ['开始游戏', '选择角色', '继续上一局', '局外强化', '成就与统计', '操作说明']) {
+  assert.ok(texts.some((t) => t.startsWith('目标：')), '没写清这一局的目标');
+  for (const label of ['开始游戏', '继续上一局', '局外强化', '成就与统计', '操作说明', '武器沙盒']) {
     assert.ok(texts.includes(label), `菜单少了「${label}」`);
   }
-  assert.ok(texts.some((t) => t.startsWith('难度：')), '难度那一项没画');
+  // 选角色和选难度都搬进了开局前的角色屏，主菜单不该再有这两项
+  assert.ok(!texts.includes('选择角色'), '「选择角色」应该并进「开始游戏」了');
+  assert.ok(!texts.some((t) => t.startsWith('难度：')), '难度应该在角色屏里选');
+  assert.ok(texts.some((t) => t.includes('普通')), '「开始游戏」那一项要写清当前角色和难度');
   assert.ok(texts.some((t) => t.startsWith('残片 ')), '没显示残片余额');
   // 角色卡、永久强化、兵种图例都搬到子屏了，主菜单上不该再有
   assert.ok(!texts.includes('冲锋兵'), '兵种图例应该只在说明屏里');
   assert.ok(!texts.some((t) => t.includes('起手：')), '角色卡应该只在角色选择屏里');
 });
 
-test('主菜单 → 角色选择屏 → 开局', () => {
-  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });   // 选择角色
+test('开始游戏 → 角色屏（选角色 + 选难度，不直接开局）→ ESC 回菜单', () => {
+  const ui = globalThis.__survivorUi;
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });   // 开始游戏
   calls.length = 0;
   runFrames(3);
   let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes('起手：')), `角色选择屏没画：${texts.slice(0, 10)}`);
+  assert.equal(ui.started, false, '点「开始游戏」不该直接开局，应该先进角色屏');
+  assert.ok(texts.some((t) => t.includes('起手：')), `角色屏没画：${texts.slice(0, 10)}`);
   for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
   assert.ok(texts.some((t) => t.includes('未解锁')), '没解锁的卡要标价');
+  assert.ok(texts.some((t) => t.startsWith('难度：')), '难度选择应该在这一屏');
+  assert.ok(texts.some((t) => t.includes('开始（回车）')), '缺少明确的开始按钮');
+
+  // 按数字键只是选中，不能开局
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+  runFrames(2);
+  assert.equal(ui.started, false, '按数字键选角色不该直接开局');
+
   // ESC 回主菜单
   fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
   calls.length = 0;
@@ -145,7 +158,7 @@ test('主菜单 → 角色选择屏 → 开局', () => {
 });
 
 test('成就与统计是独立一屏，打完一局后统计有数', () => {
-  fire(handlers.window, 'keydown', { code: 'Digit5', preventDefault() {} });   // 成就与统计
+  fire(handlers.window, 'keydown', { code: 'Digit4', preventDefault() {} });   // 成就与统计
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -164,7 +177,7 @@ test('成就与统计是独立一屏，打完一局后统计有数', () => {
 });
 
 test('局外强化是独立一屏：永久强化和角色解锁都在里面', () => {
-  fire(handlers.window, 'keydown', { code: 'Digit4', preventDefault() {} });   // 局外强化
+  fire(handlers.window, 'keydown', { code: 'Digit3', preventDefault() {} });   // 局外强化
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -213,8 +226,8 @@ test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async (
     runFrames(2);
   };
 
-  // 从主菜单第 8 项进沙盒
-  fire(handlers.window, 'keydown', { code: 'Digit8', preventDefault() {} });
+  // 从主菜单第 6 项进沙盒
+  fire(handlers.window, 'keydown', { code: 'Digit6', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
   let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -294,11 +307,14 @@ test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async (
   assert.ok(texts.includes('色块幸存者'), 'ESC 没回主菜单');
 });
 
-test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
+test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {
+  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes(`难度：${DIFFICULTIES[0].name}`)), `新存档只该有基准难度：${texts.slice(0, 14)}`);
+  // 难度的正主搬到角色屏了，菜单上只在「开始游戏」那一项的小字里露一次
+  assert.ok(texts.some((t) => t.includes(DIFFICULTIES[0].name)), `新存档只该有基准难度：${texts.slice(0, 14)}`);
+  assert.ok(!texts.some((t) => t.includes(DIFFICULTIES[1].name)), '没通关就切出了噩梦');
   assert.ok(texts.includes('色块幸存者'), '按 D 不该开局');
 });
 
@@ -314,13 +330,13 @@ test('首屏不会误触：按无关的键、点空白处都不开局', () => {
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes('选择角色')), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
+  assert.ok(texts.includes('色块幸存者'), `已经进游戏了，首屏防误触失效：${texts.slice(0, 12)}`);
 });
 
 test('残片不够时点没解锁的角色卡：不开局、也不扣残片', async () => {
   const { heroCardX, HERO_CARD } = await import('../src/layout.js');
-  // 先进角色选择屏（坐标写死会随主菜单布局变化而失灵，所以用数字键直达）
-  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  // 先进角色屏（坐标写死会随主菜单布局变化而失灵，所以用数字键直达）
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(2);
   const before = JSON.stringify(store.get('survivor.meta') || null);
   // 第二张卡（游侠）在新存档里是锁着的
@@ -355,7 +371,8 @@ test('首屏按数字键选角色，开局用的就是那个角色', () => {
 });
 
 test('连续跑 600 帧不崩，且每帧都在画东西', () => {
-  fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} }); // 先开始，否则只测到首屏
+  // 必须显式开一局：点角色卡不再直接开局了，所以不能靠"前面的用例正好把游戏开着"
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
   calls.length = 0;
   runFrames(600);
   assert.ok(calls.length > 600, `600 帧只产生了 ${calls.length} 次绘制调用`);
@@ -802,8 +819,9 @@ function freshRun() {
   for (let i = 0; i < 8; i++) {
     const w = globalThis.__survivorWorld;
     if (!ui.started) {
-      // 主菜单：1 = 开始游戏；子屏先 ESC 回菜单
-      fire(handlers.window, 'keydown', { code: ui.screen === 'menu' ? 'Digit1' : 'Escape', preventDefault() {} });
+      // 主菜单：1 = 开始游戏（进角色屏）；角色屏：回车开局；其它子屏先 ESC 回菜单
+      const code = ui.screen === 'menu' ? 'Digit1' : ui.screen === 'heroes' ? 'Enter' : 'Escape';
+      fire(handlers.window, 'keydown', { code, preventDefault() {} });
     } else if (ui.winPanel) {
       fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
     } else if (w.over) {
@@ -866,7 +884,7 @@ test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () =>
   fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
-  assert.ok(texts().some((t) => t.includes('选择角色')), `按 Q 没回到首屏：${texts().slice(0, 12)}`);
+  assert.ok(texts().includes('色块幸存者'), `按 Q 没回到首屏：${texts().slice(0, 12)}`);
   assert.ok(texts().some((t) => t.includes('继续上一局')), '首屏没显示存档');
   assert.ok(store.has('survivor.save'), '退出时没写档');
 
@@ -881,7 +899,7 @@ test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () =>
   assert.equal(store.has('survivor.save'), false, '读出来之后应该消档，避免反复读同一个档');
   calls.length = 0;
   runFrames(3);
-  assert.ok(!texts().some((t) => t.includes('选择角色')), '读档后应该在局内，而不是首屏');
+  assert.ok(!texts().includes('色块幸存者'), '读档后应该在局内，而不是首屏');
 });
 
 test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
