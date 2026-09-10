@@ -230,8 +230,9 @@ console.log('\n=== 主动技能：会用 vs 不会用 ===');
     const w = createWorld(seed);
     for (let i = 0; i < 600 * 60 && !w.over; i++) {
       if (w.paused) {
-        // 优先学技能，其余轮换
-        const k = w.choices.findIndex((c) => c.skill);
+        // 交界 Boss 的战利品也会让世界暂停，那时 w.choices 是 null——
+        // 直接 findIndex 会抛 TypeError（CI 上就是这么炸的）。战利品随便挑第一张
+        const k = w.choices ? w.choices.findIndex((c) => c.skill) : -1;
         chooseUpgrade(w, k >= 0 ? k : Math.floor(i / 97) % 3);
       }
       let slot = null;
