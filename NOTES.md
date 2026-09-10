@@ -213,6 +213,15 @@
   另外 `getHero` / 方向键选角还引用着已经搬走的 `heroId`。两处都是渲染烟测立刻报出来的。
   **输入层（`input.js`）这一刀没动**：键盘和指针的事件处理里，raw input 和 UI 路由
   （菜单导航、暂停、沙盒点击、回放退出）是交织的，硬拆会把路由逻辑撕成两半，得先想清楚边界。
+- ~~拆 `game.js`（第三刀：世界层绘制）~~ 已完成（2026-09-10）：`src/world-render.js`（793 行）
+  接走背景 / 地形 / 实体 / 投射物 / 特效 / 相机 / 暗角与全屏覆盖，`game.js` 1573 → 811 行。
+  分界线是"读不读 UI 状态"：世界层一个都不读，HUD 和面板（`uiPaused` / `winPanel` / 选卡）留在 game.js 编排。
+  搬完清理无用 import 时又漏了两个（`findBossKind` / `findEliteKind` 是 Boss 描边和精英标记要用的），
+  渲染烟测立刻报 `ReferenceError`——这已经是同一类错误第三次被它抓到了。
+  现在的分布：game.js 811 / world-render.js 793 / hud.js 878 / weapons.js 744 / sim.js 709 / screens.js 364。
+  **`input.js` 仍然没动**：raw input 和 UI 路由交织，需要先设计"当前屏 → 处理函数"的路由表。
+- ~~平衡报告产物化~~ 已完成（2026-09-10）：CI 里 `npm run balance | tee balance-report.txt` 并上传 artifact，
+  改数值前后可以直接 diff 两次构建的报告，而不用本地重跑两遍。
 - ~~CI 加确定性自检~~ 已完成（2026-09-10）：`npm run selftest` 录 3 局（不同 seed / 角色）再原地重演比对，
   约 2 秒。以前录像只在本地手跑，CI 里**没有任何人验"世界还是确定性的"**——
   而这条性质是快照、存档、平衡工具、崩溃复现的共同地基，坏掉却不会有任何报错。

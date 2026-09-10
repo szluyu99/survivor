@@ -89,7 +89,12 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 
 渲染层：
 
-- `src/game.js` —— 只剩装配和主循环：输入、固定步长累加器、异常兜底。
+- `src/game.js` —— 装配 + 主循环 + 输入 + 各屏路由（811 行）。世界层绘制、局外屏、沙盒、
+  局外进度分别在 `world-render.js` / `screens.js` / `sandbox.js` / `progress.js`。
+- `src/world-render.js` —— 世界层绘制：背景、地形、实体、投射物、特效、相机、暗角与全屏覆盖。
+  它一个 UI 状态都不读（HUD 和面板要读 `uiPaused` / `winPanel`，留在 `game.js` 编排）。
+  **全项目对 canvas 调用数最敏感的地方**：同色实体攒一条路径、粒子透明度量化 8 档、碎片按颜色分组，
+  密集场面下每帧 fill/stroke 必须 < 100（`test/render.test.mjs` 有两条断言守着）。
 - `src/render` 相关：`src/shapes.js`（形状/描边/网格/暗角）、`src/hud.js`（局内 HUD、暂停/选卡/战利品/结算面板）、
   `src/screens.js`（局外的几屏：主菜单 / 开局前的角色屏 / 局外强化 / 成就与统计 / 操作说明——
   它和局内 HUD 的关注点完全不同，前者一帧只画一屏、几乎只是排版，后者每帧都画、要抠调用数）、`src/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、

@@ -30,4 +30,9 @@ jobs:
       - name: 平衡回归断言（每级升级必须有用、一局必须结束、帧率无关性等）
         run: npm run check
       - name: 平衡回归报告（只输出，不做断言）
-        run: npm run balance
+        run: npm run balance | tee balance-report.txt
+      - name: 存平衡报告（改数值前后可以直接 diff）
+        uses: actions/upload-artifact@v4
+        with:
+          name: balance-report
+          path: balance-report.txt
