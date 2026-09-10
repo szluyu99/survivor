@@ -63,7 +63,8 @@ function heroCardHit(x, y) {
   return -1;
 }
 
-// 商店（局外强化）里的一行 = 一个可买的东西。左栏永久强化，右栏角色解锁
+// 商店（局外强化）里的一行 = 一个可买的东西。左栏永久强化，右栏角色解锁。
+// 成就墙也复用这套坐标：左栏统计、右栏成就
 const SHOP_ROW = { w: 380, h: 54, gap: 10, leftX: 70, rightX: VIEW_W - 70 - 380, y0: 130 };
 const shopRowY = (i) => SHOP_ROW.y0 + i * (SHOP_ROW.h + SHOP_ROW.gap);
 function shopRowHit(x, y, col, count) {
@@ -77,7 +78,9 @@ function shopRowHit(x, y, col, count) {
 
 // 主菜单：竖排大按钮。以前所有东西都堆在一屏上（残片 + 4 张角色卡 + 3 个强化 +
 // 难度 + 帮助 + 三行提示），信息太密；现在拆成菜单 → 各功能屏
-const MENU_BTN = { w: 340, h: 40, gap: 10, y0: 150, count: 6 };
+// 7 个入口：开始 / 选角色 / 继续 / 局外强化 / 成就与统计 / 难度 / 说明。
+// 高度和间距压了一点，否则最后一项会撞到底部那三行小字
+const MENU_BTN = { w: 340, h: 36, gap: 8, y0: 140, count: 7 };
 const menuBtnY = (i) => MENU_BTN.y0 + i * (MENU_BTN.h + MENU_BTN.gap);
 const menuBtnX = () => (VIEW_W - MENU_BTN.w) / 2;
 function menuBtnHit(x, y) {

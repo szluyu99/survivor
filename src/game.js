@@ -10,6 +10,7 @@ import { createHud } from './hud.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
+import { ACHIEVEMENTS, doneCount, recordRun } from './achievements.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
@@ -75,7 +76,7 @@ const hud = createHud(ctx, {
   getOverTab: () => overTab,
   getReplayReady: () => !!lastReplay,
 });
-const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge, drawMenu, drawHeroSelect, drawShop, drawHelpScreen, WEAPON_NAME, clock } = hud;
+const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge, drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen, WEAPON_NAME, clock } = hud;
 
 // ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
 // 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
@@ -112,10 +113,15 @@ function saveMeta(next) {
   meta = next;
   try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch { /* 无痕模式会抛，忽略 */ }
 }
-// 结算：死亡那一刻把这局的残片记到账上
-function awardShards(w) {
+// 结算：死亡那一刻把这局的残片和累计统计一起记到账上。
+// 两件事必须一次写完——分两次 saveMeta 的话后一次会用到前一次之前的 meta 快照
+function settleRun(w) {
   const got = earnShards(w);
-  if (got > 0) saveMeta({ ...meta, shards: meta.shards + got });
+  saveMeta({
+    ...meta,
+    shards: meta.shards + Math.max(0, got),
+    stats: recordRun(meta.stats, w),
+  });
 }
 // 首屏点角色卡：没解锁就先花残片买下来（买完不直接开局，避免"手一抖花掉又开了一局"）
 function pickOrUnlockHero(id) {
@@ -337,6 +343,11 @@ function menuItems() {
     },
     { id: 'shop', label: '局外强化', note: `残片 ${meta.shards}` },
     {
+      id: 'stats',
+      label: '成就与统计',
+      note: `${doneCount(meta.stats, meta)}/${ACHIEVEMENTS.length} 成就 · ${meta.stats.runs} 局`,
+    },
+    {
       id: 'difficulty',
       label: `难度：${findDifficulty(difficulty).name}`,
       note: openDiffs > 1 ? '点击切换' : '通关后解锁噩梦',
@@ -368,6 +379,7 @@ function activateMenu(i) {
   else if (it.id === 'heroes') screen = 'heroes';
   else if (it.id === 'resume') resumeSave();
   else if (it.id === 'shop') screen = 'shop';
+  else if (it.id === 'stats') screen = 'stats';
   else if (it.id === 'difficulty') cycleDifficulty();
   else if (it.id === 'help') screen = 'help';
 }
@@ -1014,6 +1026,7 @@ function frame(now) {
       if (!started) {
         if (screen === 'heroes') drawHeroSelect();
         else if (screen === 'shop') drawShop();
+        else if (screen === 'stats') drawAchievements();
         else if (screen === 'help') drawHelpScreen();
         else drawMenu(menuItems(), menuCursor);
       } else if (player) {
@@ -1051,7 +1064,7 @@ function frame(now) {
                 lastReplay = recorder.toJSON(world);
                 globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能重演这一局
               }
-              awardShards(world);
+              settleRun(world);
               clearSave();
             }
             acc -= STEP;

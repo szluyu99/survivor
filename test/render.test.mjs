@@ -76,6 +76,7 @@ const { ALL_WEAPONS } = await import('../src/weapons.js');
 const { PERKS } = await import('../src/meta.js');
 const { ZONES, ZONE_SECONDS } = await import('../src/zones.js');
 const { DIFFICULTIES } = await import('../src/difficulty.js');
+const { ACHIEVEMENTS } = await import('../src/achievements.js');
 
 // 帧时间戳必须单调递增：主循环的 dt 会被夹在 [0, 0.25]，
 // 传一个比上次小的 now 会让 dt 变成 0，那一段世界根本不动
@@ -117,7 +118,7 @@ test('主菜单只有一排入口，具体内容都在子屏里', () => {
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('色块幸存者'), '标题没画');
   assert.ok(texts.some((t) => t.includes('通关')), '没写清这一局的目标');
-  for (const label of ['开始游戏', '选择角色', '继续上一局', '局外强化', '操作说明']) {
+  for (const label of ['开始游戏', '选择角色', '继续上一局', '局外强化', '成就与统计', '操作说明']) {
     assert.ok(texts.includes(label), `菜单少了「${label}」`);
   }
   assert.ok(texts.some((t) => t.startsWith('难度：')), '难度那一项没画');
@@ -141,6 +142,25 @@ test('主菜单 → 角色选择屏 → 开局', () => {
   runFrames(2);
   texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('色块幸存者'), 'ESC 没回到主菜单');
+});
+
+test('成就与统计是独立一屏，打完一局后统计有数', () => {
+  fire(handlers.window, 'keydown', { code: 'Digit5', preventDefault() {} });   // 成就与统计
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('成就与统计'), `没进成就屏：${texts.slice(0, 10)}`);
+  assert.ok(texts.includes('累计统计'), '左栏统计没画');
+  assert.ok(texts.includes('成就'), '右栏成就没画');
+  for (const k of ['总局数', '累计击杀', '最长存活', '最高轮次']) {
+    assert.ok(texts.includes(k), `统计里少了「${k}」`);
+  }
+  for (const a of ACHIEVEMENTS.slice(0, 3)) {
+    assert.ok(texts.some((t) => t.includes(a.name)), `成就「${a.name}」没画`);
+  }
+  assert.ok(!texts.some((t) => t.includes('NaN') || t.includes('undefined')), `画出了坏值：${texts.filter((t) => t.includes('NaN') || t.includes('undefined'))}`);
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  runFrames(2);
 });
 
 test('局外强化是独立一屏：永久强化和角色解锁都在里面', () => {
@@ -651,6 +671,11 @@ test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
   }
   assert.ok(w2.over, '没死成');
   assert.equal(store.has('survivor.save'), false, '阵亡后存档还在');
+  // 结算要把残片和累计统计一起写进存档（两件事必须一次写完）
+  const meta = JSON.parse(store.get('survivor.meta'));
+  assert.ok(meta.stats.runs >= 1, `累计局数没记上：${JSON.stringify(meta.stats)}`);
+  assert.ok(meta.stats.kills >= 1, '累计击杀没记上');
+  assert.ok(meta.stats.bestT > 0, '最长存活没记上');
   // 死后重开，把状态交还给后面的用例
   fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
   runFrames(3);

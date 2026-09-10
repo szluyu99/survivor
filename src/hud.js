@@ -10,6 +10,7 @@ import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banish
 import { HEROES, findHero } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
+import { ACHIEVEMENTS, achievementRows, statRows, doneCount } from './achievements.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { interruptNeed } from './enemies.js';
@@ -862,6 +863,55 @@ export function createHud(ctx, deps) {
     ctx.textAlign = 'left';
   }
 
+  // 成就与统计屏：左栏累计数字，右栏成就清单（带进度）
+  function drawAchievements() {
+    const m = meta();
+    const stats = m.stats;
+    screenFrame('成就与统计', `已达成 ${doneCount(stats, m)}/${ACHIEVEMENTS.length} · 累计 ${stats.runs} 局`);
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('累计统计', 70, 108);
+    ctx.font = '13px ui-monospace, monospace';
+    statRows(stats, m).forEach(([k, v], i) => {
+      const y = 132 + i * 22;
+      ctx.fillStyle = P.dimmer;
+      ctx.fillText(k, 70, y);
+      ctx.fillStyle = P.text;
+      ctx.fillText(v, 230, y);
+    });
+
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('成就', 470, 108);
+    const rows = achievementRows(stats, m);
+    rows.forEach((r, i) => {
+      const y = 128 + i * 32;
+      ctx.fillStyle = r.done ? P.calm : P.dimmer;
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(r.done ? `✓ ${r.name}` : `· ${r.name}`, 470, y);
+      ctx.fillStyle = r.done ? P.dim : P.faint;
+      ctx.font = '12px sans-serif';
+      ctx.fillText(r.desc, 560, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = r.done ? P.calm : P.faint;
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.fillText(r.text, VIEW_W - 70, y);
+      ctx.textAlign = 'left';
+      // 未达成的画一条细进度条，比只写数字直观
+      if (!r.done) {
+        const a = ACHIEVEMENTS[i];
+        const [cur, goal] = a.progress(stats, m);
+        ctx.fillStyle = P.bar;
+        ctx.fillRect(470, y + 6, 380, 3);
+        ctx.fillStyle = P.accent;
+        ctx.fillRect(470, y + 6, 380 * Math.max(0, Math.min(1, cur / goal)), 3);
+      }
+    });
+    drawBackBtn();
+  }
+
   // 操作说明屏
   function drawHelpScreen() {
     screenFrame('操作说明', 'ESC / 点返回回到主菜单');
@@ -965,7 +1015,7 @@ export function createHud(ctx, deps) {
 
   return {
     drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge,
-    drawMenu, drawHeroSelect, drawShop, drawHelpScreen,
+    drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen,
     statBars, WEAPON_NAME, clock,
   };
 }

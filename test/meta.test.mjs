@@ -226,3 +226,109 @@ test('不在最后一个区域打死 Boss 不算通关', () => {
   assert.equal(kills, 1, '第一个区域的 Boss 没被打死，这条测试的前提就不成立');
   assert.equal(w.won, false, '第一个区域打死 Boss 不该算通关');
 });
+
+// ---- 成就与累计统计 ----
+import {
+  ACHIEVEMENTS, defaultStats, normalizeStats, recordRun, achievementDone, doneCount, achievementRows, statRows,
+} from '../src/achievements.js';
+import { HEROES as ALL_HEROES } from '../src/heroes.js';
+
+const fakeRun = (over = {}) => ({
+  t: 100, kills: 200, bossCount: 2, chests: 3, evolved: ['arcfield'], loop: 0, hero: DEFAULT_HERO, ...over,
+});
+
+test('新存档带一份空统计，成就一个都没达成', () => {
+  const m = defaultMeta();
+  assert.deepEqual(m.stats, defaultStats());
+  assert.equal(doneCount(m.stats, m), 0, '空存档不该有已达成的成就');
+});
+
+test('一局结束会把数据并进累计统计，且不原地改旧对象', () => {
+  const s0 = defaultStats();
+  const s1 = recordRun(s0, fakeRun());
+  assert.equal(s0.runs, 0, '不该原地改传进来的统计');
+  assert.equal(s1.runs, 1);
+  assert.equal(s1.kills, 200);
+  assert.equal(s1.bosses, 2);
+  assert.equal(s1.chests, 3);
+  assert.equal(s1.evolutions, 1);
+  assert.equal(s1.bestT, 100);
+  assert.equal(s1.bestKills, 200);
+  assert.equal(s1.heroBest[DEFAULT_HERO], 100);
+
+  // 第二局更差：累计要加，最好成绩不该退步
+  const s2 = recordRun(s1, fakeRun({ t: 40, kills: 30, bossCount: 0, chests: 0, evolved: [] }));
+  assert.equal(s2.runs, 2);
+  assert.equal(s2.kills, 230);
+  assert.equal(s2.bestT, 100, '最好成绩被更差的一局盖掉了');
+  assert.equal(s2.bestKills, 200);
+  // 轮次取最高
+  const s3 = recordRun(s2, fakeRun({ loop: 2 }));
+  assert.equal(s3.maxLoop, 2);
+  assert.equal(recordRun(s3, fakeRun({ loop: 1 })).maxLoop, 2, '轮次应该取历史最高');
+});
+
+test('每个角色的最好成绩分开记', () => {
+  let s = defaultStats();
+  for (const h of ALL_HEROES) s = recordRun(s, fakeRun({ hero: h.id, t: 30 + ALL_HEROES.indexOf(h) * 10 }));
+  for (const [i, h] of ALL_HEROES.entries()) {
+    assert.equal(s.heroBest[h.id], 30 + i * 10, `${h.name} 的最好成绩不对`);
+  }
+  assert.equal(s.runs, ALL_HEROES.length);
+});
+
+test('成就按阈值解锁，进度文本跟着走', () => {
+  const m = defaultMeta();
+  const first = ACHIEVEMENTS.find((a) => a.id === 'firstBlood');
+  assert.equal(achievementDone(first, m.stats, m), false);
+  const after = recordRun(m.stats, fakeRun());
+  assert.equal(achievementDone(first, after, m), true, '打完一局就该解锁"开张"');
+
+  // 累计击杀类：差一个不算达成，够了才算
+  const k1k = ACHIEVEMENTS.find((a) => a.id === 'kills1k');
+  assert.equal(achievementDone(k1k, { ...after, kills: 999 }, m), false);
+  assert.equal(achievementDone(k1k, { ...after, kills: 1000 }, m), true);
+
+  // 通关类读的是 meta.beaten
+  const win = ACHIEVEMENTS.find((a) => a.id === 'winNormal');
+  assert.equal(achievementDone(win, after, m), false);
+  assert.equal(achievementDone(win, after, { ...m, beaten: ['normal'] }), true);
+
+  const rows = achievementRows(after, m);
+  assert.equal(rows.length, ACHIEVEMENTS.length);
+  assert.ok(rows.some((r) => r.done && r.text === '已达成'));
+  assert.ok(rows.some((r) => !r.done && r.text.includes('/')), '未达成的行应该显示进度');
+});
+
+test('"全员出勤"要每个角色都活过 60 秒', () => {
+  const m = defaultMeta();
+  const all = ACHIEVEMENTS.find((a) => a.id === 'allHeroes');
+  let s = defaultStats();
+  for (const h of ALL_HEROES) s = recordRun(s, fakeRun({ hero: h.id, t: 59 }));
+  assert.equal(achievementDone(all, s, m), false, '59 秒不该算');
+  for (const h of ALL_HEROES) s = recordRun(s, fakeRun({ hero: h.id, t: 61 }));
+  assert.equal(achievementDone(all, s, m), true);
+});
+
+test('老存档（没有 stats 字段）读出来不会变 NaN', () => {
+  const m = normalizeMeta({ shards: 10, unlocked: ['rookie'], perks: {}, beaten: ['normal'] });
+  assert.deepEqual(m.stats, defaultStats());
+  assert.equal(Number.isFinite(m.stats.kills), true);
+  // 脏统计也要洗：负数、小数、不存在的角色、非数字
+  const dirty = normalizeStats({ runs: -3, kills: 12.9, bestT: 'abc', maxLoop: 2.7, heroBest: { rookie: -5, nope: 100 } });
+  assert.equal(dirty.runs, 0);
+  assert.equal(dirty.kills, 12);
+  assert.equal(dirty.bestT, 0);
+  assert.equal(dirty.maxLoop, 2);
+  assert.deepEqual(dirty.heroBest, {});
+});
+
+test('统计墙的行都是能画的字符串', () => {
+  const m = defaultMeta();
+  m.stats = recordRun(m.stats, fakeRun());
+  for (const [k, v] of statRows(m.stats, m)) {
+    assert.equal(typeof k, 'string');
+    assert.equal(typeof v, 'string');
+    assert.ok(!v.includes('NaN') && !v.includes('undefined'), `「${k}」的值有问题：${v}`);
+  }
+});

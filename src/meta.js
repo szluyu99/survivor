@@ -8,6 +8,7 @@
 // 否则所有平衡阈值都会跟着玩家的存档漂移。
 import { HEROES, DEFAULT_HERO } from './heroes.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
+import { defaultStats, normalizeStats } from './achievements.js';
 
 // 结算公式：存活时长为主，击杀为辅，再乘难度倍率、加通关奖励。
 // 产出和价格一起校准过一次：加了精英原型之后基准局长从 116 秒掉到 90 秒，
@@ -54,7 +55,7 @@ export function perkCost(perk, level) {
 }
 
 export function defaultMeta() {
-  return { shards: 0, unlocked: [DEFAULT_HERO], perks: {}, beaten: [] };
+  return { shards: 0, unlocked: [DEFAULT_HERO], perks: {}, beaten: [], stats: defaultStats() };
 }
 
 // 从 localStorage 读回来的东西什么都可能是：手改过的、旧版本的、被截断的 JSON。
@@ -79,6 +80,8 @@ export function normalizeMeta(raw) {
       if (DIFFICULTIES.some((d) => d.id === id) && !meta.beaten.includes(id)) meta.beaten.push(id);
     }
   }
+  // 累计统计：老存档没有这一块，读出来是 undefined，直接参与运算会变 NaN
+  meta.stats = normalizeStats(raw.stats);
   return meta;
 }
 

@@ -18,6 +18,7 @@ import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
 import { ELITE_KINDS } from './elites.js';
 import { DIFFICULTIES, WIN_BONUS } from './difficulty.js';
+import { ACHIEVEMENTS, defaultStats } from './achievements.js';
 import { TERRAIN_TUNING } from './tuning.js';
 
 function checkWeapon(def, errors) {
@@ -267,6 +268,29 @@ export function validateContent() {
     if (d.requiresWin === d.id) errors.push(`${at}：解锁条件指向自己，永远解不开`);
   }
   if (!(WIN_BONUS > 0)) errors.push('通关奖励必须为正数，否则打通没有收益');
+
+  // 成就：id 唯一、说明齐全、进度函数对"空存档"和"满存档"都能算出合理的 [当前, 目标]
+  const achIds = ACHIEVEMENTS.map((a) => a.id);
+  if (new Set(achIds).size !== achIds.length) errors.push('成就 id 有重复');
+  const emptyStats = defaultStats();
+  const emptyMeta = { beaten: [], stats: emptyStats };
+  for (const a of ACHIEVEMENTS) {
+    const at = `成就 ${a.id || '?'}`;
+    if (!a.id || !a.name || !a.desc) errors.push(`${at}：缺 id/name/desc`);
+    if (typeof a.progress !== 'function') { errors.push(`${at}：缺 progress()`); continue; }
+    let pair;
+    try {
+      pair = a.progress(emptyStats, emptyMeta);
+    } catch (e) {
+      errors.push(`${at}：progress() 在空存档上抛错 ${e.message}`);
+      continue;
+    }
+    if (!Array.isArray(pair) || pair.length !== 2) { errors.push(`${at}：progress() 要返回 [当前, 目标]`); continue; }
+    const [cur, goal] = pair;
+    if (!(goal > 0)) errors.push(`${at}：目标值不合法`);
+    if (!(cur >= 0)) errors.push(`${at}：空存档上的进度不该是负数`);
+    if (cur >= goal) errors.push(`${at}：空存档就已经达成了，这个成就没有意义`);
+  }
 
   // 槽位数得放得下东西，否则玩法直接失效
   if (!(MAX_SLOTS >= 1)) errors.push('武器槽位数不合法');
