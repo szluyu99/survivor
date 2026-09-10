@@ -143,6 +143,21 @@ export function createFx({ onDeath, onWin } = {}) {
       sfx.surge();
     },
     calm: () => { /* 喘息期只在 HUD 上标注，不需要额外表现 */ },
+    // 自爆者留下引信：画一个和炸圈同大的红环当预警，再配一声"倒计时"
+    elitebomb: (f) => {
+      ring(f.x, f.y, f.amount, P.danger);
+      burst(f.x, f.y, 14, P.danger, 120, 2.5);
+      sfx.eliteBomb();
+    },
+    elitesplit: (f) => {
+      burst(f.x, f.y, 22, P.enemy.splitter, 190, 3);
+      fxState.shake = Math.max(fxState.shake, 5);
+      sfx.elite();
+    },
+    eliteshield: (f) => {
+      ring(f.x, f.y, f.amount + 26, P.calm);
+      sfx.eliteShield();
+    },
     split: (f) => {
       burst(f.x, f.y, 14, P.enemy.splitter, 190, 3);
       sfx.hit();

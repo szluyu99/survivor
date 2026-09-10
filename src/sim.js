@@ -2,7 +2,7 @@
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
 import { findWeapon } from './weapons.js';
 import { rollChoices, rerollChoices, banishChoice, TRAITS, CURSES } from './upgrades.js';
-import { KINDS, tickEnemy, tickSpawns, splitOnDeath, bossFissionOnDeath, makeEnemy, BOSS_KINDS, findBossKind } from './enemies.js';
+import { KINDS, tickEnemy, tickSpawns, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
@@ -30,8 +30,8 @@ export { PERKS, earnShards };
 export { TRAITS, CURSES };
 // 兵种表定义在 enemies.js，同样转出去
 export { KINDS };
-// Boss 原型表定义在 bosses.js，经 enemies.js 转出
-export { BOSS_KINDS, findBossKind };
+// Boss / 精英原型表定义在 bosses.js、elites.js，经 enemies.js 转出
+export { BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind };
 export { TERRAIN };
 export { SKILLS, MAX_SKILL_SLOTS };
 
@@ -75,7 +75,7 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     },
     weapons: [{ id: hero.weapon, level: 1, timer: 0 }],
     enemies: pool(MAX_ENEMIES, makeEnemy),
-    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
+    bullets: pool(MAX_BULLETS, () => ({ active: false, id: 0, x: 0, y: 0, vx: 0, vy: 0, r: 5, life: 0, dmg: 0, pierce: 1, blast: 0, fuse: 0, flip: -1, foe: false, homing: 0, src: '', color: '' })),
     gems: pool(MAX_GEMS, () => ({ active: false, x: 0, y: 0, r: 4, value: 0 })),
     orbs: pool(MAX_ORBS, () => ({ active: false, x: 0, y: 0, r: 9 })),
     terrain: pool(MAX_TERRAIN, makeTerrain),
@@ -127,9 +127,9 @@ function rollDmg(w, dmg) {
 // 打断机制要在每处再加一次累计，太容易漏。统一收口到这里
 function damageEnemy(w, e, dmg0, src) {
   const [rolled, crit] = rollDmg(w, dmg0);
-  // 守卫者：护卫还活着时减伤。标记在 tickBoss 里每帧算好，这里只读——
-  // Boss 一帧能被打十几次，不能在伤害入口里扫敌人池
-  const dmg = e.shielded ? rolled * findBossKind(e.boss).guard.damageTaken : rolled;
+  // 减伤（Boss 护卫在场 / 精英开盾）：倍率由行为代码每帧写进 e.armor，这里只读——
+  // Boss 一帧能被打十几次，不能在伤害入口里扫敌人池或查原型表
+  const dmg = e.armor > 0 ? rolled * e.armor : rolled;
   const real = Math.min(dmg, e.hp);
   e.hp -= dmg;
   e.flash = crit ? 0.12 : 0.08;
@@ -145,6 +145,22 @@ function noteDamage(w, src, amount) {
   if (!src || !(amount > 0)) return;
   w.log.damageBy[src] = (w.log.damageBy[src] || 0) + amount;
   w.log.dealt += amount;
+}
+
+// 玩家受伤的唯一出口：扣血、记账、判死。接触伤害和敌对子弹以前各写一遍，
+// 引信引爆是第三条路径，再抄一遍就该出事了
+function hurtPlayer(w, dmg, src) {
+  const p = w.player;
+  if (p.invuln > 0 || w.over) return;
+  noteTaken(w, src, Math.min(dmg, p.hp));
+  p.hp -= dmg;
+  p.flash = 0.15;
+  emit(w, 'hurt', p.x, p.y, dmg);
+  if (p.hp <= 0) {
+    p.hp = 0;
+    w.over = true;
+    emit(w, 'dead', p.x, p.y);
+  }
 }
 
 function noteTaken(w, src, amount) {
@@ -217,6 +233,8 @@ function killEnemy(w, e) {
     w.player.hp = Math.min(w.player.maxHp, w.player.hp + w.stats.lifeOnKill);
   }
   if (kind === 'splitter') splitOnDeath(w, e, enemyCtx);
+  // 精英原型的死亡效果：自爆者留引信、裂变精英裂成小号
+  if (kind === 'elite') eliteOnDeath(w, e, enemyCtx);
   // 裂变者死了会裂成两只小 Boss，这时不该报"BOSS 倒下"（它还没真的倒下）
   const fissioned = kind === 'boss' && bossFissionOnDeath(w, e, enemyCtx);
   emit(w, kind === 'boss' ? (fissioned ? 'kill' : 'bossdead') : 'kill', x, y, r);
@@ -257,6 +275,7 @@ const api = {
     b.r = opts.r ?? 5;
     b.color = opts.color ?? ''; // 空表示让渲染层按 foe 决定颜色
     b.blast = opts.blast ?? 0;   // >0 表示命中后炸一圈
+    b.fuse = opts.fuse ?? 0;     // >0 表示这是定时炸弹：数到 0 才炸，中途不和任何东西交互
     b.flip = opts.flip ?? -1;    // 剩余寿命低于这个值就反向飞（回旋镖）
     b.homing = opts.homing ?? 0; // >0 表示每秒最多转这么多弧度去追最近的敌人
     b.foe = opts.foe ?? false;   // 敌对子弹只打玩家。漏了这一行 Boss 弹幕会变成玩家子弹去打 Boss 自己
@@ -461,6 +480,19 @@ export function update(w, dt, input) {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     b.life -= dt;
+    // 定时炸弹（自爆精英留下的引信）：倒计时期间不和任何东西交互，
+    // 数到 0 的那一帧敌我都吃伤害——所以它既能帮你清场，也能把你自己炸掉
+    if (b.fuse > 0) {
+      b.fuse -= dt;
+      if (b.fuse <= 0) {
+        api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
+        const rr = b.blast + p.r;
+        const bdx = p.x - b.x, bdy = p.y - b.y;
+        if (bdx * bdx + bdy * bdy <= rr * rr) hurtPlayer(w, b.dmg, b.src || 'eliteBomb');
+        b.active = false;
+      }
+      continue;
+    }
     // 追踪弹：每帧朝最近的敌人拧一点方向
     if (b.homing > 0) {
       const t = api.nearestEnemy(w, b.x, b.y);

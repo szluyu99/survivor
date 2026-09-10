@@ -1,5 +1,5 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone, findBossKind } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone, findBossKind, findEliteKind } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
@@ -751,7 +751,7 @@ function render(w) {
       shapePath('boss', ex, ey, e.r + 6, 0);
       ctx.stroke();
       // 减伤中：再套一圈护卫色的虚圈，让"现在打不动"看得见
-      if (e.shielded) {
+      if (e.armor > 0) {
         ctx.strokeStyle = P.calm;
         ctx.lineWidth = 2;
         ctx.globalAlpha = 0.7;
@@ -769,11 +769,30 @@ function render(w) {
       }
     }
     if (e.kind === 'elite') {
-      // 精英加一圈金边和血条，让人一眼看出该躲还是该打
-      ctx.strokeStyle = P.warn;
+      // 精英：描边颜色区分原型（自爆红 / 护盾青 / 裂变紫），加血条
+      const arch = findEliteKind(e.elite);
+      ctx.strokeStyle = arch.ring;
       ctx.lineWidth = 2;
       shapePath('elite', ex, ey, e.r + 5, 0);
       ctx.stroke();
+      // 开盾中：套一圈实心感更强的环，"打不动"要看得见
+      if (e.armor > 0) {
+        ctx.strokeStyle = P.calm;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(ex, ey, e.r + 14, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      // 裂变精英画个内圈，和分裂怪同一种视觉语言
+      if (arch.fission && e.gen === 0) {
+        ctx.strokeStyle = arch.ring;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ex, ey, e.r * 0.45, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       const bw = e.r * 2.4;
       ctx.fillStyle = P.bar;
       ctx.fillRect(ex - bw / 2, ey - e.r - 16, bw, 4);
@@ -786,7 +805,7 @@ function render(w) {
   let mines = 0;
   ctx.beginPath();
   for (const b of w.bullets) {
-    if (!b.active || b.blast <= 0) continue;
+    if (!b.active || b.blast <= 0 || b.fuse > 0) continue;
     // 地雷画一圈示意爆炸范围，不然踩上去很懵
     const bx = b.x - camX, by = b.y - camY;
     ctx.moveTo(bx + b.blast, by);
@@ -794,6 +813,22 @@ function render(w) {
     mines++;
   }
   if (mines) { ctx.strokeStyle = P.mineRing; ctx.lineWidth = 1; ctx.stroke(); }
+
+  // 自爆精英留下的引信：红圈 + 随倒计时收缩的内圈，站在里面就会被炸
+  for (const b of w.bullets) {
+    if (!b.active || b.fuse <= 0) continue;
+    const bx = b.x - camX, by = b.y - camY;
+    ctx.strokeStyle = P.danger;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5 + 0.5 * Math.min(1, b.fuse * 3);
+    ctx.beginPath();
+    ctx.arc(bx, by, b.blast, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(bx, by, b.blast * (1 - Math.min(1, b.fuse / 0.9)), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   bucketReset();
   for (const b of w.bullets) {

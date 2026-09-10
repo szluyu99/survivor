@@ -113,7 +113,7 @@ export function createHud(ctx, deps) {
       // Boss 原型名 + 减伤状态：不写出来的话"打不动"看起来像 bug
       const arch = findBossKind(boss.boss);
       ctx.fillText(
-        boss.shielded ? `${arch.name}（护卫在场，减伤）` : arch.name,
+        boss.armor > 0 ? `${arch.name}（护卫在场，减伤）` : arch.name,
         VIEW_W / 2, 12,
       );
       // 预警期间显示打断进度：满了这一招就被打掉

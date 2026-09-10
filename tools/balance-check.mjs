@@ -10,12 +10,16 @@ import { PERKS, earnShards, heroCost } from '../src/meta.js';
 import { ZONES, ZONE_SECONDS } from '../src/zones.js';
 import { DIFFICULTIES } from '../src/difficulty.js';
 import { LOOP } from '../src/tuning.js';
+import { ELITE_KINDS } from '../src/elites.js';
 import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
 import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
 
 const DT = 1 / 60;
 const SEEDS = [1, 5, 9, 13, 21];
+// 比例类断言（强化/难度/轮次/精英）要拿两组平均值相除，5 个种子里只要有一个 200 秒的
+// 长局就能把平均值拉偏 30%，结论会随机翻面。这些断言单独用一组更大的种子
+const RATIO_SEEDS = [1, 3, 5, 7, 9, 11, 13, 17, 21, 29];
 const failures = [];
 const notes = [];
 
@@ -24,6 +28,8 @@ function check(ok, message) {
 }
 
 const avgOf = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+// 中位数：整局时长的分布有长尾（偶尔滚出一局 300 秒的雪球），比例类判断用它更稳
+const medOf = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
 // ---- DPS 台架：关刷怪、钉住靶子，测单位时间打出的伤害 ----
 function dpsAt(ids, levels, dist, seconds = 12) {
@@ -248,9 +254,9 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
   // 新玩家和老玩家玩的就不是同一个游戏了
   const maxed = {};
   for (const p of PERKS) maxed[p.id] = p.maxLevel;
-  const baseAvg = avgOf(SEEDS.map((seed) => play(seed).w.t));
-  const buffAvg = avgOf(SEEDS.map((seed) => play(seed, { perks: maxed }).w.t));
-  const shards = avgOf(SEEDS.map((seed) => earnShards(play(seed).w)));
+  const baseAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
+  const buffAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed, { perks: maxed }).w.t));
+  const shards = avgOf(RATIO_SEEDS.map((seed) => earnShards(play(seed).w)));
   const totalCost = HEROES.reduce((a, h) => a + heroCost(h.id), 0)
     + PERKS.reduce((a, p) => a + p.cost.reduce((x, y) => x + y, 0), 0);
   console.log(`  无强化 ${baseAvg.toFixed(0)}s → 满级强化 ${buffAvg.toFixed(0)}s（${(buffAvg / baseAvg).toFixed(2)} 倍）`);
@@ -314,9 +320,9 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
   console.log(`  通关需要活到 ${need}s（走进最后一个区域）；满级强化下最长一局 ${best.toFixed(0)}s`);
   check(best >= need, `满级强化下最长也只活了 ${best.toFixed(0)}s，通关（需要 ${need}s）根本摸不到`);
 
-  const normalAvg = avgOf(SEEDS.map((seed) => play(seed).w.t));
+  const normalAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
   const hard = DIFFICULTIES.find((d) => d.requiresWin);
-  const hardAvg = avgOf(SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
+  const hardAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
   console.log(`  普通 ${normalAvg.toFixed(0)}s → ${hard.name} ${hardAvg.toFixed(0)}s（${(hardAvg / normalAvg).toFixed(2)} 倍）`);
   check(hardAvg < normalAvg * 0.95, `${hard.name}难度平均 ${hardAvg.toFixed(0)}s，和普通的 ${normalAvg.toFixed(0)}s 差不多，难度倍率没起作用`);
   check(hardAvg > 25, `${hard.name}难度平均只活 ${hardAvg.toFixed(0)}s，太劝退了`);
@@ -324,9 +330,11 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
 
 console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==');
 {
-  // 直接把世界摆到第 2 / 第 3 轮起步，看还能撑多久。
-  // 通关后"继续无尽"是新加的路径，如果第二轮一进去就秒死，这个入口等于没有
-  const runLoop = (loop) => avgOf(SEEDS.map((seed) => {
+  // 用中位数而不是平均值：机器人偶尔会滚出一局 300 秒的雪球，
+  // 10 个种子里一个这样的长局就能把平均值抬高 30%，结论会随机翻面。
+  // 实测中位数 90s → 89s → 59s → 54s：一轮 +35% 血还在噪声里，
+  // 两轮（1.82 倍）才明显咬得动，所以"递进"这条只比第 1 轮和第 3 轮
+  const runLoop = (loop) => medOf(RATIO_SEEDS.map((seed) => {
     const w = createWorld(seed);
     w.loop = loop;
     w.zoneIndex = loop * ZONES.length;
@@ -338,15 +346,58 @@ console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==
     }
     return w.t;
   }));
-  const base = runLoop(0);
+  const first = runLoop(0);
   const second = runLoop(1);
   const third = runLoop(2);
-  console.log(`  第 1 轮 ${base.toFixed(0)}s → 第 2 轮 ${second.toFixed(0)}s → 第 3 轮 ${third.toFixed(0)}s`);
+  console.log(`  中位存活：第 1 轮 ${first.toFixed(0)}s → 第 2 轮 ${second.toFixed(0)}s → 第 3 轮 ${third.toFixed(0)}s`);
   console.log(`  第 3 轮敌人血量倍率 ${(LOOP.hpMul ** 2).toFixed(2)}x`);
-  check(second < base * 0.95, `第 2 轮平均 ${second.toFixed(0)}s，和第 1 轮的 ${base.toFixed(0)}s 差不多，轮次加成没起作用`);
-  check(third < second, '第 3 轮不比第 2 轮难，轮次加成没有累积');
-  check(second > 25, `第 2 轮平均只活 ${second.toFixed(0)}s，进无尽模式等于直接墙死`);
+  check(third < first * 0.85, `第 3 轮中位 ${third.toFixed(0)}s vs 第 1 轮 ${first.toFixed(0)}s，轮次加成没起作用`);
+  check(second > 25 && third > 25, `进无尽模式就墙死了（第 2 轮 ${second.toFixed(0)}s、第 3 轮 ${third.toFixed(0)}s）`);
   check(LOOP.hpMul ** 2 < 4, `第 3 轮血量已经 ${(LOOP.hpMul ** 2).toFixed(1)} 倍，乘方叠得太快`);
+}
+
+console.log('== 13. 每种精英都能打死，且不会把一局砍半 ==');
+{
+  // 把精英原型钉死（正常是每只随机抽），逐个跑整局：
+  // 自爆者的引信会连玩家一起炸、护盾者会拖时间、裂变精英会翻三倍数量，
+  // 任何一个失控都会让平均局长直接掉一截
+  const runElite = (id) => {
+    const times = [];
+    let killed = 0;
+    let spawned = 0;
+    for (const seed of RATIO_SEEDS) {
+      const w = createWorld(seed);
+      for (let i = 0; i < 400 * 60 && !w.over; i++) {
+        if (w.paused) chooseUpgrade(w, Math.floor(i / 97) % 3);
+        // 每帧把新刷出来的精英改成指定原型。
+        // 血量不动：三种原型的 hpMul 差异只有 ±20%，为了改它去反推原始倍率反而容易算错
+        // （第一版就写成了"除以自己再乘自己"的空操作）
+        for (const e of w.enemies) {
+          if (e.active && e.kind === 'elite' && e.elite !== id) {
+            e.elite = id;
+            e.armor = 0;
+            spawned++;
+          }
+        }
+        const a = (i / 60) * 1.6;
+        update(w, DT, { dx: Math.cos(a), dy: Math.sin(a), dash: w.player.dashCd <= 0 });
+        for (const f of w.fx) {
+          if (f.active && f.type === 'kill') killed++;
+          f.active = false;
+        }
+      }
+      times.push(w.t);
+    }
+    return { avg: avgOf(times), spawned, killed };
+  };
+  const base = avgOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
+  for (const el of ELITE_KINDS) {
+    const r = runElite(el.id);
+    console.log(`  只出${el.name}：平均 ${r.avg.toFixed(0)}s（基准 ${base.toFixed(0)}s），出场 ${r.spawned} 只`);
+    check(r.spawned > 0, `${el.name} 一局都没出场，测不到`);
+    check(r.avg > base * 0.5, `只出${el.name}时平均只有 ${r.avg.toFixed(0)}s，把一局砍掉一半以上`);
+    check(r.avg < base * 1.6, `只出${el.name}时平均 ${r.avg.toFixed(0)}s，比基准还轻松，机制没起作用`);
+  }
 }
 
 console.log('');

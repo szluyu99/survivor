@@ -121,6 +121,12 @@ export const sfx = {
     // 上行三音，和升级的琶音区分：这是"捡到东西"而不是"变强了"
     [659, 880, 1175].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.14, gain: 0.16, delay: i * 0.06 }));
   },
+  // 自爆引信：两声短促的"哔"，告诉你有东西在倒计时
+  eliteBomb() {
+    [880, 880].forEach((f, i) => tone({ freq: f, type: 'square', dur: 0.07, gain: 0.16, delay: i * 0.22 }));
+  },
+  // 开盾：闷一下，和"打不动"的手感对应
+  eliteShield() { tone({ freq: 220, to: 320, type: 'sine', dur: 0.22, gain: 0.16 }); },
   win() {
     // 上行大三和弦琶音，比升级的三音更长更亮：这是一局的终点
     [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.5, gain: 0.2, delay: i * 0.12 }));

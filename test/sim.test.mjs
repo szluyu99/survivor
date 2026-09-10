@@ -647,16 +647,18 @@ test('素材达标后能抽到进化卡，选了就合成并腾出槽位', () =>
 test('三条进化线的素材配方都能走通', () => {
   for (const evo of EVOLUTIONS) {
     const w = forceMaterials(7, evo.from);
-    // 进化卡只是权重更高，不是必出，所以最多试 6 次升级
+    // 进化卡只是权重更高，不是必出。单次没抽到的概率约 0.73，
+    // 试 10 次就有约 4% 会全空——五条进化线合起来接近 20% 的概率变红。
+    // 放宽到 24 次（约 0.1%），这条测的是"进化卡权重别低到几乎不出"，不是运气
     let picked = false;
-    for (let round = 0; round < 10 && !picked; round++) {
+    for (let round = 0; round < 24 && !picked; round++) {
       const cards = rollUntilChoices(w);
       assert.ok(cards, `${evo.id} 第 ${round + 1} 次都没升级`);
       const k = cards.findIndex((c) => c.evo);
       if (k >= 0) { chooseUpgrade(w, k); picked = true; }
       else chooseUpgrade(w, cards.length - 1);
     }
-    assert.ok(picked, `${evo.id} 连续 10 次升级都没抽到进化卡，权重可能太低`);
+    assert.ok(picked, `${evo.id} 连续 24 次升级都没抽到进化卡，权重可能太低`);
     assert.ok(w.weapons.some((x) => x.id === evo.id), `${evo.id} 合成结果不对：${w.weapons.map((x) => x.id)}`);
   }
 });
@@ -1176,7 +1178,7 @@ function putEnemy(w, kind, x, y, extra = {}) {
     speed: 60, dmg: 6, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
     state: 'chase', stateT: 0, volley: 0, plan: '', rage: 0, stun: 0,
     // Boss 专用字段也要重置：池子会复用槽位，不写的话会读到上一只 Boss 留下的原型
-    boss: 'brute', gen: 0, shielded: 0, tellDmg: 0, ...extra,
+    boss: 'brute', elite: 'bomber', gen: 0, armor: 0, tellDmg: 0, ...extra,
   });
   return e;
 }
@@ -1561,7 +1563,13 @@ test('守卫者：护卫在场时减伤，护卫清掉后恢复', () => {
     const boss = placeEnemy(w, 'boss', 70, 0, { boss: 'warden', maxHp: 1e9, hp: 1e9, speed: 0, dmg: 0 });
     if (withGuard) placeEnemy(w, arch.guard.kind, 70 + 40, 0, { speed: 0, dmg: 0 });
     w.weapons = [{ id: 'bolt', level: 3, timer: 0 }];
-    for (let i = 0; i < 3 * 60; i++) update(w, DT, { dx: 0, dy: 0 });
+    for (let i = 0; i < 3 * 60; i++) {
+      // 守卫者自己会召唤护卫，那样"没护卫"这一组也会开减伤，两组就一样了。
+      // 把它钉在追人状态上，只测"护卫在场 → 减伤"这一件事
+      boss.state = 'chase';
+      boss.stateT = 99;
+      update(w, DT, { dx: 0, dy: 0 });
+    }
     return 1e9 - boss.hp;
   };
   const bare = hit(false);
@@ -1576,4 +1584,114 @@ test('守卫者：护卫在场时减伤，护卫清掉后恢复', () => {
 test('基准 Boss 原型的招式权重和加原型之前一致（历史平衡数据的锚点）', () => {
   assert.deepEqual(BOSS_KINDS[0].plans, { charge: 0.45, shoot: 0.35, summon: 0.2 });
   assert.equal(BOSS_KINDS[0].hpMul, 1);
+});
+
+// ---- 精英原型 ----
+import { ELITE_KINDS, findEliteKind, rollElite } from '../src/elites.js';
+
+test('每只精英都会抽一个原型，三种都抽得到', () => {
+  const seen = new Set();
+  let a = 999;
+  const rng = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = 0; i < 3000; i++) seen.add(rollElite(rng));
+  for (const el of ELITE_KINDS) assert.ok(seen.has(el.id), `${el.name} 一次都没抽到`);
+});
+
+test('自爆精英死后留引信，倒计时结束才炸，能炸到玩家', () => {
+  const w = labWorld(3, { noWeapons: true });
+  const arch = findEliteKind('bomber');
+  // 贴着玩家放一只，血只剩 1，一发就死
+  const e = placeEnemy(w, 'elite', 24, 0, { elite: 'bomber', maxHp: 40, hp: 1, speed: 0, dmg: 20 });
+  w.weapons = [{ id: 'bolt', level: 3, timer: 0 }];
+  const hp0 = w.player.hp;
+  let fuseSeen = 0;
+  for (let i = 0; i < 60 && e.active; i++) { if (w.paused) chooseUpgrade(w, 0); update(w, DT, { dx: 0, dy: 0 }); }
+  assert.equal(e.active, false, '精英没被打死，测不了');
+  const bomb = w.bullets.find((b) => b.active && b.fuse > 0);
+  assert.ok(bomb, '死后没留下引信');
+  assert.equal(bomb.blast, arch.bomb.radius);
+  assert.equal(w.player.hp, hp0, '引信还在倒计时就炸到玩家了');
+  // 倒计时期间引信不该和任何东西交互
+  for (let i = 0; i < Math.round(arch.bomb.fuse * 60) - 4; i++) {
+    if (w.paused) chooseUpgrade(w, 0);   // 精英掉的经验球会顶出选卡，不选就等于时间停住
+    update(w, DT, { dx: 0, dy: 0 });
+    if (w.bullets.some((b) => b.active && b.fuse > 0)) fuseSeen++;
+  }
+  assert.ok(fuseSeen > 10, '引信提前消失了');
+  assert.equal(w.player.hp, hp0, '引信还没到点就扣血了');
+  // 再跑几帧让它炸
+  for (let i = 0; i < 20; i++) { if (w.paused) chooseUpgrade(w, 0); update(w, DT, { dx: 0, dy: 0 }); }
+  assert.ok(w.player.hp < hp0, '引信炸了却没伤到站在圈里的玩家');
+  assert.ok(w.log.takenBy.eliteBomb > 0, '承受伤害没记到 eliteBomb 名下');
+});
+
+test('护盾精英周期性开盾，开盾时伤害被压下来', () => {
+  const arch = findEliteKind('warder');
+  const dmgOver = (frames) => {
+    const w = labWorld(9, { noWeapons: true, immortal: true });
+    // stateT 要手动给：spawnEnemy 会把它初始化成"无盾计时"，而夹具是直接往池子里塞
+    const e = placeEnemy(w, 'elite', 70, 0, {
+      elite: 'warder', maxHp: 1e9, hp: 1e9, speed: 0, dmg: 0, stateT: arch.shield.off,
+    });
+    w.weapons = [{ id: 'bolt', level: 3, timer: 0 }];
+    let onFrames = 0;
+    for (let i = 0; i < frames; i++) {
+      if (w.paused) chooseUpgrade(w, 0);
+      update(w, DT, { dx: 0, dy: 0 });
+      if (e.armor > 0) onFrames++;
+    }
+    return { dmg: 1e9 - e.hp, onFrames, armor: e.armor };
+  };
+  // 一开始是无盾的（出场就免伤会让人以为是 bug）
+  const early = dmgOver(Math.round(arch.shield.off * 60) - 10);
+  assert.equal(early.onFrames, 0, '出场就开盾了');
+  // 跑够一个完整周期，盾一定开过
+  const full = dmgOver(Math.round((arch.shield.off + arch.shield.on) * 60));
+  assert.ok(full.onFrames > 30, `盾没开过：${full.onFrames} 帧`);
+  assert.ok(full.armor > 0 || full.onFrames > 0);
+});
+
+test('裂变精英死后裂成三只小精英，小的不再裂', () => {
+  const w = labWorld(4, { noWeapons: true, immortal: true });
+  const arch = findEliteKind('fission');
+  placeEnemy(w, 'elite', 40, 0, { elite: 'fission', maxHp: 100, hp: 1, speed: 0, dmg: 0 });
+  w.weapons = [{ id: 'bolt', level: 5, timer: 0 }];
+  // 不能用"父体 active 变 false"当结束条件：alloc 会复用刚释放的槽位，
+  // 父体这个对象很可能已经变成了它的子体。改成盯 elitesplit 事件，出现就立刻数
+  let split = false;
+  for (let i = 0; i < 240 && !split; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) {
+      if (f.active && f.type === 'elitesplit') split = true;
+      f.active = false;
+    }
+  }
+  assert.ok(split, '父体没裂开');
+  const kids = w.enemies.filter((e) => e.active && e.kind === 'elite');
+  assert.equal(kids.length, arch.fission.count, `应该裂成 ${arch.fission.count} 只，实际 ${kids.length}`);
+  for (const k of kids) {
+    assert.equal(k.gen, 1, '小精英应该是第 1 代');
+    assert.equal(k.elite, 'fission', '原型要继承父体');
+    assert.ok(k.maxHp < 100, '小精英血量应该更少');
+  }
+  // 再把小的都打死：不该再裂出下一代
+  for (let i = 0; i < 60 * 20 && w.enemies.some((e) => e.active && e.kind === 'elite'); i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, DT, { dx: 0, dy: 0 });
+  }
+  assert.equal(w.enemies.filter((e) => e.active && e.kind === 'elite').length, 0, '小精英又裂了下一代');
+});
+
+test('精英原型都有机制，且基准原型的血量倍率不夸张', () => {
+  for (const el of ELITE_KINDS) {
+    assert.ok(el.bomb || el.shield || el.fission, `${el.name} 没有任何机制`);
+    assert.ok(el.hpMul >= 0.6 && el.hpMul <= 1.5, `${el.name} 的血量倍率 ${el.hpMul} 偏离太多`);
+  }
 });

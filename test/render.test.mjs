@@ -673,7 +673,7 @@ test('通关时弹通关面板，回车继续无尽', () => {
       w.zoneIndex = ZONES.length - 1;
       if (w.bossTimer > 1) w.bossTimer = 0.01;
       const boss = w.enemies.find((e) => e.active && e.kind === 'boss');
-      if (boss) { boss.hp = 1; boss.shielded = 0; }
+      if (boss) { boss.hp = 1; boss.armor = 0; }
       runFrames(1, 3.5e6 + i * 17, 0);
       ok = w.won;
     }

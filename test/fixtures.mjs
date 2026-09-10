@@ -39,7 +39,7 @@ export function putEnemy(w, kind, x, y, extra = {}) {
     hitCd: 1e9, orbCd: 0, lastBulletId: 0, flash: 0,
     state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0, tellDmg: 0,
     // Boss 专用字段：默认基准原型、第 0 代、没有减伤
-    boss: 'brute', gen: 0, shielded: 0,
+    boss: 'brute', elite: 'bomber', gen: 0, armor: 0,
     ...extra,
   });
   return e;

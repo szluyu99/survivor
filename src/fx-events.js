@@ -11,6 +11,8 @@ export const FX_EVENTS = [
   'dash', 'shock', 'slow', 'magnet', 'decoy',
   // 敌人与波次
   'elite', 'surge', 'calm', 'split', 'shoot', 'summon',
+  // 精英原型
+  'elitebomb', 'elitesplit', 'eliteshield',
   // Boss
   'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
   // 地图

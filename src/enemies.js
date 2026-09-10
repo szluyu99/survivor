@@ -5,8 +5,9 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
 import { zoneWeight, zoneBurst, zoneBoss, loopScale } from './zones.js';
 import { BOSS_KINDS, findBossKind, rollPlan, DEFAULT_BOSS } from './bosses.js';
+import { ELITE_KINDS, findEliteKind, rollElite, DEFAULT_ELITE } from './elites.js';
 
-export { BOSS_KINDS, findBossKind };
+export { BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind };
 
 // 敌人对象的形状。只有 Boss 会用到后面那几个状态机字段
 export function makeEnemy() {
@@ -14,8 +15,11 @@ export function makeEnemy() {
     active: false, kind: 'grunt', x: 0, y: 0, r: 10, hp: 0, maxHp: 0,
     speed: 0, dmg: 0, gem: 1, hitCd: 0, orbCd: 0, lastBulletId: 0, flash: 0,
     state: 'chase', stateT: 0, moveX: 0, moveY: 0, volley: 0, plan: '', rage: 0, stun: 0, tellDmg: 0,
-    // 只有 Boss 用：原型 id、第几代（裂变出来的是 1，不再裂）、护卫是否还活着（减伤用）
-    boss: DEFAULT_BOSS, gen: 0, shielded: 0,
+    // Boss / 精英用：原型 id、第几代（裂变出来的是 1，不再裂）
+    boss: DEFAULT_BOSS, elite: DEFAULT_ELITE, gen: 0,
+    // 受伤倍率：0 表示正常吃伤害，>0 表示减伤（Boss 护卫在场、精英开盾都用它）。
+    // 放在实体上而不是每次命中去查原型表：Boss 一帧能被打十几次
+    armor: 0,
   };
 }
 
@@ -88,14 +92,24 @@ export function spawnEnemy(w, ctx, kindId = null, angle = null) {
   e.stun = 0;
   e.tellDmg = 0;
   e.gen = 0;
-  e.shielded = 0;
+  e.armor = 0;
   // Boss 原型由区域决定：荒野蛮兽、沼泽裂变者、巢穴守卫者
   e.boss = DEFAULT_BOSS;
+  e.elite = DEFAULT_ELITE;
   if (id === 'boss') {
     const arch = findBossKind(zoneBoss(w));
     e.boss = arch.id;
     e.maxHp *= arch.hpMul;
     e.hp = e.maxHp;
+  }
+  if (id === 'elite') {
+    // 精英原型每只随机抽
+    const arch = findEliteKind(rollElite(w.rng));
+    e.elite = arch.id;
+    e.maxHp *= arch.hpMul;
+    e.hp = e.maxHp;
+    // 护盾者从"无盾"开始数：一出场就免伤会让人以为是 bug
+    e.stateT = arch.shield ? arch.shield.off : 0;
   }
   return e;
 }
@@ -121,7 +135,7 @@ function tickBoss(w, e, dt, ctx) {
       if (!o.active || o === e || o.kind !== arch.guard.kind) continue;
       if (Math.hypot(o.x - e.x, o.y - e.y) <= arch.guard.radius) guards++;
     }
-    e.shielded = guards > 0 ? 1 : 0;
+    e.armor = guards > 0 ? arch.guard.damageTaken : 0;
   }
 
   // 半血狂暴：出招更快、弹更多、召唤更多。不加这个的话 Boss 就是背三招然后照抄
@@ -266,6 +280,9 @@ export function tickEnemy(w, e, dt, ctx) {
     return;
   }
 
+  // 精英：原型行为（目前只有护盾者需要每帧照顾），走位仍然是普通追人
+  if (e.kind === 'elite') tickElite(w, e, dt, ctx);
+
   if (e.kind === 'shooter') {
     // 保持中距离：太近就退，太远就靠，射程内就绕着走
     e.stateT -= dt;
@@ -322,6 +339,59 @@ export function splitOnDeath(w, e, ctx) {
     m.r = Math.max(6, pr * 0.6);
     m.speed = pspd * 1.25;
   }
+}
+
+// 精英行为。只有护盾者需要每帧照顾：无盾 3 秒 → 开盾 2.2 秒，来回切
+function tickElite(w, e, dt, ctx) {
+  const arch = findEliteKind(e.elite);
+  if (!arch.shield) return;
+  e.stateT -= dt;
+  if (e.stateT > 0) return;
+  if (e.armor > 0) {
+    e.armor = 0;
+    e.stateT = arch.shield.off;
+  } else {
+    e.armor = arch.shield.damageTaken;
+    e.stateT = arch.shield.on;
+    ctx.emit(w, 'eliteshield', e.x, e.y, e.r);
+  }
+}
+
+// 精英死亡：自爆者留引信，裂变精英裂成小号。返回 true 表示"这只死得不普通"
+export function eliteOnDeath(w, e, ctx) {
+  const arch = findEliteKind(e.elite);
+  // 先把父体数据抄下来：下面会 alloc 新实体，而 alloc 优先复用刚释放的槽位
+  const px = e.x, py = e.y, pr = e.r, php = e.maxHp, pspd = e.speed, pdmg = e.dmg, pelite = e.elite;
+  if (arch.bomb) {
+    // 引信是一颗"定时炸弹"子弹：数到 0 才炸，炸的时候敌我都吃伤害
+    ctx.spawnBullet(w, px, py, {
+      vx: 0, vy: 0, r: 6, life: arch.bomb.fuse + 0.5, dmg: pdmg * arch.bomb.dmgMul,
+      blast: arch.bomb.radius, fuse: arch.bomb.fuse, foe: true, src: 'eliteBomb',
+    });
+    ctx.emit(w, 'elitebomb', px, py, arch.bomb.radius);
+    return true;
+  }
+  if (arch.fission && e.gen === 0) {
+    const n = arch.fission.count;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const m = spawnEnemy(w, ctx, 'elite');
+      if (!m) continue;
+      m.elite = pelite;   // 继承原型，别让 spawnEnemy 重新抽一个
+      m.gen = 1;
+      m.x = px + Math.cos(a) * (pr + 18);
+      m.y = py + Math.sin(a) * (pr + 18);
+      m.maxHp = m.hp = Math.max(12, php * arch.fission.hpMul);
+      m.r = Math.max(9, pr * arch.fission.rMul);
+      m.speed = pspd * arch.fission.speedMul;
+      m.dmg = pdmg * 0.8;
+      m.gem = Math.max(1, Math.round(e.gem * 0.4));
+      m.armor = 0;
+    }
+    ctx.emit(w, 'elitesplit', px, py, pr);
+    return true;
+  }
+  return false;
 }
 
 // 裂变者死亡：裂成两只小 Boss（裂出来的不再裂）。

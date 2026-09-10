@@ -16,6 +16,7 @@ import { HERO_CARD } from './layout.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
+import { ELITE_KINDS } from './elites.js';
 import { DIFFICULTIES, WIN_BONUS } from './difficulty.js';
 import { TERRAIN_TUNING } from './tuning.js';
 
@@ -210,6 +211,38 @@ export function validateContent() {
       if (!(b.guard.radius > 0)) errors.push(`${at}：护卫判定半径不合法`);
       if (!(b.guard.damageTaken > 0 && b.guard.damageTaken < 1)) {
         errors.push(`${at}：减伤后的受伤倍率应该在 0~1 之间`);
+      }
+    }
+  }
+
+  // 精英原型
+  const eliteIds = ELITE_KINDS.map((e) => e.id);
+  if (new Set(eliteIds).size !== eliteIds.length) errors.push('精英原型 id 有重复');
+  if (!ELITE_KINDS.length) errors.push('精英原型表是空的');
+  for (const el of ELITE_KINDS) {
+    const at = `精英原型 ${el.id || '?'}`;
+    if (!el.id || !el.name || !el.hint) errors.push(`${at}：缺 id/name/hint`);
+    if (!(el.hpMul > 0)) errors.push(`${at}：血量倍率不合法`);
+    if (!el.ring) errors.push(`${at}：缺描边色 ring`);
+    // 三种机制至少要有一种，否则这个原型和普通精英没区别
+    if (!el.bomb && !el.shield && !el.fission) errors.push(`${at}：没有任何机制，等于普通精英`);
+    if (el.bomb) {
+      for (const f of ['fuse', 'radius', 'dmgMul']) {
+        if (!(el.bomb[f] > 0)) errors.push(`${at}：bomb.${f} 不合法`);
+      }
+    }
+    if (el.shield) {
+      for (const f of ['off', 'on']) {
+        if (!(el.shield[f] > 0)) errors.push(`${at}：shield.${f} 不合法`);
+      }
+      if (!(el.shield.damageTaken > 0 && el.shield.damageTaken < 1)) {
+        errors.push(`${at}：开盾后的受伤倍率应该在 0~1 之间`);
+      }
+    }
+    if (el.fission) {
+      if (!(el.fission.count >= 2)) errors.push(`${at}：fission.count 至少 2`);
+      for (const f of ['hpMul', 'rMul', 'speedMul']) {
+        if (!(el.fission[f] > 0)) errors.push(`${at}：fission.${f} 不合法`);
       }
     }
   }
