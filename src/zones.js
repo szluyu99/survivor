@@ -8,6 +8,7 @@
 // 写法和其他内容表一致：一条配置就是一个区域。weights 是"在基础权重上乘多少"，
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
 import { TERRAIN_TUNING, LOOP } from './tuning.js';
+import { P } from './palette.js';
 
 // 每个区域的"清场时长"：走完这么久，本区域的 Boss 就来堵门（见 tickZone）。
 // 打倒它才进下一段，所以一段的实际长度是 ZONE_SECONDS + Boss 战时长。
@@ -38,7 +39,7 @@ export const ZONES = [
     terrain: { rockShare: 0.2, maxFillers: 34 },
     burst: ['rusher', 'splitter'],
     boss: 'fission',
-    tint: 'rgba(60,120,90,0.07)',
+    tint: P.zoneTint.marsh,
   },
   {
     id: 'lair',
@@ -48,7 +49,7 @@ export const ZONES = [
     terrain: { rockShare: 0.92, maxFillers: 30, chestCooldown: 20 },
     burst: ['rusher', 'tank'],
     boss: 'warden',
-    tint: 'rgba(120,70,140,0.07)',
+    tint: P.zoneTint.lair,
   },
   {
     id: 'snow',
@@ -62,7 +63,7 @@ export const ZONES = [
     terrain: { rockShare: 0.35, maxFillers: 16 },
     burst: ['rusher', 'shooter'],
     boss: 'phantom',
-    tint: 'rgba(150,175,205,0.07)',
+    tint: P.zoneTint.snow,
   },
 ];
 

@@ -16,10 +16,11 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（231 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（232 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 105 秒
 npm run validate   # 内容表结构校验
+npm run arch       # 架构约束：确定性、依赖方向、颜色来源、fx 事件登记（约 0.1 秒）
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
 ```
 
@@ -87,6 +88,9 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 - `src/render` 相关：`src/shapes.js`（形状/描边/网格/暗角）、`src/hud.js`（HUD、暂停面板、
   选卡、死亡结算、首屏）、`src/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、
   `src/layout.js`（UI 命中区域，绘制和点击判定共用一套坐标）。
+- `src/sandbox.js` —— 武器沙盒（工具屏）的全部状态与交互。通过一个 `host` 拿"换一个干净世界"
+  和"回主菜单"两件事，其余留在 `game.js`——拆出来是因为 `game.js` 已经同时扛着
+  输入 / 主循环 / 渲染编排 / 局外状态四件事。
 - `src/palette.js` —— 语义化色板，其他文件零硬编码色值。
 - 表现层的"动作感"全部只动渲染层（`fx.js` / `game.js` 的 render），逻辑一个字节不改：
   冲刺残影按帧采样、击杀碎片按兵种形状拆块、命中火花沿"玩家→目标"方向喷、
@@ -103,6 +107,25 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 
 主循环用**固定步长**（逻辑恒定 1/60，渲染用真实 dt）。之前是变步长，同一个 seed 在
 30/60/144fps 下能跑出 441s / 113s / 77s 三种结果，平衡数据完全不可比。
+
+## 这个项目的硬规则（`npm run arch` 会拦）
+
+新来的人最容易踩、而且破坏后果都是**静默**的四条。它们不再靠注释和记忆，`tools/arch-check.mjs` 在 CI 里守着：
+
+1. **逻辑层必须完全确定性**：`sim.js` / `enemies.js` / `weapons.js` / `skills.js` / `terrain.js` /
+   `upgrades.js` / `zones.js` / `bosses.js` / `elites.js` / `meta.js` / `achievements.js` /
+   `difficulty.js` / `heroes.js` / `pool.js` / `tuning.js` / `replay.js` 里不许出现
+   `Math.random()` / `Date.now()` / `performance.now()`——随机数只能来自 `w.rng()`，时间只能来自 `w.t`。
+   破坏它的后果是录像和存档从此不可重演，而游戏表面照常运行。
+2. **逻辑层不许碰 DOM**（`document` / `window` / `localStorage` / `requestAnimationFrame`），
+   也不许 import 表现层（`game.js` / `hud.js` / `fx.js` / `shapes.js` / `audio.js` / `layout.js`）。
+   它必须能在 node 里裸跑——测试和平衡脚本都建立在这一点上。
+3. **`enemies.js` / `weapons.js` / `skills.js` / `terrain.js` / `upgrades.js` / `zones.js` /
+   `bosses.js` / `elites.js` 不许 import `sim.js`**：它们需要的能力由 sim 通过 `ctx` / `api` 注入，
+   否则是循环依赖。
+4. **颜色只能来自 `palette.js`**（`#fff` / `#000` / 纯白纯黑的半透明覆盖层除外），
+   **新 fx 事件必须先进 `fx-events.js` 的登记表**——`emit()` 的调用点由 arch 检查，
+   "登记表 ↔ 渲染层处理"由契约测试双向检查。
 
 ## 加内容的约定
 
@@ -263,6 +286,26 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 - 面板标题行显示最近 3 秒的实时输出，用来和 `npm run balance` 的台架 DPS 对照。
 - 沙盒是工具，所以**不写存档、不记成就、不结算残片、不录像**，升级卡也直接丢掉（等级手动调）。
   「围一圈 20 只」对应的正是平衡台架里的群体场景，这样台架数字和眼睛看到的画面能对上。
+
+## 崩了怎么查
+
+主循环有一层 try/catch（不加的话异常会断掉 rAF 链条，画面定格但玩家看不到任何提示）。
+崩溃时除了控制台堆栈，还会把**复现材料**写进 `localStorage` 的 `survivor.crash`：
+
+```js
+// 浏览器控制台里导出
+copy(localStorage.getItem('survivor.crash'))   // 或者 JSON.parse(...) 自己看
+```
+
+里面有 `message` / `stack`，以及这一局的**完整录像**（seed + 角色 + 强化 + 难度 + 每帧输入）。
+把 `report.replay` 存成 `crash.json` 之后：
+
+```bash
+npm run replay -- crash.json    # 精确重演崩溃那一局
+```
+
+这是"世界完全确定性"额外换来的好处：崩溃不再是一段没有上下文的堆栈。
+读档继续的局和沙盒局不录像，那时存的是世界快照（`snapshot`）。
 
 ## 部署
 

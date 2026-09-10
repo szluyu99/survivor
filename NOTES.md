@@ -6,7 +6,8 @@
 ## 一、现状速览
 
 - 纯静态 Web 游戏，零依赖零构建（ES module + Canvas 2D），`npm run serve` 起本地服务，GitHub Pages 部署。
-- 231 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）都在 CI 里。
+- 232 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）、
+  架构约束（`npm run arch`）都在 CI 里。
 - 一局的完整链路：首屏选角色/难度 → 走四个区域 → 打倒最后一个区域的 Boss 通关 → 继续无尽或重开 → 结算残片 → 局外解锁。
 
 ## 二、已做的事
@@ -191,6 +192,24 @@
     密集场面下每帧 fill/stroke 仍然 < 100（逐个画会退回几百次，那正是当年掉帧的原因）。
 
 ### 工程层
+- ~~架构约束进 CI~~ 已完成（2026-09-10）：`tools/arch-check.mjs`（零依赖，读文件 + 正则 + 断言）。
+  守四条：①逻辑层不许 `Math.random` / `Date.now` / `performance.now`（录像和快照会静默不可重演）；
+  ②逻辑层不许碰 DOM、不许 import 表现层；③`enemies/weapons/skills/terrain/upgrades/zones/bosses/elites`
+  不许 import `sim.js`（循环依赖，能力靠 ctx 注入）；④颜色只能来自 `palette.js`、`emit` 的事件名必须已登记。
+  写的时候踩到两点：**必须先剥注释**（注释里提 localStorage 是在解释"为什么不能用"，第一版误报了
+  `meta.js` / `achievements.js`），以及 `validate.js` 不该算逻辑层（它是内容检查器，要读 `layout.js` 的常量）。
+  它当场抓出一处真问题：三个区域的 `tint` 是硬编码 rgba，已挪进 `palette.js` 的 `zoneTint`。
+  验证方式是故意往 `zones.js` 塞一个 `Math.random()`，确认它变红。
+- ~~拆 `game.js`（第一刀）~~ 已完成（2026-09-10）：把武器沙盒整块（161 行）拆成 `src/sandbox.js`，
+  通过 `host`（`getWorld` / `beginSandboxRun` / `exitToMenu`）拿宿主能力。
+  `game.js` 1743 → 1622 行。剩下的两刀（`input.js` 输入层、`progress.js` 局外状态）还没动。
+  搬迁时唯一的坑：模块顶层的可变状态跨文件后要么变闭包要么变显式传参——
+  漏改了四处 `sandboxSpawn(world, ...)`，渲染烟测立刻报 `world is not defined`。
+- ~~崩溃自动导出复现材料~~ 已完成（2026-09-10）：崩溃时把 `{ message, stack, replay }` 写进
+  `localStorage` 的 `survivor.crash`，`report.replay` 存成文件后可以直接 `npm run replay -- crash.json`
+  精确重演。这是"世界完全确定性"顺手换来的好处：崩溃不再只是一段没有上下文的堆栈。
+  读档继续的局和沙盒局不录像，那时退回存世界快照。测试里故意把 `w.enemies` 弄成 null 触发一次崩溃，
+  再断言存下来的录像能重演出同一局。
 - ~~武器沙盒 / 测试模式~~ 已完成（2026-09-10）：主菜单第 8 项，或 `?sandbox=1` 直接进。
   左栏 17 把武器点着调等级（Shift / 右键降级），右栏开关（无敌 / 冻结刷怪 / 锁槽位 / 时间倍速）
   和靶子（杂兵 / 围一圈 20 只 / 精英 / Boss / 清空），左上角显示最近 3 秒实时输出。

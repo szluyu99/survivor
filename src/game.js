@@ -9,6 +9,7 @@ import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
 import { createHud } from './hud.js';
+import { createSandbox } from './sandbox.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
@@ -372,157 +373,35 @@ function unlockHeroAt(i) {
   if (next) { saveMeta(next); setHero(h.id); }
 }
 
-// ---- 武器沙盒 ----
-//
-// 起因：武器已经 17 把（7 基础 + 7 进化 + 3 觉醒），但强度判断全来自台架 DPS 和机器人局长，
-// "手感"这一维完全没法量。沙盒把 test/fixtures.mjs 里那套夹具搬到运行时：
-// 关掉刷怪和地形、玩家无敌、想试哪把武器就点几下调到几级，随手放靶子。
-// 它是工具，所以不写存档、不记成就、不录像，也不结算残片。
-const sandbox = {
-  on: false,
-  open: true,       // 面板展开着？Tab 折叠（第一版没法收起来，左半屏一直被挡）
-  immortal: true,
-  freeze: true,     // 冻结自动刷怪（靶子靠手动放）
-  lockSlots: true,  // 默认仍然锁 3 个槽位，和实战一致；放开是为了试任意组合
-  scale: 1,         // 时间倍速
-  hint: '',
-  dpsWindow: [],    // [时间, 累计伤害] 采样，算最近 3 秒的输出
-};
-
-const SANDBOX_GROUPS = [
-  ['base', WEAPONS],
-  ['evo', EVO_WEAPONS],
-  ['awaken', AWAKEN_WEAPONS],
-];
-
-function sandboxRows() {
-  const rows = [];
-  for (const [group, list] of SANDBOX_GROUPS) {
-    for (const def of list) {
-      const inst = world.weapons.find((x) => x.id === def.id);
-      rows.push({ id: def.id, name: def.name, group, level: inst ? inst.level : 0, maxLevel: def.maxLevel });
-    }
-  }
-  return rows;
-}
-
-function sandboxButtons() {
-  return [
-    { id: 'immortal', label: `无敌　${sandbox.immortal ? '开' : '关'}`, on: sandbox.immortal },
-    { id: 'freeze', label: `冻结刷怪　${sandbox.freeze ? '开' : '关'}`, on: sandbox.freeze },
-    { id: 'slots', label: `锁 ${MAX_SLOTS} 个槽位　${sandbox.lockSlots ? '开' : '关'}`, on: sandbox.lockSlots },
-    { id: 'scale', label: `时间 ×${sandbox.scale}`, on: sandbox.scale !== 1 },
-    { id: 'grunt', label: '放一只杂兵', on: false },
-    { id: 'ring', label: '围一圈 20 只', on: false },
-    { id: 'elite', label: '放一只精英', on: false },
-    { id: 'boss', label: '放一只 Boss', on: false },
-    { id: 'clear', label: '清空场上敌人', on: false },
-    { id: 'reset', label: '清空武器重来', on: false },
-    { id: 'exit', label: 'ESC 退出沙盒', on: false },
-  ];
-}
-
-// 调等级：没装的点一下装上（受槽位限制），装了的 +1 / -1，减到 0 就卸掉。
-// delta 来自 [+] / [-] 按钮；点行的空白处等价于 +1（Shift 点和右键仍然是 -1，留着当快捷方式）
-function sandboxBumpWeapon(i, down) {
-  const row = sandboxRows()[i];
-  if (!row) return;
-  const inst = world.weapons.find((x) => x.id === row.id);
-  if (!inst) {
-    if (down) return;
-    if (sandbox.lockSlots && world.weapons.length >= MAX_SLOTS) {
-      sandbox.hint = `槽位满了（点"锁 ${MAX_SLOTS} 个槽位"可以放开）`;
-      return;
-    }
-    world.weapons.push({ id: row.id, level: 1, timer: 0 });
-    sandbox.hint = '';
-    return;
-  }
-  if (down) {
-    inst.level--;
-    if (inst.level <= 0) world.weapons = world.weapons.filter((x) => x !== inst);
-  } else if (inst.level < row.maxLevel) {
-    inst.level++;
-  } else {
-    sandbox.hint = `${row.name}已经满级`;
-  }
-}
-
-function sandboxAction(id) {
-  if (id === 'immortal') sandbox.immortal = !sandbox.immortal;
-  else if (id === 'freeze') sandbox.freeze = !sandbox.freeze;
-  else if (id === 'slots') sandbox.lockSlots = !sandbox.lockSlots;
-  else if (id === 'scale') sandbox.scale = sandbox.scale === 1 ? 2 : sandbox.scale === 2 ? 0.5 : 1;
-  else if (id === 'grunt') sandboxSpawn(world, 'grunt', 200, 0);
-  else if (id === 'ring') {
-    // 围一圈：对应平衡台架里的"群体"场景，这样台架数字和眼睛看到的能对上
-    for (let k = 0; k < 20; k++) sandboxSpawn(world, 'grunt', 150, (k / 20) * Math.PI * 2);
-  } else if (id === 'elite') sandboxSpawn(world, 'elite', 220, 0);
-  else if (id === 'boss') sandboxSpawn(world, 'boss', 260, 0);
-  else if (id === 'clear') { for (const e of world.enemies) e.active = false; }
-  else if (id === 'reset') { world.weapons = []; sandbox.hint = ''; }
-  else if (id === 'exit') exitSandbox();
-}
-
-function beginSandbox() {
-  unlock();
-  world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
-  globalThis.__survivorWorld = world;
-  world.weapons = [];          // 从空手开始，想试哪把点哪把
-  world.terrainTimer = 1e9;
-  world.chestTimer = 1e9;
-  for (const t of world.terrain) t.active = false;
-  sandbox.on = true;
-  sandbox.open = true;
-  sandbox.hint = '';
-  sandbox.dpsWindow.length = 0;
-  recording = false;           // 工具局不录像、不结算
-  settled = true;
-  lastReplay = null;
-  player = null;
-  winPanel = false;
-  uiPaused = false;
-  queuedActions.length = 0;
-  acc = 0;
-  fx.reset();
-  started = true;
-  last = performance.now();
-}
-
-function exitSandbox() {
-  sandbox.on = false;
-  started = false;
-  screen = 'menu';
-  menuCursor = 0;
-  uiPaused = false;
-  restart();                   // 换回一个正常世界，免得下次开局接着用沙盒里的怪物
-  started = false;
-}
-
-// 每帧对世界做沙盒该有的约束。放在推进之前，这样"冻结刷怪"当帧就生效
-function sandboxEnforce(w) {
-  if (sandbox.immortal) {
-    w.player.maxHp = Math.max(w.player.maxHp, 1e9);
-    w.player.hp = w.player.maxHp;
-  }
-  if (sandbox.freeze) {
-    w.spawnTimer = 1e9;
-    w.eliteTimer = 1e9;
-    w.bossTimer = 1e9;
-  }
-  // 沙盒里不想被选卡打断：升级卡直接丢掉（武器等级手动调）
-  if (w.paused && w.choices) { w.choices = null; w.paused = false; }
-  if (w.paused && w.loot) { w.loot = null; w.paused = false; }
-}
-
-// 最近 3 秒的输出：w.log.dealt 是累计值，采样两端相减
-function sandboxDps(w) {
-  const win = sandbox.dpsWindow;
-  win.push([w.t, w.log.dealt]);
-  while (win.length > 2 && w.t - win[0][0] > 3) win.shift();
-  const span = w.t - win[0][0];
-  return span > 0.2 ? (w.log.dealt - win[0][1]) / span : 0;
-}
+// 武器沙盒（实现在 sandbox.js）。它只需要"换一个干净世界"和"回主菜单"两件事，
+// 其余（录像、存档、主循环那些状态怎么清）留在这里
+const sandbox = createSandbox({
+  getWorld: () => world,
+  beginSandboxRun() {
+    unlock();
+    world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
+    globalThis.__survivorWorld = world;
+    recording = false;           // 工具局不录像、不结算
+    settled = true;
+    lastReplay = null;
+    player = null;
+    winPanel = false;
+    uiPaused = false;
+    queuedActions.length = 0;
+    acc = 0;
+    fx.reset();
+    started = true;
+    last = performance.now();
+  },
+  exitToMenu() {
+    started = false;
+    screen = 'menu';
+    menuCursor = 0;
+    uiPaused = false;
+    restart();                   // 换回一个正常世界，免得下次开局接着用沙盒里的怪物
+    started = false;
+  },
+});
 
 function activateMenu(i) {
   const it = menuItems()[i];
@@ -532,7 +411,7 @@ function activateMenu(i) {
   else if (it.id === 'shop') screen = 'shop';
   else if (it.id === 'stats') screen = 'stats';
   else if (it.id === 'help') screen = 'help';
-  else if (it.id === 'sandbox') beginSandbox();
+  else if (it.id === 'sandbox') sandbox.begin();
 }
 
 addEventListener('keydown', (e) => {
@@ -619,10 +498,10 @@ addEventListener('keydown', (e) => {
   // 沙盒的按键要排在局内那套之前：Tab 在局内是详情浮层、数字键是选卡，
   // 排在后面的话沙盒永远收不到（折叠面板就是这么失灵的）
   if (sandbox.on) {
-    if (e.code === 'Escape') { exitSandbox(); return; }
-    if (e.code === 'Tab') { sandbox.open = !sandbox.open; e.preventDefault(); return; }
+    if (e.code === 'Escape') { sandbox.exit(); return; }
+    if (e.code === 'Tab') { sandbox.toggle(); e.preventDefault(); return; }
     const quick = { Digit1: 'grunt', Digit2: 'ring', Digit3: 'elite', Digit4: 'boss', Digit0: 'clear' }[e.code];
-    if (quick) { sandboxAction(quick); return; }
+    if (quick) { sandbox.action(quick); return; }
   }
   // Q / E 放技能，边沿触发
   if (!e.repeat && started && !world.over && !world.paused && !uiPaused) {
@@ -712,23 +591,23 @@ canvas.addEventListener('pointerdown', (e) => {
   if (sandbox.on) {
     // 折叠把手：展开时在面板上沿，收起时贴屏幕最下面
     if (sandbox.open ? inSandboxHandle(pointer.x, pointer.y) : inSandboxHandleMin(pointer.x, pointer.y)) {
-      sandbox.open = !sandbox.open;
+      sandbox.toggle();
       pointer = null;
       return;
     }
     if (sandbox.open) {
-      const rows = sandboxRows();
+      const rows = sandbox.rows();
       const hitRow = sandboxRowHit(pointer.x, pointer.y, rows.length);
       if (hitRow) {
         // delta 是 0 表示点在行上（不是 [+]/[-]），那就按 +1；Shift 点仍然是 -1
         const down = hitRow.delta < 0 || (hitRow.delta === 0 && e.shiftKey);
-        sandboxBumpWeapon(hitRow.index, down);
+        sandbox.bump(hitRow.index, down);
         pointer = null;
         return;
       }
-      const btns = sandboxButtons();
+      const btns = sandbox.buttons();
       const bi = sandboxBtnHit(pointer.x, pointer.y, btns.length);
-      if (bi >= 0) { sandboxAction(btns[bi].id); pointer = null; return; }
+      if (bi >= 0) { sandbox.action(btns[bi].id); pointer = null; return; }
     }
   }
   // 通关面板：点一下继续无尽
@@ -803,8 +682,8 @@ canvas.addEventListener('contextmenu', (e) => {
   // 沙盒里右键是"降一级"，不是冲刺
   if (sandbox.on && sandbox.open) {
     const at = viewPos(e);
-    const hitRow = sandboxRowHit(at.x, at.y, sandboxRows().length);
-    if (hitRow) sandboxBumpWeapon(hitRow.index, true);
+    const hitRow = sandboxRowHit(at.x, at.y, sandbox.rows().length);
+    if (hitRow) sandbox.bump(hitRow.index, true);
     return;
   }
   if (started && !world.over && !world.paused && !uiPaused) dashQueued = true;
@@ -1626,6 +1505,31 @@ function render(w) {
 let last = performance.now();
 let crashed = null;
 
+// 崩溃现场：这个游戏是完全确定性的，崩的那一刻手里正好有 seed + 完整输入流，
+// 存下来就能用 `npm run replay` 精确重演。不存的话只剩一段没有上下文的堆栈
+const CRASH_KEY = 'survivor.crash';
+function saveCrashReport(err) {
+  try {
+    const report = {
+      at: new Date().toISOString(),
+      message: String(err && err.message ? err.message : err),
+      stack: String(err && err.stack ? err.stack : ''),
+      // 录像本身就够重演：seed / 角色 / 强化 / 难度 / 每帧输入都在里面
+      replay: recording && recorder ? recorder.toJSON(world) : null,
+      // 没在录像的局（读档继续、沙盒）至少留一份世界快照
+      snapshot: recording && recorder ? null : safeSnapshot(),
+      sandbox: sandbox.on,
+    };
+    localStorage.setItem(CRASH_KEY, JSON.stringify(report));
+    console.error('[survivor] 崩溃现场已存到 localStorage 的 survivor.crash，'
+      + '导出成文件后可以用 npm run replay 重演');
+  } catch { /* 容量/无痕模式，忽略——崩溃提示本身不该再崩一次 */ }
+}
+
+function safeSnapshot() {
+  try { return snapshot(world); } catch { return null; }
+}
+
 function drawCrash(err) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = P.crashBg;
@@ -1633,7 +1537,7 @@ function drawCrash(err) {
   ctx.fillStyle = P.crashText;
   ctx.font = '16px ui-monospace, monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('游戏崩了，控制台有完整堆栈：', 20, 40);
+  ctx.fillText('游戏崩了。控制台有完整堆栈，复现材料在 localStorage 的 survivor.crash：', 20, 40);
   const msg = String(err && err.message ? err.message : err);
   msg.match(/.{1,70}/g)?.forEach((line, i) => ctx.fillText(line, 20, 70 + i * 22));
 }
@@ -1673,10 +1577,10 @@ function frame(now) {
         drawReplayBadge(player.world, player.progress);
       } else if (sandbox.on) {
         // 沙盒：同一套固定步长，只是 dt 先乘上倍速，并且每步都把约束按回去
-        acc += dt * sandbox.scale;
+        acc += dt * sandbox.state.scale;
         let steps = 0;
         while (acc >= STEP && steps < MAX_CATCHUP) {
-          sandboxEnforce(world);
+          sandbox.enforce(world);
           update(world, STEP, readInput());
           consumeFx(world);
           acc -= STEP;
@@ -1686,10 +1590,10 @@ function frame(now) {
         stepFx(dt);
         render(world);
         drawSandbox(world, {
-          rows: sandboxRows(),
-          buttons: sandboxButtons(),
-          dps: sandboxDps(world),
-          hint: sandbox.hint,
+          rows: sandbox.rows(),
+          buttons: sandbox.buttons(),
+          dps: sandbox.dps(world),
+          hint: sandbox.state.hint,
           open: sandbox.open,
         });
       } else {
@@ -1730,6 +1634,7 @@ function frame(now) {
       // 测试要靠这个标记发现崩溃：try/catch 会把异常吞掉，否则烟测永远是绿的
       globalThis.__survivorCrash = err;
       console.error('[survivor] 主循环异常', err);
+      saveCrashReport(err);
       try { drawCrash(err); } catch { /* 连报错都画不出来就算了 */ }
     }
   }
@@ -1739,5 +1644,5 @@ requestAnimationFrame(frame);
 
 // ?sandbox=1：直接进武器沙盒。调武器时不想每次都点两下菜单
 if (globalThis.location && new URLSearchParams(globalThis.location.search).get('sandbox') === '1') {
-  beginSandbox();
+  sandbox.begin();
 }

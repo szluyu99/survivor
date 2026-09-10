@@ -82,6 +82,17 @@ const { ACHIEVEMENTS } = await import('../src/achievements.js');
 // 传一个比上次小的 now 会让 dt 变成 0，那一段世界根本不动
 // （用例里写死的绝对时间戳很容易被新插入的用例挤到"过去"，就是这么坑过好几次）
 let lastFrameMs = 0;
+// 允许崩溃的一帧：runFrames 自带"不许崩"的断言，测崩溃处理时要绕开它
+function runFramesRaw(n) {
+  for (let i = 0; i < n; i++) {
+    const cb = rafCb;
+    if (!cb) return;
+    rafCb = null;
+    lastFrameMs += 16.7;
+    cb(lastFrameMs);
+  }
+}
+
 function runFrames(n, startMs = 0, stepMs = 16.7) {
   // stepMs 为 0 的调用（"同一时刻画几帧"）也要往前挪一帧，否则夹完 dt 恒为 0
   if (startMs <= lastFrameMs) startMs = lastFrameMs + (stepMs || 16.7);
@@ -1332,6 +1343,30 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
   // 最后正常选一张，回到游戏
   fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(5);
+});
+
+test('崩溃时把复现材料写进 localStorage（这游戏是确定性的，录像就能重演）', async () => {
+  const { verify } = await import('../src/replay.js');
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  const w = warmUp(4);
+  store.delete?.('survivor.crash');
+  // 制造一次主循环异常：把渲染层要用的字段弄坏，最省事且不污染逻辑
+  const realEnemies = w.enemies;
+  try {
+    w.enemies = null;                 // render 里遍历 enemies 时会抛
+    runFramesRaw(1);
+  } finally {
+    w.enemies = realEnemies;
+  }
+  const raw = store.get('survivor.crash');
+  assert.ok(raw, '崩溃了却没留下现场');
+  const report = JSON.parse(raw);
+  assert.ok(report.message, '崩溃报告里没有错误信息');
+  assert.ok(report.replay, '崩溃报告里没有录像（这局本来在录）');
+  // 关键：这份录像必须真的能重演
+  const { ok } = verify(report.replay);
+  assert.ok(ok, '崩溃录像重演不出同一局');
+  globalThis.__survivorCrash = undefined;
 });
 
 test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没声没画面）', async () => {
