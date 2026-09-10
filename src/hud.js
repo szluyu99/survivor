@@ -480,6 +480,41 @@ export function createHud(ctx, deps) {
       VIEW_W / 2, REROLL_BTN.y + REROLL_BTN.h + 18);
   }
 
+  // 战利品面板：打倒交界 Boss 之后的三选一。卡片画法和升级卡一样，
+  // 但标题、配色、副标题不同——它是"通过了这一段"的奖励，不是构筑选择，
+  // 而且没有重抽/排除（一次性补给，没必要再加一层决策）
+  function drawLoot(w) {
+    ctx.fillStyle = P.overlay;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.chest;
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('战利品 · 选一个（点击或按 1/2/3）', VIEW_W / 2, CARD_Y - 52);
+    ctx.fillStyle = P.dim;
+    ctx.font = '14px sans-serif';
+    const next = ZONES[(w.zoneIndex + 1) % ZONES.length];
+    ctx.fillText(`打倒了${currentZone(w).name}的 Boss，挑完就进${next.name}`, VIEW_W / 2, CARD_Y - 26);
+    w.loot.forEach((u, i) => {
+      const x = cardX(i);
+      ctx.fillStyle = P.card;
+      ctx.fillRect(x, CARD_Y, CARD_W, CARD_H);
+      ctx.strokeStyle = P.chest;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, CARD_Y, CARD_W, CARD_H);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = P.chest;
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText(u.name, x + CARD_W / 2, CARD_Y + 62);
+      ctx.fillStyle = P.dim;
+      ctx.font = '14px sans-serif';
+      const lines = u.desc.length > 14 ? [u.desc.slice(0, 13), u.desc.slice(13)] : [u.desc];
+      lines.forEach((t, li) => ctx.fillText(t, x + CARD_W / 2, CARD_Y + 96 + li * 19));
+      ctx.fillStyle = P.faint;
+      ctx.font = '13px ui-monospace, monospace';
+      ctx.fillText(`[${i + 1}]`, x + CARD_W / 2, CARD_Y + CARD_H - 16);
+    });
+  }
+
   // 横条：名字 + 条 + 占比，左右两栏共用
   function statBars(rows, x, y, w0, total, color) {
     ctx.textAlign = 'left';
@@ -1023,7 +1058,7 @@ export function createHud(ctx, deps) {
   }
 
   return {
-    drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge,
+    drawHud, drawPausePanel, drawChoices, drawLoot, drawGameOver, drawWinPanel, drawReplayBadge,
     drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen,
     statBars, WEAPON_NAME, clock,
   };

@@ -1,7 +1,7 @@
 // 纯逻辑层：不碰 DOM，方便在 node 里跑测试。
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
 import { findWeapon } from './weapons.js';
-import { rollChoices, rerollChoices, banishChoice, TRAITS, CURSES } from './upgrades.js';
+import { rollChoices, rerollChoices, banishChoice, rollLoot, TRAITS, CURSES } from './upgrades.js';
 import { KINDS, tickEnemy, tickSpawns, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
@@ -97,6 +97,7 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     zoneBoss: 0,          // 1 = 正在打交界 Boss，这段区域时间冻结
     loop: 0,              // 无尽轮次：区域循环完一整轮算一轮，敌人再叠一档强度
     choices: null,
+    loot: null,           // 打倒交界 Boss 后的三选一，挑完才换区
     evolved: [],
     chests: 0,
     // 选卡时的两个交互：重抽和排除。排除掉的卡这一局不再出现
@@ -196,11 +197,25 @@ export function reroll(w) { return rerollChoices(w); }
 export function banish(w, index) { return banishChoice(w, index); }
 
 export function chooseUpgrade(w, index) {
+  // 战利品和升级卡共用这个入口：外部（渲染层、测试、平衡工具）只需要
+  // "暂停了就挑一张"，不用关心这次暂停是升到级了还是刚打完交界 Boss
+  if (w.loot) return chooseLoot(w, index);
   if (!w.choices || !w.choices[index]) return;
   w.choices[index].apply(w);
   w.player.level++;
   w.choices = null;
   w.paused = false;
+}
+
+// 选走一件战利品，然后才真正换区（横幅也在这时候弹）
+export function chooseLoot(w, index) {
+  if (!w.loot || !w.loot[index]) return;
+  w.loot[index].apply(w);
+  w.loot = null;
+  // 升级卡可能和战利品在同一帧堆上来（打死 Boss 的那颗经验球正好让你升级），
+  // 那就继续停着让人挑完
+  w.paused = !!w.choices;
+  finishZoneBoss(w);
 }
 
 // 开箱：直接给一次免费升级（白捡一张卡），所以宝箱值得绕路
@@ -230,6 +245,18 @@ function anyBossAlive(w) {
     if (list[i].active && list[i].kind === 'boss') return true;
   }
   return false;
+}
+
+// 交界 Boss 战收尾：清掉标记、推进区域、弹横幅。
+// 只有挑完战利品才会走到这儿（关掉 Boss 的那种局不走这条路，见 update）
+function finishZoneBoss(w) {
+  if (!w.zoneBoss) return;
+  const loopBefore = w.loop;
+  w.zoneBoss = 0;
+  advanceZone(w);
+  // 进入新一轮时报轮次，否则只报区域——两条横幅同时弹会互相盖掉
+  if (w.loop > loopBefore) emit(w, 'loop', w.player.x, w.player.y, w.loop);
+  else emit(w, 'zone', w.player.x, w.player.y, w.zoneIndex);
 }
 
 function killEnemy(w, e) {
@@ -451,7 +478,7 @@ export function update(w, dt, input) {
   let entered = null;
   if (tickZone(w, dt) === 'boss') {
     if (w.bossTimer >= SPAWN_TIMERS.bossOff) {
-      // 这一局关掉了 Boss（测试 / 平衡工具）：没人堵门，到点就换区
+      // 这一局关掉了 Boss（测试 / 平衡工具）：没人堵门，到点就换区，也没有战利品
       entered = advanceZone(w);
     } else {
       // 交界 Boss：让 tickSpawns 这一帧就把它放出来，之后区域时间冻结
@@ -459,9 +486,11 @@ export function update(w, dt, input) {
       w.bossTimer = 0;
     }
   } else if (w.zoneBoss && !anyBossAlive(w)) {
-    // Boss（含裂变者裂出的子体）全清了才换景
-    w.zoneBoss = 0;
-    entered = advanceZone(w);
+    // Boss（含裂变者裂出的子体）全清了：先给一件战利品，挑完才换景（见 chooseLoot）
+    w.loot = rollLoot(w);
+    w.paused = true;
+    emit(w, 'loot', p.x, p.y, w.zoneIndex);
+    return;
   }
   if (entered) {
     // 进入新一轮时报轮次，否则只报区域——两条横幅同时弹会互相盖掉

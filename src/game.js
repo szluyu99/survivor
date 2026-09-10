@@ -76,7 +76,7 @@ const hud = createHud(ctx, {
   getOverTab: () => overTab,
   getReplayReady: () => !!lastReplay,
 });
-const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge, drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen, WEAPON_NAME, clock } = hud;
+const { drawHud, drawPausePanel, drawChoices, drawLoot, drawGameOver, drawWinPanel, drawReplayBadge, drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen, WEAPON_NAME, clock } = hud;
 
 // ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
 // 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
@@ -484,11 +484,11 @@ addEventListener('keydown', (e) => {
   }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
-  if (world.paused && world.choices) {
+  if (world.paused && (world.choices || world.loot)) {
     const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
-    // Shift + 数字 = 排除这张卡，单按数字 = 选它
-    if (i >= 0) queueAction(e.shiftKey ? 'banish' : 'pick', i);
-    if (e.code === 'KeyR') queueAction('reroll');
+    // Shift + 数字 = 排除这张卡，单按数字 = 选它。战利品没有重抽/排除
+    if (i >= 0) queueAction(e.shiftKey && !world.loot ? 'banish' : 'pick', i);
+    if (e.code === 'KeyR' && !world.loot) queueAction('reroll');
   }
   if (world.over && e.code === 'KeyR') startReplay();  // 死亡结算里按 R 看回放
   if (world.over && e.code === 'Space') restart();
@@ -578,7 +578,11 @@ canvas.addEventListener('pointerdown', (e) => {
     pointer = null;
     return;
   }
-  if (world.paused && world.choices) {
+  if (world.paused && world.loot) {
+    // 战利品只有"挑一张"，没有重抽和排除
+    const i = cardHit(pointer.x, pointer.y);
+    if (i >= 0) { queueAction('pick', i); pointer = null; }
+  } else if (world.paused && world.choices) {
     const bi = banishHit(pointer.x, pointer.y);
     if (bi >= 0 && world.banishes > 0) { queueAction('banish', bi); pointer = null; return; }
     if (inRerollBtn(pointer.x, pointer.y)) { queueAction('reroll'); pointer = null; return; }
@@ -990,7 +994,8 @@ function render(w) {
   drawHud(w);
   drawStick();
   if (uiPaused) drawPausePanel(w);
-  if (w.paused && w.choices) drawChoices(w);
+  if (w.paused && w.loot) drawLoot(w);
+  else if (w.paused && w.choices) drawChoices(w);
   if (winPanel) drawWinPanel(w);
   if (w.over) drawGameOver(w);
 }

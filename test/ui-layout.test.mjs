@@ -106,6 +106,16 @@ for (let i = 0; i < 60 * 60 && !(wc.paused && wc.choices); i++) {
   update(wc, 1 / 60, { dx: Math.cos(a), dy: Math.sin(a), dash: false });
 }
 
+// 停在战利品界面的世界：跑到交界 Boss 出场，秒掉它
+const wl = createWorld(13);
+wl.player.maxHp = wl.player.hp = 1e9;
+wl.eliteTimer = 1e9;
+for (let i = 0; i < 200 * 60 && !wl.loot; i++) {
+  if (wl.paused) chooseUpgrade(wl, 0);
+  for (const e of wl.enemies) if (e.active && e.kind === 'boss') e.hp = 1;
+  update(wl, 1 / 60, { dx: 0, dy: 0 });
+}
+
 const menuItems = [
   { id: 'start', label: '开始游戏', note: '角色：新兵' },
   { id: 'heroes', label: '选择角色', note: '已解锁 2/4' },
@@ -157,6 +167,7 @@ const SCREENS = {
   '结算·详情': () => { overTab = 1; hud.drawGameOver(w); },
   通关面板: () => hud.drawWinPanel(w),
   选卡: () => hud.drawChoices(wc),
+  战利品: () => hud.drawLoot(wl),
 };
 
 for (const [name, draw] of Object.entries(SCREENS)) {

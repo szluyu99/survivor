@@ -16,7 +16,8 @@ function play({ seed, weapons, startLevels = null, mover = circling, pick = () =
   let bossKills = 0;
   let firstBossKillAt = null;
   for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
-    if (w.paused) { levels++; chooseUpgrade(w, pick(i)); }
+    // 战利品也会让世界暂停，但它不算升级——不区分的话报告里的"升级次数"会虚高
+    if (w.paused) { if (w.choices) levels++; chooseUpgrade(w, pick(i)); }
     const inp = mover(i);
     // 有冷却就冲：模拟真人一有冲刺就用掉
     update(w, DT, dash ? { ...inp, dash: w.player.dashCd <= 0 } : inp);

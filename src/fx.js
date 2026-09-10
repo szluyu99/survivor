@@ -247,6 +247,12 @@ export function createFx({ onDeath, onWin } = {}) {
       fxState.flash = 0.18;
       sfx.chest();
     },
+    // 打倒交界 Boss 掉战利品：门开了，面板由 hud 画，这里只做"这一刻"的表现
+    loot: (f) => {
+      burst(f.x, f.y, 30, P.chest, 240, 3.5);
+      fxState.flash = 0.22;
+      sfx.chest();
+    },
     // 换区域：横幅报出新区域的名字，顺便抖一下，让"场景变了"这件事有分量
     zone: (f, w) => {
       const z = currentZone(w);

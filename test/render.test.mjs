@@ -548,6 +548,7 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
     assert.ok(texts.some((t) => t.includes(ZONES[w.zoneIndex % ZONES.length].name)), `HUD 没画区域名：${texts.slice(0, 14)}`);
 
     // 清场时间走完先是一场交界 Boss 战，HUD 的倒计时要换成"Boss 战"
+    const zoneBefore = w.zoneIndex;
     w.zoneT = ZONE_SECONDS - 0.005;
     calls.length = 0;
     runFrames(10);
@@ -555,13 +556,22 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
     assert.equal(w.zoneBoss, 1, '推到切换点却没进 Boss 战');
     assert.ok(fighting.some((t) => t.includes('Boss 战')), `Boss 战期间 HUD 没提示：${fighting.slice(0, 14)}`);
 
-    // 把世界推到真正的切换：关掉 Boss 并清场，横幅应该弹出来
+    // 打倒挡门的 Boss：先弹战利品面板，按 1 挑一张之后才换区
     const nextName = ZONES[(w.zoneIndex + 1) % ZONES.length].name;
     w.bossTimer = 1e9;
     for (const e of w.enemies) if (e.active && e.kind === 'boss') e.active = false;
     calls.length = 0;
+    runFrames(3);
+    const lootTexts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.ok(w.loot && w.loot.length === 3, '打倒交界 Boss 没弹三选一的战利品');
+    assert.ok(lootTexts.some((t) => t.includes('战利品')), `战利品面板没画出来：${lootTexts.slice(0, 14)}`);
+    assert.equal(w.zoneIndex, zoneBefore, '战利品还没挑就换区了');
+
+    fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    calls.length = 0;
     runFrames(20);
     const banner = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.equal(w.loot, null, '按了 1 战利品没被挑掉');
     assert.ok(banner.some((t) => t.includes('进入')), `换区域没弹横幅：${banner.slice(0, 14)}`);
     assert.ok(banner.some((t) => t.includes(nextName)), `横幅里没有新区域「${nextName}」`);
   } finally {

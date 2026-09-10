@@ -18,7 +18,8 @@ export function record(seed = 1, seconds = 120, hero = DEFAULT_HERO) {
   const w = createWorld(seed, hero);
   const rec = createRecorder(seed, w.hero);
   for (let i = 0; i < seconds * 60 && !w.over; i++) {
-    const action = w.paused && w.choices ? { type: 'pick', index: 0 } : null;
+    // 升级卡和交界 Boss 的战利品都走 chooseUpgrade，只看 choices 会卡在战利品面板上
+    const action = w.paused ? { type: 'pick', index: 0 } : null;
     const input = rec.record({ ...circling(i), dash: w.player.dashCd <= 0 }, action);
     if (action) chooseUpgrade(w, action.index);
     update(w, DT, input);

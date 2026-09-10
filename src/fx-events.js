@@ -17,6 +17,8 @@ export const FX_EVENTS = [
   'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
   // 地图
   'chest', 'zone', 'loop',
+  // 交界 Boss 的战利品
+  'loot',
   // 通关
   'win',
 ];

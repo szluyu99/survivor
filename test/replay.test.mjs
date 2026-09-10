@@ -33,7 +33,8 @@ function fingerprint(w) {
 
 function run(w, from, to, mover = circling) {
   for (let i = from; i < to; i++) {
-    if (w.paused && w.choices) chooseUpgrade(w, 0);
+    // 升级卡和交界 Boss 的战利品都走 chooseUpgrade，不然世界会停在暂停态上不动
+    if (w.paused) chooseUpgrade(w, 0);
     update(w, DT, mover(i));
     for (const f of w.fx) f.active = false;
   }
@@ -137,6 +138,29 @@ test('角色会跟着快照和录像一起走（否则重演的是另一个角�
   const replay = rec.toJSON(w3);
   assert.equal(replay.hero, 'warden');
   assert.equal(fingerprint(playback(replay)), fingerprint(w3));
+});
+
+test('没挑完的战利品也会进快照（读档回来还得接着挑）', () => {
+  const w = createWorld(13);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.eliteTimer = 1e9;
+  for (let i = 0; i < 200 * 60 && !w.loot; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    for (const e of w.enemies) if (e.active && e.kind === 'boss') e.hp = 1;
+    update(w, DT, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  assert.ok(w.loot, '没跑到战利品那一步');
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+  assert.equal(snap.lootKeys.length, w.loot.length);
+  const w2 = restore(snap);
+  assert.deepEqual(w2.loot.map((c) => c.key), w.loot.map((c) => c.key), '读档后战利品对不上');
+  assert.equal(w2.paused, true, '读档后应该还停在战利品面板上');
+  assert.equal(w2.zoneBoss, 1, '读档后 Boss 战标记丢了，区域会白送一次推进');
+  // 挑同一张之后两边继续跑，结果必须一致
+  chooseUpgrade(w, 0);
+  chooseUpgrade(w2, 0);
+  assert.equal(fingerprint(run(w2, 0, 120)), fingerprint(run(w, 0, 120)));
 });
 
 test('永久强化会跟着快照和录像走（否则重演的是另一套初始属性）', () => {

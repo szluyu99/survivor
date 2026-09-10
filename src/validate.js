@@ -9,7 +9,7 @@ import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, MAX_SLOTS } from './weap
 import { SKILLS, MAX_SKILL_SLOTS } from './skills.js';
 import { KINDS } from './enemies.js';
 import { TERRAIN } from './terrain.js';
-import { TRAITS, CURSES } from './upgrades.js';
+import { TRAITS, CURSES, LOOT } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
 import { HERO_CARD } from './layout.js';
@@ -112,6 +112,14 @@ export function validateContent() {
   for (const c of CURSES) {
     if (!c.id || !c.name || !c.desc) errors.push(`诅咒 ${c.id || '?'}：缺 id/name/desc`);
     if (typeof c.apply !== 'function') errors.push(`诅咒 ${c.id}：缺 apply()`);
+  }
+  // 战利品：至少要够抽三张，否则交界 Boss 那个面板会画出空卡
+  const lootIds = LOOT.map((l) => l.id);
+  if (new Set(lootIds).size !== lootIds.length) errors.push('战利品 id 有重复');
+  if (LOOT.length < 3) errors.push(`战利品只有 ${LOOT.length} 项，三选一凑不齐`);
+  for (const l of LOOT) {
+    if (!l.id || !l.name || !l.desc) errors.push(`战利品 ${l.id || '?'}：缺 id/name/desc`);
+    if (typeof l.apply !== 'function') errors.push(`战利品 ${l.id}：缺 apply()`);
   }
 
   if (new Set(FX_EVENTS).size !== FX_EVENTS.length) errors.push('fx 事件登记表有重复项');

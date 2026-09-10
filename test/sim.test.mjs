@@ -608,7 +608,10 @@ function forceMaterials(seed, ids, level = EVO_LEVEL) {
 }
 function rollUntilChoices(w, maxSeconds = 300) {
   // 必须绕圈：直线跑的话经验球全被甩在身后（球只以 26px/s 漂过来），等不到下一次升级
-  for (let i = 0; i < maxSeconds * 60 && !w.paused && !w.over; i++) {
+  for (let i = 0; i < maxSeconds * 60 && !w.over; i++) {
+    // 交界 Boss 的战利品也会让世界停下来。挑一张继续跑，否则这里会误判成"没能升级"
+    if (w.loot) chooseUpgrade(w, 0);
+    if (w.paused) break;
     const a = (i / 60) * 1.6;
     update(w, DT, { dx: Math.cos(a), dy: Math.sin(a) });
   }

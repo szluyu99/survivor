@@ -1,5 +1,5 @@
-// 升级系统：通用词条、诅咒卡、武器升级与进化、每次升级抽三张。
-// 逻辑层的其他部分只通过 rollChoices / chooseUpgrade 和这里打交道。
+// 升级系统：通用词条、诅咒卡、武器升级与进化、每次升级抽三张，以及交界 Boss 的战利品。
+// 逻辑层的其他部分只通过 rollChoices / rollLoot / chooseUpgrade 和这里打交道。
 import { WEAPONS, MAX_SLOTS, findWeapon, findEvolution } from './weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { CARDS } from './tuning.js';
@@ -156,3 +156,80 @@ export function banishChoice(w, index) {
   w.choices = [...keep, fresh[0]].filter(Boolean);
   return true;
 }
+
+// ---------- 交界 Boss 的战利品 ----------
+//
+// 起因：区域交界改成 Boss 战之后，打倒挡门的 Boss 只是"门开了"，获得感全靠掉的那几颗经验球，
+// 而它是一局里最难的一下。战利品把它变成正反馈。
+//
+// 故意和升级卡分成两个池子：升级卡是构筑选择（要哪把武器、赌不赌诅咒），一局十几次；
+// 战利品是一次性补给，一局最多三四次，所以给得直接——回血、补次数、直接抬一把武器，
+// 不引入新的成长维度，也就不会挤掉升级卡的位置。
+// 每张卡只碰已经存在的字段（player / stats / weapons / 次数），不新增世界状态。
+
+// 手里等级最低、还没满级的那把武器。空手或全满级时返回 null
+function weakestWeapon(w) {
+  let best = null;
+  for (const inst of w.weapons) {
+    const def = findWeapon(inst.id);
+    if (!def || inst.level >= def.maxLevel) continue;
+    if (!best || inst.level < best.level) best = inst;
+  }
+  return best;
+}
+
+export const LOOT = [
+  {
+    id: 'mend', name: '疗愈', desc: '回满血，生命上限 +15',
+    apply: (w) => { w.player.maxHp += 15; w.player.hp = w.player.maxHp; },
+  },
+  {
+    // 抬最弱的那把而不是随机一把：随机经常砸在已经满级的武器上，变成空卡
+    id: 'refine', name: '精炼', desc: '最弱的武器 +2 级',
+    apply: (w) => {
+      for (let n = 0; n < 2; n++) {
+        const inst = weakestWeapon(w);
+        if (!inst) return;
+        inst.level++;
+      }
+    },
+  },
+  {
+    id: 'whet', name: '磨刀', desc: '全体伤害 +20%',
+    apply: (w) => { w.stats.damageMul *= 1.2; },
+  },
+  {
+    id: 'supply', name: '补给', desc: '重抽 +1，排除 +1',
+    apply: (w) => { w.rerolls++; w.banishes++; },
+  },
+  {
+    id: 'focus', name: '贯注', desc: '攻速 +18%，移速 +8%',
+    apply: (w) => { w.stats.rateMul *= 1.18; w.player.speed *= 1.08; },
+  },
+  {
+    id: 'insight', name: '学识', desc: '经验获取 +40%',
+    apply: (w) => { w.stats.xpMul *= 1.4; },
+  },
+];
+
+const LOOT_BY_ID = new Map(LOOT.map((l) => [l.id, l]));
+
+// 战利品卡长得和升级卡一样（key/name/desc/apply），这样 HUD 画卡那套代码能直接复用
+const lootCard = (l) => ({ key: `loot:${l.id}`, name: l.name, desc: l.desc, loot: true, apply: l.apply });
+
+// 抽三张。用世界自己的 rng，所以录像和存档都能重演
+export function rollLoot(w) {
+  const bag = LOOT.slice();
+  const out = [];
+  while (out.length < 3 && bag.length) {
+    out.push(lootCard(bag.splice(Math.floor(w.rng() * bag.length), 1)[0]));
+  }
+  return out;
+}
+
+// 按 key 找回一张（读档用：带函数的卡没法 JSON 化，只能存 key 再重建，且不消耗随机数）
+export function lootByKey(key) {
+  const l = LOOT_BY_ID.get(String(key).replace(/^loot:/, ''));
+  return l ? lootCard(l) : null;
+}
+

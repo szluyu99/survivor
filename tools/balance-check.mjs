@@ -255,14 +255,17 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
   // 新玩家和老玩家玩的就不是同一个游戏了
   const maxed = {};
   for (const p of PERKS) maxed[p.id] = p.maxLevel;
-  const baseAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
-  const buffAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed, { perks: maxed }).w.t));
-  const shards = avgOf(RATIO_SEEDS.map((seed) => earnShards(play(seed).w)));
+  // 和角色、轮次、难度那几条一样用中位数：平均值会被偶尔一局 400 秒的雪球抬飞，
+  // 出现过"满级强化比无强化还短（0.98 倍）"这种明显是噪声的结论
+  const baseMed = medOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
+  const buffMed = medOf(RATIO_SEEDS.map((seed) => play(seed, { perks: maxed }).w.t));
+  // 残片产出同理：用平均值算出来的"全解锁 6 局"其实没人经历过，还正好压在断言下界上一碰就红
+  const shards = medOf(RATIO_SEEDS.map((seed) => earnShards(play(seed).w)));
   const totalCost = HEROES.reduce((a, h) => a + heroCost(h.id), 0)
     + PERKS.reduce((a, p) => a + p.cost.reduce((x, y) => x + y, 0), 0);
-  console.log(`  无强化 ${baseAvg.toFixed(0)}s → 满级强化 ${buffAvg.toFixed(0)}s（${(buffAvg / baseAvg).toFixed(2)} 倍）`);
-  console.log(`  平均每局 ${shards.toFixed(0)} 残片，全解锁需要 ${totalCost} 片，约 ${Math.ceil(totalCost / Math.max(1, shards))} 局`);
-  check(buffAvg / baseAvg < 1.8, `满级永久强化把平均存活拉到 ${(buffAvg / baseAvg).toFixed(2)} 倍，局外加成盖过了局内成长`);
+  console.log(`  中位存活：无强化 ${baseMed.toFixed(0)}s → 满级强化 ${buffMed.toFixed(0)}s（${(buffMed / baseMed).toFixed(2)} 倍）`);
+  console.log(`  中位每局 ${shards.toFixed(0)} 残片，全解锁需要 ${totalCost} 片，约 ${Math.ceil(totalCost / Math.max(1, shards))} 局`);
+  check(buffMed / baseMed < 1.8, `满级永久强化把中位存活拉到 ${(buffMed / baseMed).toFixed(2)} 倍，局外加成盖过了局内成长`);
   check(shards > 0, '一局赚不到残片，局外进度永远动不了');
   const runsToUnlock = Math.ceil(totalCost / Math.max(1, shards));
   check(runsToUnlock <= 20, `全解锁要打 ${runsToUnlock} 局，太肝了`);

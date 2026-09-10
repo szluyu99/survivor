@@ -143,16 +143,44 @@ test('清场时间走完是本区域的 Boss 堵门，不打倒就不换区', ()
   assert.ok(w.enemies.some((e) => e.active && e.kind === 'boss'), '场上没有活着的 Boss');
   // Boss 战期间区域时间冻结，不会越涨越多
   assert.ok(w.zoneT <= ZONE_SECONDS + 1 / 30, `Boss 战期间区域时间还在涨：${w.zoneT}`);
-  // 把 Boss（含裂变子体）削到一滴血，让武器打死它——直接改 hp 不会触发死亡结算
+  // 把 Boss（含裂变子体）削到一滴血，让武器打死它——直接改 hp 不会触发死亡结算。
+  // 打完会先弹战利品（挑完才换区），所以这里不能顺手 chooseUpgrade，得先看见 loot
+  let sawLoot = false;
   for (let i = 0; i < 60 * 60 && w.zoneIndex === 0; i++) {
     for (const e of w.enemies) if (e.active && e.kind === 'boss') e.hp = 1;
+    if (w.loot) {
+      sawLoot = true;
+      assert.equal(w.loot.length, 3, `战利品应该是三选一，实际 ${w.loot.length} 张`);
+      assert.equal(w.zoneIndex, 0, '战利品还没挑就换区了');
+    }
     if (w.paused) chooseUpgrade(w, 0);
     update(w, 1 / 60, { dx: 0, dy: 0 });
     for (const f of w.fx) f.active = false;
   }
+  assert.ok(sawLoot, '打倒交界 Boss 没有掉战利品');
   assert.equal(w.zoneIndex, 1, 'Boss 清完了还是没换区');
   assert.equal(w.zoneBoss, 0, 'Boss 战标记没清掉');
-  assert.equal(w.zoneT, 0, '换区后清场时间应该从 0 重新开始');
+  assert.ok(w.zoneT <= 1 / 30, `换区后清场时间应该从 0 重新开始，实际 ${w.zoneT}`);
+});
+
+test('挑战利品和挑升级卡走的是同一个入口', () => {
+  // 平衡工具和测试里到处是"暂停了就 chooseUpgrade(i)"，
+  // 战利品要是另开一个入口，那些循环会静默卡死在暂停态上
+  const w = createWorld(1);
+  w.loot = [
+    { key: 'loot:a', name: 'a', desc: 'a', loot: true, apply: (x) => { x.stats.damageMul *= 2; } },
+    { key: 'loot:b', name: 'b', desc: 'b', loot: true, apply: () => {} },
+  ];
+  w.zoneBoss = 1;
+  w.paused = true;
+  const dmg0 = w.stats.damageMul;
+  const level0 = w.player.level;
+  chooseUpgrade(w, 0);
+  assert.equal(w.loot, null, '战利品没被消耗');
+  assert.equal(w.paused, false, '挑完战利品世界没继续');
+  assert.equal(w.stats.damageMul, dmg0 * 2, '战利品的效果没生效');
+  assert.equal(w.player.level, level0, '战利品不该顺带升一级');
+  assert.equal(w.zoneIndex, 1, '挑完战利品应该换区');
 });
 
 test('关掉 Boss 的那种局（测试/平衡工具）区域到点就换', () => {

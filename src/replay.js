@@ -8,7 +8,7 @@
 //    直接看行为差异，而不是靠平均值猜。
 
 import { createWorld, update, chooseUpgrade, reroll, banish, DEFAULT_HERO, DEFAULT_DIFFICULTY } from './sim.js';
-import { cardByKey } from './upgrades.js';
+import { cardByKey, lootByKey } from './upgrades.js';
 
 // v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性）；
 // v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形）；
@@ -16,8 +16,9 @@ import { cardByKey } from './upgrades.js';
 // v6：加了难度（difficulty 改敌人数值）和通关状态；
 // v7：加了无尽轮次（loop 决定敌人额外倍率）；
 // v8：加了精英原型（elite）、统一的减伤字段（armor 取代 shielded）、子弹引信（fuse）；
-// v9：区域交界 Boss 战（zoneBoss 决定区域时间是否冻结）
-export const REPLAY_VERSION = 9;
+// v9：区域交界 Boss 战（zoneBoss 决定区域时间是否冻结）；
+// v10：交界 Boss 的战利品三选一（lootKeys，挑完才换区）
+export const REPLAY_VERSION = 10;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -78,6 +79,7 @@ export function snapshot(w) {
     banishes: w.banishes,
     // 卡片带函数，只能存 key，恢复时按 key 重建
     choiceKeys: w.choices ? w.choices.map((c) => c.key || null) : null,
+    lootKeys: w.loot ? w.loot.map((c) => c.key || null) : null,
     spawnTimer: w.spawnTimer,
     eliteTimer: w.eliteTimer,
     bossTimer: w.bossTimer,
@@ -141,6 +143,7 @@ export function restore(snap) {
   unpackPool(w.gems, snap.gems, GEM_FIELDS);
   unpackPool(w.terrain, snap.terrain, TERRAIN_FIELDS);
   w.choices = snap.choiceKeys ? snap.choiceKeys.map((k) => cardByKey(w, k)).filter(Boolean) : null;
+  w.loot = snap.lootKeys ? snap.lootKeys.map((k) => lootByKey(k)).filter(Boolean) : null;
   return w;
 }
 
