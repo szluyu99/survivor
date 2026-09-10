@@ -32,7 +32,7 @@ function saveBest(w) {
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain } = createShapes(ctx);
+const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain, edgeMarker } = createShapes(ctx);
 
 // 批量绘制用的分组桶：key 是颜色（都是 palette 里的常量字符串，不产生新字符串），
 // value 是复用的数组。每帧只把长度清零、不重建，热循环里零分配
@@ -976,6 +976,20 @@ function render(w) {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   drawVignette();
+
+  // 屏幕外的 Boss 和精英：在边缘画箭头指过去。画在暗角之后，否则边缘正好被压暗。
+  // 越远越淡，这样"它在那边、大概多远"都不用猜
+  const marked = w.enemies;
+  for (let i = 0; i < marked.length; i++) {
+    const e = marked[i];
+    if (!e.active || (e.kind !== 'boss' && e.kind !== 'elite')) continue;
+    const sx = e.x - camX, sy = e.y - camY;
+    if (sx > -e.r && sx < VIEW_W + e.r && sy > -e.r && sy < VIEW_H + e.r) continue;
+    const dx = sx - VIEW_W / 2, dy = sy - VIEW_H / 2;
+    const d = Math.hypot(dx, dy) || 1;
+    edgeMarker(sx, sy, e.kind === 'boss' ? P.enemy.boss : P.enemy.elite,
+      Math.max(0.3, Math.min(0.9, 700 / d)));
+  }
 
   if (fxState.flash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${fxState.flash * 0.5})`;

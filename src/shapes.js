@@ -147,5 +147,36 @@ export function createShapes(ctx) {
     ctx.strokeRect(x - t.r, y - t.r * 0.8, t.r * 2, t.r * 1.6);
   }
 
-  return { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain };
+  // 屏幕外的重要目标：在视口边缘画一个指向它的三角。
+  // 交界 Boss 是换区的必要条件，它绕到视野外时玩家会以为门卡住了——
+  // 守卫者尤其爱一边召唤一边往后缩。精英同理（跑掉的精英等于白等一轮）
+  const EDGE_PAD = 22;
+  function edgeMarker(sx, sy, color, alpha = 1) {
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    let dx = sx - cx, dy = sy - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    // 把方向投到内缩一圈的边框上：横竖两个方向里先撞到的那条边说话
+    const halfW = VIEW_W / 2 - EDGE_PAD, halfH = VIEW_H / 2 - EDGE_PAD;
+    const scale = Math.min(
+      Math.abs(dx) > 1e-6 ? halfW / Math.abs(dx) : Infinity,
+      Math.abs(dy) > 1e-6 ? halfH / Math.abs(dy) : Infinity,
+    );
+    const px = cx + dx * scale, py = cy + dy * scale;
+    const a = Math.atan2(dy, dx);
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(px + Math.cos(a) * 12, py + Math.sin(a) * 12);
+    ctx.lineTo(px + Math.cos(a + 2.5) * 10, py + Math.sin(a + 2.5) * 10);
+    ctx.lineTo(px + Math.cos(a - 2.5) * 10, py + Math.sin(a - 2.5) * 10);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = P.outline;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  return { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawTerrain, edgeMarker };
 }

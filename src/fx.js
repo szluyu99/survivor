@@ -3,7 +3,8 @@
 // 全部走对象池，帧里不 new。
 import { P } from './palette.js';
 import { sfx } from './audio.js';
-import { currentZone } from './zones.js';
+import { currentZone, zoneBoss as zoneBossId } from './zones.js';
+import { findBossKind } from './bosses.js';
 
 // onDeath / onWin 由 game.js 传进来（写最好成绩、记通关解锁），fx 模块自己不碰 localStorage
 export function createFx({ onDeath, onWin } = {}) {
@@ -187,9 +188,12 @@ export function createFx({ onDeath, onWin } = {}) {
     },
 
     // Boss
-    boss: () => {
+    // 交界 Boss 出场：横幅写清"谁挡住了去路"，而不是笼统的 BOSS 出现——
+    // 打倒它才能换区，这条提示是玩家理解"为什么倒计时停了"的入口
+    boss: (f, w) => {
+      const arch = findBossKind(zoneBossId(w));
       fxState.warn = 1.8;
-      fxState.warnText = 'BOSS 出现';
+      fxState.warnText = w.zoneBoss ? `${currentZone(w).name}的${arch.name}挡住了去路` : 'BOSS 出现';
       fxState.warnColor = P.enemy.boss;
       fxState.shake = Math.max(fxState.shake, 8);
       sfx.boss();

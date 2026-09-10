@@ -955,3 +955,35 @@ test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没�
   const extra = Object.keys(fx.handlers).filter((t) => !FX_EVENTS.includes(t));
   assert.deepEqual(extra, [], `这些处理没有对应的登记项（可能是改名后的残留）：${extra.join(', ')}`);
 });
+
+// 屏幕外的 Boss / 精英指示箭头。三角必须落在视口里、贴着目标那一侧的边，
+// 不然它要么看不见，要么指错方向
+test('边缘指示箭头贴着目标那一侧的边，且不画到屏幕外', async () => {
+  const { createShapes } = await import('../src/shapes.js');
+  const { VIEW_W, VIEW_H } = await import('../src/view.js');
+  const pts = [];
+  const stub = {
+    beginPath() {}, closePath() {}, fill() {}, stroke() {}, arc() {}, rect() {},
+    createRadialGradient: () => ({ addColorStop() {} }),
+    moveTo(x, y) { pts.push([x, y]); },
+    lineTo(x, y) { pts.push([x, y]); },
+  };
+  for (const p of ['fillStyle', 'strokeStyle', 'lineWidth', 'globalAlpha']) stub[p] = '';
+  const { edgeMarker } = createShapes(stub);
+
+  const cases = [
+    ['右', 4000, VIEW_H / 2, (x, y) => x > VIEW_W * 0.8],
+    ['左', -4000, VIEW_H / 2, (x) => x < VIEW_W * 0.2],
+    ['上', VIEW_W / 2, -4000, (x, y) => y < VIEW_H * 0.2],
+    ['下', VIEW_W / 2, 4000, (x, y) => y > VIEW_H * 0.8],
+  ];
+  for (const [name, sx, sy, onRightEdge] of cases) {
+    pts.length = 0;
+    edgeMarker(sx, sy, '#fff', 1);
+    assert.ok(pts.length >= 3, `${name}边的箭头没画出三角`);
+    for (const [x, y] of pts) {
+      assert.ok(x >= 0 && x <= VIEW_W && y >= 0 && y <= VIEW_H, `${name}边的箭头画到了屏幕外：${x},${y}`);
+      assert.ok(onRightEdge(x, y), `${name}边的箭头没贴在该贴的那条边上：${x},${y}`);
+    }
+  }
+});

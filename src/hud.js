@@ -138,6 +138,17 @@ export function createHud(ctx, deps) {
       ctx.font = 'bold 11px sans-serif';
       ctx.fillText('硬直中，随便打', bx, 44);
     }
+    // 门禁提示：交界 Boss 挡着的时候把"打倒它才能往前走"写在血条旁边。
+    // 只写 Boss 名字的话，玩家看到区域倒计时停住会以为是 bug
+    if (w.zoneBoss) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = P.accent;
+      ctx.font = '11px sans-serif';
+      ctx.fillText(`打倒它才能进${ZONES[(w.zoneIndex + 1) % ZONES.length].name}`, bx + bw, 44);
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = P.warn;
+    ctx.font = 'bold 12px sans-serif';
     const tag = boss.rage ? 'BOSS 狂暴' : 'BOSS';
       const label = boss.state === 'telegraph'
         ? `${tag}：准备${boss.plan === 'charge' ? '冲撞' : boss.plan === 'shoot' ? '弹幕' : '召唤'}`

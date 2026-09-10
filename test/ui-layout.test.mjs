@@ -183,6 +183,7 @@ test('极端内容下各面板依然不重叠不越界', () => {
   ex.skills = SKILLS.slice(0, MAX_SKILL_SLOTS).map((d) => ({ id: d.id, level: d.maxLevel, cd: 0 }));
   ex.loop = 3;
   ex.difficulty = 'nightmare';
+  ex.zoneBoss = 1; // 交界 Boss 挡门：血条旁边会多一行门禁提示
   ex.t = 3725;
   ex.kills = 4821;
   ex.player.level = 88;
