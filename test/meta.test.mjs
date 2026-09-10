@@ -13,7 +13,9 @@ import { PLAYER } from '../src/tuning.js';
 
 test('残片按存活时长和击杀结算，空局是 0', () => {
   assert.equal(earnShards({ t: 0, kills: 0 }), 0);
-  assert.equal(earnShards({ t: 90, kills: 170 }), Math.floor(90 / 8) + Math.floor(170 / 20));
+  // 公式写在 meta.js 里，这里只钉住『随时长和击杀单调增长』和『空局是 0』，
+  // 不在测试里复制一份公式——校准数值时不该顺带改测试
+  assert.ok(earnShards({ t: 90, kills: 170 }) > earnShards({ t: 45, kills: 80 }));
   // 单调：活得更久、杀得更多，不该反而变少
   let last = -1;
   for (let t = 0; t <= 400; t += 20) {

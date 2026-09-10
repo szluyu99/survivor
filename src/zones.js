@@ -9,7 +9,11 @@
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
 import { TERRAIN_TUNING, LOOP } from './tuning.js';
 
-export const ZONE_SECONDS = 100;  // 每个区域的时长，走完一轮再从头循环（难度靠时间继续涨）
+// 每个区域的时长，走完一轮再从头循环（难度靠时间继续涨）。
+// 它同时决定通关线：要打最后一个区域的 Boss，至少得活到 ZONE_SECONDS × (区域数 - 1)。
+// 100 秒时通关线是 200 秒，而中位局长只有 90 秒——通关变成了"先刷几十局强化"的后置目标，
+// 所以压到 75 秒（通关线 150 秒），让强化到一半的存档就有机会摸到
+export const ZONE_SECONDS = 75;
 
 export const ZONES = [
   {

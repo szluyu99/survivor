@@ -232,19 +232,20 @@ console.log('== 8. 每个角色都能玩，且没有明显的陷阱角色 ==');
   // 注意机器人偏差：它绕圈走、按固定顺序选卡，对"自动追踪"的起手武器最友好，
   // 所以各角色的绝对数字没法直接比。这条只拦两件事：
   // 某个角色根本活不下去（起手武器打不到东西 / 属性写错），或者强到把难度曲线抹平。
-  const heroAvg = [];
+  // 用中位数：术士曾经跑出一局 397 秒的雪球，把它的平均值抬到 135 秒，看着像最强角色
+  const heroMed = [];
   for (const h of HEROES) {
-    const ts = SEEDS.map((seed) => play(seed, { hero: h.id }).w.t);
-    const a = ts.reduce((x, y) => x + y, 0) / ts.length;
-    heroAvg.push([h, a]);
-    console.log(`  ${h.name.padEnd(4)} ${ts.map((t) => `${t.toFixed(0)}s`.padStart(5)).join(' ')}  平均 ${a.toFixed(0)}s`);
-    check(a > 30, `角色「${h.name}」平均只活 ${a.toFixed(0)}s，起手武器或属性修正有问题`);
-    check(a < 300, `角色「${h.name}」平均活 ${a.toFixed(0)}s，强到把难度曲线抹平了`);
+    const ts = RATIO_SEEDS.map((seed) => play(seed, { hero: h.id }).w.t);
+    const m = medOf(ts);
+    heroMed.push([h, m]);
+    console.log(`  ${h.name.padEnd(4)} 中位 ${m.toFixed(0)}s（各局 ${ts.map((t) => t.toFixed(0)).join('/')}）`);
+    check(m > 30, `角色「${h.name}」中位只活 ${m.toFixed(0)}s，起手武器或属性修正有问题`);
+    check(m < 300, `角色「${h.name}」中位活 ${m.toFixed(0)}s，强到把难度曲线抹平了`);
   }
-  const best = Math.max(...heroAvg.map(([, a]) => a));
-  const worst = Math.min(...heroAvg.map(([, a]) => a));
-  console.log(`  最强/最弱角色平均值之比 ${(best / worst).toFixed(2)}（放宽到 3 倍，机器人对起手武器有偏好）`);
-  check(best / worst < 3, `最强角色平均 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
+  const best = Math.max(...heroMed.map(([, m]) => m));
+  const worst = Math.min(...heroMed.map(([, m]) => m));
+  console.log(`  最强/最弱角色中位值之比 ${(best / worst).toFixed(2)}（放宽到 3 倍，机器人对起手武器有偏好）`);
+  check(best / worst < 3, `最强角色中位 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
 }
 
 console.log('== 9. 永久强化不能把难度曲线抹平 ==');
@@ -263,7 +264,9 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
   console.log(`  平均每局 ${shards.toFixed(0)} 残片，全解锁需要 ${totalCost} 片，约 ${Math.ceil(totalCost / Math.max(1, shards))} 局`);
   check(buffAvg / baseAvg < 1.8, `满级永久强化把平均存活拉到 ${(buffAvg / baseAvg).toFixed(2)} 倍，局外加成盖过了局内成长`);
   check(shards > 0, '一局赚不到残片，局外进度永远动不了');
-  check(totalCost / Math.max(1, shards) < 40, `全解锁要打 ${Math.ceil(totalCost / shards)} 局，太肝了`);
+  const runsToUnlock = Math.ceil(totalCost / Math.max(1, shards));
+  check(runsToUnlock <= 20, `全解锁要打 ${runsToUnlock} 局，太肝了`);
+  check(runsToUnlock >= 6, `全解锁只要 ${runsToUnlock} 局，局外进度还没开始就结束了`);
 }
 
 console.log('== 10. 每个 Boss 原型都要能打死，且不能变成消耗战 ==');
@@ -320,12 +323,14 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
   console.log(`  通关需要活到 ${need}s（走进最后一个区域）；满级强化下最长一局 ${best.toFixed(0)}s`);
   check(best >= need, `满级强化下最长也只活了 ${best.toFixed(0)}s，通关（需要 ${need}s）根本摸不到`);
 
-  const normalAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
+  // 和角色、轮次那两条一样用中位数：平均值会被偶尔一局 300+ 秒的雪球抬飞，
+  // 出现过"噩梦比普通还长"这种结论
+  const normalMed = medOf(RATIO_SEEDS.map((seed) => play(seed).w.t));
   const hard = DIFFICULTIES.find((d) => d.requiresWin);
-  const hardAvg = avgOf(RATIO_SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
-  console.log(`  普通 ${normalAvg.toFixed(0)}s → ${hard.name} ${hardAvg.toFixed(0)}s（${(hardAvg / normalAvg).toFixed(2)} 倍）`);
-  check(hardAvg < normalAvg * 0.95, `${hard.name}难度平均 ${hardAvg.toFixed(0)}s，和普通的 ${normalAvg.toFixed(0)}s 差不多，难度倍率没起作用`);
-  check(hardAvg > 25, `${hard.name}难度平均只活 ${hardAvg.toFixed(0)}s，太劝退了`);
+  const hardMed = medOf(RATIO_SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
+  console.log(`  中位存活：普通 ${normalMed.toFixed(0)}s → ${hard.name} ${hardMed.toFixed(0)}s（${(hardMed / normalMed).toFixed(2)} 倍）`);
+  check(hardMed < normalMed * 0.95, `${hard.name}难度中位 ${hardMed.toFixed(0)}s，和普通的 ${normalMed.toFixed(0)}s 差不多，难度倍率没起作用`);
+  check(hardMed > 25, `${hard.name}难度中位只活 ${hardMed.toFixed(0)}s，太劝退了`);
 }
 
 console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==');

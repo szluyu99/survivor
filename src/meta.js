@@ -10,33 +10,35 @@ import { HEROES, DEFAULT_HERO } from './heroes.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
 
 // 结算公式：存活时长为主，击杀为辅，再乘难度倍率、加通关奖励。
-// 刻意做得"钝"一些——普通难度一局 90 秒 170 杀大约 19 片，解锁第二个角色要两三局，
-// 太快就没有积累感，太慢就变成刷。通关给的比苟活多，让"打通"明显更划算
+// 产出和价格一起校准过一次：加了精英原型之后基准局长从 116 秒掉到 90 秒，
+// 老公式（t/8 + kills/20）的中位产出只有 20 片，全解锁要 36 局，明显变成刷了。
+// 现在中位约 40 片、全解锁约 12 局。通关奖励给得比一局的自然产出还多，
+// 让"打通"明显比"苟活"划算
 export function earnShards(w) {
-  const base = Math.floor(w.t / 8) + Math.floor(w.kills / 20);
+  const base = Math.floor(w.t / 6) + Math.floor(w.kills / 12);
   const mul = findDifficulty(w.difficulty).shardMul;
   return Math.floor(base * mul) + (w.won ? WIN_BONUS : 0);
 }
 
 // 角色解锁价：基准角色免费，后面的越来越贵
-export const HERO_COST = { rookie: 0, ranger: 40, warden: 60, hunter: 80 };
+export const HERO_COST = { rookie: 0, ranger: 35, warden: 50, hunter: 65 };
 export const heroCost = (id) => HERO_COST[id] ?? 0;
 
 // 永久强化：幅度刻意压得很小（三级满也只有 +30 血 / +12% 伤害 / +9% 移速）。
 // 它的作用是让攒残片有去处，不是让老存档碾压难度曲线
 export const PERKS = [
   {
-    id: 'vigor', name: '体质', maxLevel: 3, cost: [20, 40, 80],
+    id: 'vigor', name: '体质', maxLevel: 3, cost: [15, 30, 55],
     desc: (lv) => `生命上限 +${lv * 10}`,
     apply: (w, lv) => { w.player.maxHp += lv * 10; w.player.hp = w.player.maxHp; },
   },
   {
-    id: 'edge', name: '锐度', maxLevel: 3, cost: [30, 60, 120],
+    id: 'edge', name: '锐度', maxLevel: 3, cost: [20, 40, 75],
     desc: (lv) => `全体伤害 +${lv * 4}%`,
     apply: (w, lv) => { w.stats.damageMul *= 1 + lv * 0.04; },
   },
   {
-    id: 'haste', name: '迅捷', maxLevel: 3, cost: [25, 50, 100],
+    id: 'haste', name: '迅捷', maxLevel: 3, cost: [15, 30, 60],
     desc: (lv) => `移速 +${lv * 3}%`,
     apply: (w, lv) => { w.player.speed *= 1 + lv * 0.03; },
   },

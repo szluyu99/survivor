@@ -69,6 +69,8 @@ function dpsAt(weaponIds, startLevels, seconds, dist) {
   return (1e12 - dummy.hp) / seconds;
 }
 const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+// 整局时长是长尾分布（偶尔一局雪球 300 秒），角色对比看中位数才不会被单局带偏
+const med = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const pad = (s, n) => String(s).padEnd(n, ' ');
 const clock = (t) => `${t.toFixed(0)}s`;
 
@@ -96,8 +98,8 @@ console.log('\n=== 各角色整局表现（三张卡轮换选）===');
 // 真实取舍还得自己上手：机器人不会主动站进光环射程，也不会用穿透枪对着一队怪打。
 for (const h of HEROES) {
   const rs = SEEDS.map((seed) => play({ seed, hero: h.id, pick: (i) => Math.floor(i / 97) % 3 }));
-  console.log(`${pad(h.name, 6)} ${rs.map((r) => pad(clock(r.t), 6)).join(' ')}  平均 ${pad(clock(avg(rs.map((r) => r.t))), 7)}`
-    + ` 平均击杀 ${pad(avg(rs.map((r) => r.kills)).toFixed(0), 6)} 典型 build ${rs[0].build}`);
+  console.log(`${pad(h.name, 6)} ${rs.map((r) => pad(clock(r.t), 6)).join(' ')}  中位 ${pad(clock(med(rs.map((r) => r.t))), 7)}`
+    + ` 平均 ${pad(clock(avg(rs.map((r) => r.t))), 7)} 平均击杀 ${pad(avg(rs.map((r) => r.kills)).toFixed(0), 6)} 典型 build ${rs[0].build}`);
 }
 
 console.log('\n=== 各区域的兵种构成（钉住区域各跑 40 秒，只看普通刷怪）===');
