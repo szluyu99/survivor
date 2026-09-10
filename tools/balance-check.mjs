@@ -16,15 +16,26 @@ import { KINDS } from '../src/enemies.js';
 import { validateContent } from '../src/validate.js';
 
 const DT = 1 / 60;
-const SEEDS = [1, 5, 9, 13, 21];
+// --quick：本地调数值时用的快速档。全量要 100 秒开外，改一个数字等这么久没法迭代；
+// CI 永远跑全量（快速档的样本量不足以支撑那些比例类断言的结论）
+const QUICK = process.argv.includes('--quick');
+const SEEDS = QUICK ? [1, 5, 9] : [1, 5, 9, 13, 21];
 // 比例类断言（强化/难度/轮次/精英）要拿两组平均值相除，5 个种子里只要有一个 200 秒的
 // 长局就能把平均值拉偏 30%，结论会随机翻面。这些断言单独用一组更大的种子
-const RATIO_SEEDS = [1, 3, 5, 7, 9, 11, 13, 17, 21, 29];
+const RATIO_SEEDS = QUICK ? [1, 5, 9] : [1, 3, 5, 7, 9, 11, 13, 17, 21, 29];
 const failures = [];
 const notes = [];
 
 function check(ok, message) {
   if (!ok) failures.push(message);
+}
+
+// 样本量敏感的断言（通关率、比例类）在快速档只提醒不拦：
+// 3 个 seed 里通关 0 次完全正常，用它当红灯只会教人忽略红灯
+const softNotes = [];
+function softCheck(ok, message) {
+  if (!QUICK) { check(ok, message); return; }
+  if (!ok) softNotes.push(message);
 }
 
 const avgOf = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -245,7 +256,7 @@ console.log('== 8. 每个角色都能玩，且没有明显的陷阱角色 ==');
   const best = Math.max(...heroMed.map(([, m]) => m));
   const worst = Math.min(...heroMed.map(([, m]) => m));
   console.log(`  最强/最弱角色中位值之比 ${(best / worst).toFixed(2)}（放宽到 3 倍，机器人对起手武器有偏好）`);
-  check(best / worst < 3, `最强角色中位 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
+  softCheck(best / worst < 3, `最强角色中位 ${best.toFixed(0)}s、最弱 ${worst.toFixed(0)}s，差了 ${(best / worst).toFixed(1)} 倍，有陷阱角色`);
 }
 
 console.log('== 9. 永久强化不能把难度曲线抹平 ==');
@@ -265,7 +276,7 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
     + PERKS.reduce((a, p) => a + p.cost.reduce((x, y) => x + y, 0), 0);
   console.log(`  中位存活：无强化 ${baseMed.toFixed(0)}s → 满级强化 ${buffMed.toFixed(0)}s（${(buffMed / baseMed).toFixed(2)} 倍）`);
   console.log(`  中位每局 ${shards.toFixed(0)} 残片，全解锁需要 ${totalCost} 片，约 ${Math.ceil(totalCost / Math.max(1, shards))} 局`);
-  check(buffMed / baseMed < 1.8, `满级永久强化把中位存活拉到 ${(buffMed / baseMed).toFixed(2)} 倍，局外加成盖过了局内成长`);
+  softCheck(buffMed / baseMed < 1.8, `满级永久强化把中位存活拉到 ${(buffMed / baseMed).toFixed(2)} 倍，局外加成盖过了局内成长`);
   check(shards > 0, '一局赚不到残片，局外进度永远动不了');
   const runsToUnlock = Math.ceil(totalCost / Math.max(1, shards));
   check(runsToUnlock <= 20, `全解锁要打 ${runsToUnlock} 局，太肝了`);
@@ -273,6 +284,8 @@ console.log('== 9. 永久强化不能把难度曲线抹平 ==');
 }
 
 console.log('== 10. 每个 Boss 原型都要能打死，且不能变成消耗战 ==');
+if (QUICK) console.log('  （快速档跳过：4 个原型 × 3 局 × 150 秒，占了全量的一大半）');
+else
 {
   // 把区域钉住来决定原型，给一套中等强度的 build，测打死本体（裂变者要连子体一起）要多久。
   // 拦两类问题：某个原型的减伤/裂变把血量堆到打不动，或者反过来强度写崩了一秒就死
@@ -327,7 +340,7 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
   const floor = ZONE_SECONDS * ZONES.length; // 三段清场时间，Boss 战另算，所以通关一定晚于这个数
   console.log(`  满级强化 ${RATIO_SEEDS.length} 局里通关 ${wins.length} 局`
     + `${wins.length ? `，通关时刻中位 ${medOf(wins).toFixed(0)}s` : ''}；最长一局 ${Math.max(...runs.map((w) => w.t)).toFixed(0)}s`);
-  check(wins.length >= 1, `满级强化下 ${RATIO_SEEDS.length} 局一次都没通关，通关线太远了`);
+  softCheck(wins.length >= 1, `满级强化下 ${RATIO_SEEDS.length} 局一次都没通关，通关线太远了`);
   if (wins.length) {
     check(medOf(wins) > floor, `通关时刻中位 ${medOf(wins).toFixed(0)}s 不该早于三段清场时间 ${floor}s，区域门禁可能失效了`);
     check(medOf(wins) < 400, `通关时刻中位 ${medOf(wins).toFixed(0)}s，太久了`);
@@ -339,8 +352,8 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
   const hard = DIFFICULTIES.find((d) => d.requiresWin);
   const hardMed = medOf(RATIO_SEEDS.map((seed) => play(seed, { difficulty: hard.id }).w.t));
   console.log(`  中位存活：普通 ${normalMed.toFixed(0)}s → ${hard.name} ${hardMed.toFixed(0)}s（${(hardMed / normalMed).toFixed(2)} 倍）`);
-  check(hardMed < normalMed * 0.95, `${hard.name}难度中位 ${hardMed.toFixed(0)}s，和普通的 ${normalMed.toFixed(0)}s 差不多，难度倍率没起作用`);
-  check(hardMed > 25, `${hard.name}难度中位只活 ${hardMed.toFixed(0)}s，太劝退了`);
+  softCheck(hardMed < normalMed * 0.95, `${hard.name}难度中位 ${hardMed.toFixed(0)}s，和普通的 ${normalMed.toFixed(0)}s 差不多，难度倍率没起作用`);
+  softCheck(hardMed > 25, `${hard.name}难度中位只活 ${hardMed.toFixed(0)}s，太劝退了`);
 }
 
 console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==');
@@ -372,6 +385,8 @@ console.log('== 12. 无尽轮次要有递进，但第二轮不能直接墙死 ==
 }
 
 console.log('== 13. 每种精英都能打死，且不会把一局砍半 ==');
+if (QUICK) console.log('  （快速档跳过：每种精英都要单独跑满几局）');
+else
 {
   // 把精英原型钉死（正常是每只随机抽），逐个跑整局：
   // 自爆者的引信会连玩家一起炸、护盾者会拖时间、裂变精英会翻三倍数量，
@@ -421,4 +436,8 @@ if (failures.length) {
   for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
-console.log('平衡检查全部通过');
+if (softNotes.length) {
+  console.log(`快速档下有 ${softNotes.length} 条样本量敏感的提醒（不算失败，跑全量才算数）：`);
+  for (const n of softNotes) console.log(`  ~ ${n}`);
+}
+console.log(`平衡检查全部通过${QUICK ? '（快速档：3 个 seed + 跳过两组重型检查，结论只作本地参考，CI 跑全量）' : ''}`);

@@ -16,9 +16,11 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（232 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（233 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 105 秒
+npm run check:quick # 快速档：3 个 seed + 跳过两组重型检查，约 20 秒。样本量敏感的断言降级成提醒
+npm run size       # 体积检查：零构建，源码原样下发，gzip 后不许超 220KB
 npm run validate   # 内容表结构校验
 npm run arch       # 架构约束：确定性、依赖方向、颜色来源、fx 事件登记（约 0.1 秒）
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
@@ -40,6 +42,8 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 ```
 
 `src/replay.js` 还提供 `snapshot(w)` / `restore(snap)`，把世界存成纯 JSON 再读回来（存档就靠这个）。
+存档带版本号：比当前老但不太老的档（`MIGRATABLE_FROM` 起）会**按缺失字段补默认值**继续用，
+太老或比当前新的才丢——这几天版本号从 8 涨到 11，每次都静默丢档，而每次加的其实只是新字段。
 
 ## 代码结构
 
@@ -88,6 +92,9 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 - `src/render` 相关：`src/shapes.js`（形状/描边/网格/暗角）、`src/hud.js`（HUD、暂停面板、
   选卡、死亡结算、首屏）、`src/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、
   `src/layout.js`（UI 命中区域，绘制和点击判定共用一套坐标）。
+- `src/progress.js` —— 局外进度的持久化层：最好成绩、选中的角色、残片与解锁、难度。
+  只跟 localStorage 和 `meta.js` 的纯函数打交道，不碰世界也不碰画面；每个写入都吞掉异常
+  （无痕模式会抛，但"存不下"不该让游戏崩）。
 - `src/sandbox.js` —— 武器沙盒（工具屏）的全部状态与交互。通过一个 `host` 拿"换一个干净世界"
   和"回主菜单"两件事，其余留在 `game.js`——拆出来是因为 `game.js` 已经同时扛着
   输入 / 主循环 / 渲染编排 / 局外状态四件事。

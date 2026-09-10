@@ -110,9 +110,28 @@ export function snapshot(w) {
   };
 }
 
-export function restore(snap) {
+// 能靠"补默认值"升上来的最老版本。
+// 这几天 REPLAY_VERSION 从 8 涨到 11，每次都把玩家的存档静默丢了一次——
+// 而每一次加的都只是新字段（zoneBoss / lootKeys / awakened），旧档缺的字段补个默认值就能接着打。
+// 只有当结构真的不兼容（字段改名、语义变了）时才该抬这个下限
+export const MIGRATABLE_FROM = 9;
+
+// 旧档缺的新字段在这里补默认值。restore 里各字段本来就写着 `?? 默认值`，
+// 这个函数只负责"决定要不要认这个版本"，以及把版本号盖成当前的
+function migrate(snap) {
+  if (snap.version === REPLAY_VERSION) return snap;
+  // 只认"比当前老、但不太老"的：比当前新的档里可能有我们根本不认识的字段语义，
+  // 硬读比丢更危险（这条是测试逼出来的——第一版把未来版本也当成可迁移了）
+  if (!Number.isFinite(snap.version)) return null;
+  if (snap.version < MIGRATABLE_FROM || snap.version > REPLAY_VERSION) return null;
+  return { ...snap, version: REPLAY_VERSION, migratedFrom: snap.version };
+}
+
+export function restore(raw) {
+  const snap = migrate(raw) || raw;
   if (snap.version !== REPLAY_VERSION) {
-    throw new Error(`存档版本不匹配：文件是 ${snap.version}，当前是 ${REPLAY_VERSION}`);
+    throw new Error(`存档版本不匹配：文件是 ${raw.version}，当前是 ${REPLAY_VERSION}`
+      + `（能迁移的最老版本是 ${MIGRATABLE_FROM}）`);
   }
   const w = createWorld(snap.seed, snap.hero, snap.perks, snap.difficulty);
   w.rng.setState(snap.rngState);

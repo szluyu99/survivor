@@ -10,28 +10,23 @@ import { createFx } from './fx.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
 import { createHud } from './hud.js';
 import { createSandbox } from './sandbox.js';
+import { createProgress } from './progress.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
-import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
+import { isUnlocked, PERKS, difficultyUnlocked } from './meta.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
 import { ACHIEVEMENTS, doneCount, recordRun } from './achievements.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js
 
-// ---- 最好成绩：localStorage 存一条就够 ----
-const BEST_KEY = 'survivor.best';
-let best = load();
-function load() {
-  try { return JSON.parse(localStorage.getItem(BEST_KEY)) || null; } catch { return null; }
+// 局外进度（最好成绩 / 角色 / 残片解锁 / 难度）全部在 progress.js 里
+const progress = createProgress();
+const activeHero = () => progress.activeHero();
+// 通关：记进存档（解锁下一档难度），弹面板。世界本身不结束，继续打就是无尽模式
+function finishRun(w) {
+  progress.noteWinFor(w);
+  winPanel = true;
 }
-function saveBest(w) {
-  const cur = { t: w.t, kills: w.kills, level: w.player.level };
-  if (!best || cur.t > best.t) {
-    best = cur;
-    try { localStorage.setItem(BEST_KEY, JSON.stringify(cur)); } catch { /* 无痕模式会抛，忽略 */ }
-  }
-}
-
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
@@ -62,17 +57,17 @@ function resize() {
 resize();
 window.addEventListener('resize', resize);
 
-const fx = createFx({ onDeath: (w) => saveBest(w), onWin: (w) => finishRun(w) });
+const fx = createFx({ onDeath: (w) => progress.noteBest(w), onWin: (w) => finishRun(w) });
 const { consumeFx, stepFx, state: fxState, particles, numbers, bolts, ghosts, shards, pushGhost } = fx;
 const hud = createHud(ctx, {
   shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain },
   fxState,
-  getBest: () => best,
+  getBest: () => progress.best,
   getMuted: () => mutedHint,
   getPaused: () => uiPaused,
-  getHero: () => heroId,
-  getMeta: () => meta,
-  getDifficulty: () => difficulty,
+  getHero: () => progress.activeHero(),
+  getMeta: () => progress.meta,
+  getDifficulty: () => progress.difficulty,
   getSave: () => saveInfo,
   getInfoOpen: () => infoOpen,
   getPauseTab: () => pauseTab,
@@ -93,52 +88,6 @@ const FIXED_SEED = urlSeed();
 const newSeed = () => (FIXED_SEED === null ? Date.now() & 0xffff : FIXED_SEED);
 
 // 角色：首屏选，记在 localStorage 里，下次默认还是它。
-// URL 带 ?hero=ranger 时以 URL 为准——和 ?seed= 搭配才能完整复现同一局
-const HERO_KEY = 'survivor.hero';
-let heroId = loadHero();
-function loadHero() {
-  const raw = globalThis.location ? new URLSearchParams(globalThis.location.search).get('hero') : null;
-  if (raw) return findHero(raw).id;
-  try { return findHero(localStorage.getItem(HERO_KEY)).id; } catch { return DEFAULT_HERO; }
-}
-function setHero(id) {
-  heroId = findHero(id).id;
-  try { localStorage.setItem(HERO_KEY, heroId); } catch { /* 无痕模式会抛，忽略 */ }
-}
-
-// ---- 局外进度：残片、角色解锁、永久强化 ----
-const META_KEY = 'survivor.meta';
-let meta = loadMeta();
-function loadMeta() {
-  try { return normalizeMeta(JSON.parse(localStorage.getItem(META_KEY))); } catch { return defaultMeta(); }
-}
-function saveMeta(next) {
-  meta = next;
-  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch { /* 无痕模式会抛，忽略 */ }
-}
-// 结算：死亡那一刻把这局的残片和累计统计一起记到账上。
-// 两件事必须一次写完——分两次 saveMeta 的话后一次会用到前一次之前的 meta 快照
-function settleRun(w) {
-  const got = earnShards(w);
-  saveMeta({
-    ...meta,
-    shards: meta.shards + Math.max(0, got),
-    stats: recordRun(meta.stats, w),
-  });
-}
-// 首屏点角色卡：没解锁就先花残片买下来（买完不直接开局，避免"手一抖花掉又开了一局"）
-function pickOrUnlockHero(id) {
-  if (isUnlocked(meta, id)) { setHero(id); return true; }
-  const next = unlockHero(meta, id);
-  if (next) { saveMeta(next); setHero(id); }
-  return false;
-}
-// 没解锁的角色不能带进对局：存档被清掉或手改过时兜一层
-const activeHero = () => (isUnlocked(meta, heroId) ? heroId : DEFAULT_HERO);
-
-// 难度：首屏切换，记在 localStorage 里。没解锁的难度同样兜一层
-const DIFF_KEY = 'survivor.difficulty';
-let difficulty = loadDifficulty();
 // 局外的屏：menu / heroes / shop / help。以前所有内容挤在一屏上，现在拆开
 let screen = 'menu';
 let menuCursor = 0;
@@ -146,27 +95,7 @@ let winPanel = false;     // 通关那一刻的面板（选继续无尽还是重
 let infoOpen = false;     // 局内的详情浮层（Tab）
 let pauseTab = 0;         // 暂停面板：0 装备 / 1 属性 / 2 战况
 let overTab = 0;          // 结算面板：0 总览 / 1 详情
-function loadDifficulty() {
-  try {
-    const id = findDifficulty(localStorage.getItem(DIFF_KEY)).id;
-    return difficultyUnlocked(meta, id) ? id : DEFAULT_DIFFICULTY;
-  } catch { return DEFAULT_DIFFICULTY; }
-}
-function cycleDifficulty() {
-  // 只在已解锁的难度之间轮转
-  const open = DIFFICULTIES.filter((d) => difficultyUnlocked(meta, d.id));
-  const i = open.findIndex((d) => d.id === difficulty);
-  difficulty = open[(i + 1) % open.length].id;
-  try { localStorage.setItem(DIFF_KEY, difficulty); } catch { /* 无痕模式会抛，忽略 */ }
-}
-// 通关：记进存档（解锁下一档难度），弹面板。世界本身不结束，继续打就是无尽模式
-function finishRun(w) {
-  const next = noteWin(meta, w.difficulty);
-  if (next) saveMeta(next);
-  winPanel = true;
-}
-
-let world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
+let world = createWorld(newSeed(), activeHero(), progress.meta.perks, progress.difficulty);
 globalThis.__survivorWorld = world;
 const keys = new Set();
 const input = { dx: 0, dy: 0, dash: false, skill: null };
@@ -304,7 +233,7 @@ function beginGame() {
 }
 
 function restart() {
-  world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
+  world = createWorld(newSeed(), activeHero(), progress.meta.perks, progress.difficulty);
   globalThis.__survivorWorld = world; // 只为渲染层测试留个观察口，游戏本身不读它
   uiPaused = false;
   acc = 0;
@@ -333,13 +262,13 @@ globalThis.__survivorUi = {
 
 // 主菜单的条目。note 是右侧的小字，disabled 的条目点了不响应
 function menuItems() {
-  const unlockedHeroes = HEROES.filter((h) => isUnlocked(meta, h.id)).length;
+  const unlockedHeroes = HEROES.filter((h) => isUnlocked(progress.meta, h.id)).length;
   return [
     // 开始游戏 → 角色屏（选角色 + 选难度 + 明确按开始），不再直接开局
     {
       id: 'start',
       label: '开始游戏',
-      note: `${findHero(activeHero()).name} · ${findDifficulty(difficulty).name}（已解锁 ${unlockedHeroes}/${HEROES.length} 角色）`,
+      note: `${findHero(activeHero()).name} · ${findDifficulty(progress.difficulty).name}（已解锁 ${unlockedHeroes}/${HEROES.length} 角色）`,
     },
     {
       id: 'resume',
@@ -347,11 +276,11 @@ function menuItems() {
       note: saveInfo ? `${saveInfo.zone} ${clock(saveInfo.t)} · ${saveInfo.heroName}` : '没有存档',
       disabled: !saveInfo,
     },
-    { id: 'shop', label: '局外强化', note: `残片 ${meta.shards}` },
+    { id: 'shop', label: '局外强化', note: `残片 ${progress.meta.shards}` },
     {
       id: 'stats',
       label: '成就与统计',
-      note: `${doneCount(meta.stats, meta)}/${ACHIEVEMENTS.length} 成就 · ${meta.stats.runs} 局`,
+      note: `${doneCount(progress.meta.stats, progress.meta)}/${ACHIEVEMENTS.length} 成就 · ${progress.meta.stats.runs} 局`,
     },
     { id: 'help', label: '操作说明', note: 'H' },
     { id: 'sandbox', label: '武器沙盒', note: '调武器看效果' },
@@ -361,16 +290,12 @@ function menuItems() {
 // 商店里的两类购买。买不动就什么都不发生（价格那一行本来就是灰的）
 function buyPerkAt(i) {
   const perk = PERKS[i];
-  if (!perk) return;
-  const next = buyPerk(meta, perk.id);
-  if (next) saveMeta(next);
+  if (perk) progress.buyPerkAt(perk.id);
 }
 
 function unlockHeroAt(i) {
   const h = HEROES[i];
-  if (!h || isUnlocked(meta, h.id)) return;
-  const next = unlockHero(meta, h.id);
-  if (next) { saveMeta(next); setHero(h.id); }
+  if (h) progress.pickOrUnlockHero(h.id);
 }
 
 // 武器沙盒（实现在 sandbox.js）。它只需要"换一个干净世界"和"回主菜单"两件事，
@@ -379,7 +304,7 @@ const sandbox = createSandbox({
   getWorld: () => world,
   beginSandboxRun() {
     unlock();
-    world = createWorld(newSeed(), activeHero(), meta.perks, difficulty);
+    world = createWorld(newSeed(), activeHero(), progress.meta.perks, progress.difficulty);
     globalThis.__survivorWorld = world;
     recording = false;           // 工具局不录像、不结算
     settled = true;
@@ -429,17 +354,17 @@ addEventListener('keydown', (e) => {
         const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
         if (hi >= 0 && hi < HERO_CARD.count) {
           // 没解锁的角色要去「局外强化」买，这里只提示不扣钱
-          if (isUnlocked(meta, HEROES[hi].id)) setHero(HEROES[hi].id);
+          if (isUnlocked(progress.meta, HEROES[hi].id)) progress.setHero(HEROES[hi].id);
           return;
         }
         // 难度也搬到这一屏：开局前要定的两件事放在一起
-        if (e.code === 'KeyD') { cycleDifficulty(); return; }
+        if (e.code === 'KeyD') { progress.cycleDifficulty(); return; }
         if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-          const cur = HEROES.findIndex((h) => h.id === heroId);
+          const cur = HEROES.findIndex((h) => h.id === progress.activeHero());
           const n = Math.min(HEROES.length, HERO_CARD.count);
           for (let step = 1; step <= n; step++) {
             const next = HEROES[(cur + (e.code === 'ArrowRight' ? step : n - step) + n) % n];
-            if (isUnlocked(meta, next.id)) { setHero(next.id); break; }
+            if (isUnlocked(progress.meta, next.id)) { progress.setHero(next.id); break; }
           }
           e.preventDefault();
           return;
@@ -473,7 +398,7 @@ addEventListener('keydown', (e) => {
     if (mi >= 0 && mi < MENU_CARD.count) { menuCursor = mi; activateMenu(mi); return; }
     if (e.code === 'KeyH') { screen = 'help'; return; }
     // 难度的正主在角色屏，主菜单按 D 仍然能切（老习惯，且 note 上就写着当前难度）
-    if (e.code === 'KeyD') { cycleDifficulty(); return; }
+    if (e.code === 'KeyD') { progress.cycleDifficulty(); return; }
     if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
     return;
   }
@@ -568,7 +493,7 @@ canvas.addEventListener('pointerdown', (e) => {
         if (inStartBtn(at.x, at.y)) { beginGame(); pointer = null; return; }
         const hi = heroCardHit(at.x, at.y);
         // 点卡片只是选中；没解锁的卡点了没反应（解锁要去「局外强化」屏，避免在这儿手滑花钱）
-        if (hi >= 0 && hi < HEROES.length && isUnlocked(meta, HEROES[hi].id)) setHero(HEROES[hi].id);
+        if (hi >= 0 && hi < HEROES.length && isUnlocked(progress.meta, HEROES[hi].id)) progress.setHero(HEROES[hi].id);
       }
     } else if (screen === 'shop') {
       if (inBackBtn(at.x, at.y)) screen = 'menu';
@@ -1617,7 +1542,7 @@ function frame(now) {
                 lastReplay = recorder.toJSON(world);
                 globalThis.__survivorReplay = lastReplay; // 只给测试用：核对录像能重演这一局
               }
-              settleRun(world);
+              progress.settleRun(world);
               clearSave();
             }
             acc -= STEP;

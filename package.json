@@ -8,6 +8,8 @@
     "test": "node --test test/sim.test.mjs test/render.test.mjs test/content.test.mjs test/replay.test.mjs test/meta.test.mjs test/ui-layout.test.mjs",
     "balance": "node tools/balance.mjs",
     "check": "node tools/balance-check.mjs",
+    "check:quick": "node tools/balance-check.mjs --quick",
+    "size": "node tools/size-check.mjs",
     "record": "node tools/replay.mjs record",
     "replay": "node tools/replay.mjs verify",
     "validate": "node -e \"import('./src/validate.js').then(m=>{const e=m.validateContent();if(e.length){console.error(e.join(String.fromCharCode(10)));process.exit(1);}console.log('内容表校验通过');})\"",

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, update, chooseUpgrade, DEFAULT_HERO, ZONE_SECONDS } from '../src/sim.js';
 import {
-  snapshot, restore, createRecorder, playback, verify, quantizeInput, REPLAY_VERSION,
+  snapshot, restore, createRecorder, playback, verify, quantizeInput, REPLAY_VERSION, MIGRATABLE_FROM,
 } from '../src/replay.js';
 
 const DT = 1 / 60;
@@ -211,6 +211,27 @@ test('区域进度会跟着快照走（否则恢复出来的是另一个区域�
   assert.equal(w2.zoneIndex, w.zoneIndex);
   assert.ok(Math.abs(w2.zoneT - w.zoneT) < 1e-9);
   assert.equal(fingerprint(w2), fingerprint(w));
+});
+
+test('旧版本存档靠补默认值升上来，太老的才丢', () => {
+  const w = run(createWorld(5), 0, 240);
+  const snap = JSON.parse(JSON.stringify(snapshot(w)));
+
+  // 装成上一个版本的档：新字段（这几版加的都是新字段）删掉，看能不能接着打
+  const old = { ...snap, version: REPLAY_VERSION - 1 };
+  delete old.awakened;
+  delete old.lootKeys;
+  const revived = restore(old);
+  assert.equal(revived.zoneIndex, w.zoneIndex, '迁移之后区域进度丢了');
+  assert.deepEqual(revived.awakened, [], '缺失的新字段要补默认值');
+  assert.equal(revived.loot, null);
+  // 迁移过来的档还得能接着跑，而不是"能读但一动就炸"
+  run(revived, 0, 60);
+  assert.ok(revived.t > w.t, '迁移出来的世界推不动');
+
+  // 太老的档仍然丢掉：这时结构本身可能已经不兼容，硬读比丢更危险
+  assert.throws(() => restore({ ...snap, version: MIGRATABLE_FROM - 1 }), /版本不匹配/);
+  assert.throws(() => restore({ ...snap, version: undefined }), /版本不匹配/);
 });
 
 test('record 返回量化后的输入（不用它就会漂）', () => {

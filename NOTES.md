@@ -6,8 +6,9 @@
 ## 一、现状速览
 
 - 纯静态 Web 游戏，零依赖零构建（ES module + Canvas 2D），`npm run serve` 起本地服务，GitHub Pages 部署。
-- 232 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）、
-  架构约束（`npm run arch`）都在 CI 里。
+- 233 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）、
+  架构约束（`npm run arch`）、体积检查（`npm run size`）都在 CI 里。
+  本地调数值用 `npm run check:quick`（约 20 秒，全量要 105 秒）。
 - 一局的完整链路：首屏选角色/难度 → 走四个区域 → 打倒最后一个区域的 Boss 通关 → 继续无尽或重开 → 结算残片 → 局外解锁。
 
 ## 二、已做的事
@@ -205,6 +206,20 @@
   `game.js` 1743 → 1622 行。剩下的两刀（`input.js` 输入层、`progress.js` 局外状态）还没动。
   搬迁时唯一的坑：模块顶层的可变状态跨文件后要么变闭包要么变显式传参——
   漏改了四处 `sandboxSpawn(world, ...)`，渲染烟测立刻报 `world is not defined`。
+- ~~拆 `game.js`（第二刀）~~ 已完成（2026-09-10）：局外进度（最好成绩 / 角色 / 残片解锁 / 难度）
+  整块搬进 `src/progress.js`（111 行，工厂 + getter）。`game.js` 1622 → 1573 行。
+  搬迁踩到的坑：用正则批量把 `meta` / `difficulty` 改成 `progress.meta` / `progress.difficulty` 时，
+  连 `from './meta.js'` 和 `from './difficulty.js'` 的**路径字符串**一起改了，模块直接找不到；
+  另外 `getHero` / 方向键选角还引用着已经搬走的 `heroId`。两处都是渲染烟测立刻报出来的。
+  **输入层（`input.js`）这一刀没动**：键盘和指针的事件处理里，raw input 和 UI 路由
+  （菜单导航、暂停、沙盒点击、回放退出）是交织的，硬拆会把路由逻辑撕成两半，得先想清楚边界。
+- ~~存档字段级迁移~~ 已完成（2026-09-10）：`restore` 现在认"比当前老但不老于 `MIGRATABLE_FROM`(9)"的档，
+  按缺失字段补默认值再继续；太老的仍然丢。测试逼出一个边界：**比当前新的版本也必须丢**
+  （第一版把未来版本当成可迁移，那种档里可能有我们根本不认识的字段语义，硬读比丢更危险）。
+- ~~`check` 快速档 + 体积断言~~ 已完成（2026-09-10）：`npm run check:quick` 105 秒 → 20 秒
+  （3 个 seed + 跳过 Boss 原型和精英那两组重型检查）。关键取舍：通关率、难度比、强化倍率这类
+  **样本量敏感的断言在快速档降级成提醒**——3 个 seed 里通关 0 次完全正常，拿它当红灯只会教人忽略红灯。
+  `npm run size`：gzip 后 122KB / 上限 220KB，拦的是"数量级出错"（比如误把图片塞进仓库），不是几 KB 波动。
 - ~~崩溃自动导出复现材料~~ 已完成（2026-09-10）：崩溃时把 `{ message, stack, replay }` 写进
   `localStorage` 的 `survivor.crash`，`report.replay` 存成文件后可以直接 `npm run replay -- crash.json`
   精确重演。这是"世界完全确定性"顺手换来的好处：崩溃不再只是一段没有上下文的堆栈。
