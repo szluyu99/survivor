@@ -78,9 +78,10 @@ function shopRowHit(x, y, col, count) {
 
 // 主菜单：竖排大按钮。以前所有东西都堆在一屏上（残片 + 4 张角色卡 + 3 个强化 +
 // 难度 + 帮助 + 三行提示），信息太密；现在拆成菜单 → 各功能屏
-// 7 个入口：开始 / 选角色 / 继续 / 局外强化 / 成就与统计 / 难度 / 说明。
+// 7 个入口：开始 / 选角色 / 继续 / 局外强化 / 成就与统计 / 难度 / 说明，
+// 再加一个武器沙盒（调武器看效果的工具屏）。
 // 高度和间距压了一点，否则最后一项会撞到底部那三行小字
-const MENU_BTN = { w: 340, h: 36, gap: 8, y0: 140, count: 7 };
+const MENU_BTN = { w: 340, h: 34, gap: 5, y0: 126, count: 8 };
 const menuBtnY = (i) => MENU_BTN.y0 + i * (MENU_BTN.h + MENU_BTN.gap);
 const menuBtnX = () => (VIEW_W - MENU_BTN.w) / 2;
 function menuBtnHit(x, y) {
@@ -122,6 +123,29 @@ const EXIT_BTN = { x: VIEW_W / 2 - 90, y: VIEW_H - 52, w: 180, h: 30 };
 const inExitBtn = (x, y) => x >= EXIT_BTN.x && x <= EXIT_BTN.x + EXIT_BTN.w
   && y >= EXIT_BTN.y && y <= EXIT_BTN.y + EXIT_BTN.h;
 
+// 武器沙盒：左栏一行一把武器（点一下 +1 级，Shift/右键 -1 级），
+// 右栏是开关和放靶子的按钮。行高压到 21 是因为武器已经有 17 把（7 基础 + 7 进化 + 3 觉醒），
+// 再高就放不进一屏
+const SANDBOX_ROW = { x: 14, w: 286, h: 21, gap: 2, y0: 92 };
+const sandboxRowY = (i) => SANDBOX_ROW.y0 + i * (SANDBOX_ROW.h + SANDBOX_ROW.gap);
+function sandboxRowHit(x, y, count) {
+  if (x < SANDBOX_ROW.x || x > SANDBOX_ROW.x + SANDBOX_ROW.w) return -1;
+  for (let i = 0; i < count; i++) {
+    if (y >= sandboxRowY(i) && y <= sandboxRowY(i) + SANDBOX_ROW.h) return i;
+  }
+  return -1;
+}
+
+const SANDBOX_BTN = { x: 312, w: 152, h: 26, gap: 5, y0: 92 };
+const sandboxBtnY = (i) => SANDBOX_BTN.y0 + i * (SANDBOX_BTN.h + SANDBOX_BTN.gap);
+function sandboxBtnHit(x, y, count) {
+  if (x < SANDBOX_BTN.x || x > SANDBOX_BTN.x + SANDBOX_BTN.w) return -1;
+  for (let i = 0; i < count; i++) {
+    if (y >= sandboxBtnY(i) && y <= sandboxBtnY(i) + SANDBOX_BTN.h) return i;
+  }
+  return -1;
+}
+
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
@@ -130,4 +154,5 @@ export {
   MENU_BTN, menuBtnX, menuBtnY, menuBtnHit, BACK_BTN, inBackBtn,
   TAB_BTN, tabBtnX, tabBtnHit, INFO_BTN, inInfoBtn,
   EXIT_BTN, inExitBtn,
+  SANDBOX_ROW, sandboxRowY, sandboxRowHit, SANDBOX_BTN, sandboxBtnY, sandboxBtnHit,
 };

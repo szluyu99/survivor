@@ -198,8 +198,80 @@ test('说明屏：操作说明、兵种图例、区域说明都在里面，ESC �
   assert.ok(texts.includes('色块幸存者'), 'ESC 之后应该回主菜单，而不是开局');
 });
 
-test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {
-  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
+test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async () => {
+  const { WEAPONS: BASE, MAX_SLOTS: SLOTS } = await import('../src/weapons.js');
+  const ui = globalThis.__survivorUi;
+  const { SANDBOX_ROW, sandboxRowY, SANDBOX_BTN, sandboxBtnY } = await import('../src/layout.js');
+  const rowCenter = (i) => ({ x: SANDBOX_ROW.x + 40, y: sandboxRowY(i) + SANDBOX_ROW.h / 2 });
+  const btnCenter = (i) => ({ x: SANDBOX_BTN.x + 40, y: sandboxBtnY(i) + SANDBOX_BTN.h / 2 });
+  const click = (at, ev = {}) => {
+    fire(handlers.canvas, 'pointerdown', { pointerId: 90, clientX: at.x, clientY: at.y, ...ev });
+    fire(handlers.canvas, 'pointerup', { pointerId: 90 });
+    runFrames(2);
+  };
+
+  // 从主菜单第 8 项进沙盒
+  fire(handlers.window, 'keydown', { code: 'Digit8', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('武器沙盒'), `沙盒没打开：${texts.slice(0, 12)}`);
+  assert.ok(texts.some((t) => t.includes('最近 3 秒输出')), '沙盒没显示实时输出');
+  const w = globalThis.__survivorWorld;
+  assert.equal(w.weapons.length, 0, '沙盒应该从空手开始');
+
+  // 点第一行三次：装上 + 升两级
+  click(rowCenter(0));
+  click(rowCenter(0));
+  click(rowCenter(0));
+  assert.equal(w.weapons.length, 1, '点了武器行却没装上');
+  assert.equal(w.weapons[0].id, BASE[0].id);
+  assert.equal(w.weapons[0].level, 3, `等级不对：${w.weapons[0].level}`);
+  // Shift 点 = 降级
+  click(rowCenter(0), { shiftKey: true });
+  assert.equal(w.weapons[0].level, 2, 'Shift 点没降级');
+
+  // 槽位锁着时装不上第四把
+  for (let i = 1; i < BASE.length; i++) click(rowCenter(i));
+  assert.equal(w.weapons.length, SLOTS, `锁着槽位却装了 ${w.weapons.length} 把`);
+  click(btnCenter(2)); // 放开槽位
+  click(rowCenter(BASE.length - 1));
+  assert.ok(w.weapons.length > SLOTS, '放开槽位之后还是装不上');
+
+  // 放靶子：数字键和按钮两条路都要通
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+  runFrames(2);
+  assert.ok(w.enemies.some((e) => e.active), '放不出靶子');
+  fire(handlers.window, 'keydown', { code: 'Digit0', preventDefault() {} });
+  runFrames(2);
+  assert.ok(!w.enemies.some((e) => e.active), '清空没生效');
+  click(btnCenter(5)); // 围一圈
+  assert.ok(w.enemies.filter((e) => e.active).length >= 10, '围一圈没放出怪');
+  click(btnCenter(7)); // 放 Boss
+  assert.ok(w.enemies.some((e) => e.active && e.kind === 'boss'), 'Boss 没放出来');
+
+  // 时间倍速：只要不崩、世界还在走就行
+  click(btnCenter(3));
+  const t0 = w.t;
+  runFrames(10);
+  assert.ok(w.t > t0, '倍速之后世界不走了');
+
+  // 沙盒里不该被升级卡打断，也不该结算残片
+  const metaBefore = JSON.stringify(store.get('survivor.meta') || null);
+  runFrames(30);
+  assert.equal(w.paused, false, '沙盒里冒出了选卡界面');
+  assert.equal(JSON.stringify(store.get('survivor.meta') || null), metaBefore, '沙盒污染了存档');
+
+  // ESC 退出回主菜单
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.equal(ui.started, false, 'ESC 之后还在局内');
+  assert.ok(texts.includes('色块幸存者'), 'ESC 没回主菜单');
+});
+
+test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {  fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));

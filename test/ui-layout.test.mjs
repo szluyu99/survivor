@@ -15,7 +15,7 @@ import { createFx } from '../src/fx.js';
 import { defaultMeta } from '../src/meta.js';
 import { recordRun } from '../src/achievements.js';
 import { VIEW_W, VIEW_H } from '../src/view.js';
-import { WEAPONS, MAX_SLOTS } from '../src/weapons.js';
+import { WEAPONS, MAX_SLOTS, EVO_WEAPONS as EVO_WEAPONS_ALL, AWAKEN_WEAPONS as AWAKEN_ALL } from '../src/weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS } from '../src/skills.js';
 import { PERKS } from '../src/meta.js';
 import { HEROES } from '../src/heroes.js';
@@ -124,6 +124,7 @@ const menuItems = [
   { id: 'stats', label: '成就与统计', note: '3/12 成就 · 8 局' },
   { id: 'difficulty', label: '难度：普通', note: '点击切换' },
   { id: 'help', label: '操作说明', note: 'H' },
+  { id: 'sandbox', label: '武器沙盒', note: '调武器看效果' },
 ];
 
 const overlaps = (a, b) => a.x0 < b.x1 - 1 && b.x0 < a.x1 - 1 && a.y0 < b.y1 - 1 && b.y0 < a.y1 - 1;
@@ -168,6 +169,22 @@ const SCREENS = {
   通关面板: () => hud.drawWinPanel(w),
   选卡: () => hud.drawChoices(wc),
   战利品: () => hud.drawLoot(wl),
+  武器沙盒: () => hud.drawSandbox(w, {
+    rows: [...WEAPONS, ...EVO_WEAPONS_ALL, ...AWAKEN_ALL].map((d, i) => ({
+      id: d.id, name: d.name, group: i < WEAPONS.length ? 'base' : 'evo',
+      level: i % 3, maxLevel: d.maxLevel,
+    })),
+    buttons: [
+      { label: '无敌　开', on: true }, { label: '冻结刷怪　开', on: true },
+      { label: '锁 3 个槽位　开', on: true }, { label: '时间 ×2', on: true },
+      { label: '放一只杂兵', on: false }, { label: '围一圈 20 只', on: false },
+      { label: '放一只精英', on: false }, { label: '放一只 Boss', on: false },
+      { label: '清空场上敌人', on: false }, { label: '清空武器重来', on: false },
+      { label: 'ESC 退出沙盒', on: false },
+    ],
+    dps: 1234,
+    hint: '槽位满了（点"锁 3 个槽位"可以放开）',
+  }),
 };
 
 for (const [name, draw] of Object.entries(SCREENS)) {

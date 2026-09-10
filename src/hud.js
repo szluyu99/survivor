@@ -6,7 +6,7 @@ import { VIEW_W, VIEW_H } from './view.js';
 import { TRAITS } from './sim.js';
 import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_BTN, menuBtnX, menuBtnY, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_BTN, menuBtnX, menuBtnY, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN, SANDBOX_ROW, sandboxRowY, SANDBOX_BTN, sandboxBtnY } from './layout.js';
 import { HEROES, findHero } from './heroes.js';
 import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked, ZONE_CLEAR_BONUS } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
@@ -525,6 +525,66 @@ export function createHud(ctx, deps) {
       ctx.fillStyle = P.faint;
       ctx.font = '13px ui-monospace, monospace';
       ctx.fillText(`[${i + 1}]`, x + CARD_W / 2, CARD_Y + CARD_H - 16);
+    });
+  }
+
+  // 武器沙盒的控制面板。ui 由 game.js 组装：
+  // { rows: [{ name, level, maxLevel, group, line }], buttons: [{ label, on }], dps, hint }
+  // 面板只占左边一半，右半边留给实际打斗——不然调完看不到效果
+  function drawSandbox(w, ui) {
+    const panelW = SANDBOX_BTN.x + SANDBOX_BTN.w + 14;
+    ctx.fillStyle = P.panelBg;
+    ctx.fillRect(0, 0, panelW, VIEW_H);
+    ctx.strokeStyle = P.cardLine;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, panelW, VIEW_H);
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = P.accent;
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText('武器沙盒', 14, 30);
+    ctx.fillStyle = P.dimmer;
+    ctx.font = '11px sans-serif';
+    ctx.fillText('点一行 +1 级，Shift 点 / 右键 -1 级　ESC 退出', 14, 48);
+    ctx.fillStyle = P.calm;
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillText(`最近 3 秒输出 ${ui.dps.toFixed(0)}/秒`, 14, 68);
+    if (ui.hint) {
+      ctx.fillStyle = P.warn;
+      ctx.fillText(ui.hint, 14, 84);
+    }
+
+    // 左栏：一行一把武器。手上有的高亮，没有的暗着（点一下就装上）
+    ctx.font = '12px sans-serif';
+    ui.rows.forEach((r, i) => {
+      const y = sandboxRowY(i);
+      const held = r.level > 0;
+      ctx.fillStyle = held ? P.card : P.panelBg;
+      ctx.fillRect(SANDBOX_ROW.x, y, SANDBOX_ROW.w, SANDBOX_ROW.h);
+      ctx.strokeStyle = held ? (r.group === 'awaken' ? P.evo : r.group === 'evo' ? P.calm : P.cardLine) : P.btnLine;
+      ctx.strokeRect(SANDBOX_ROW.x, y, SANDBOX_ROW.w, SANDBOX_ROW.h);
+      ctx.fillStyle = held ? P.text : P.faint;
+      ctx.fillText(r.name, SANDBOX_ROW.x + 6, y + 15);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = held ? P.warn : P.faint;
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(held ? `Lv.${r.level}/${r.maxLevel}` : '未装', SANDBOX_ROW.x + SANDBOX_ROW.w - 6, y + 15);
+      ctx.textAlign = 'left';
+      ctx.font = '12px sans-serif';
+    });
+
+    // 右栏：开关和放靶子
+    ui.buttons.forEach((b, i) => {
+      const y = sandboxBtnY(i);
+      ctx.fillStyle = b.on ? P.card : P.panelBg;
+      ctx.fillRect(SANDBOX_BTN.x, y, SANDBOX_BTN.w, SANDBOX_BTN.h);
+      ctx.strokeStyle = b.on ? P.accent : P.btnLine;
+      ctx.lineWidth = b.on ? 2 : 1;
+      ctx.strokeRect(SANDBOX_BTN.x, y, SANDBOX_BTN.w, SANDBOX_BTN.h);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = b.on ? P.accent : P.dim;
+      ctx.font = '12px sans-serif';
+      ctx.fillText(b.label, SANDBOX_BTN.x + 8, y + 17);
     });
   }
 
@@ -1071,7 +1131,7 @@ export function createHud(ctx, deps) {
   }
 
   return {
-    drawHud, drawPausePanel, drawChoices, drawLoot, drawGameOver, drawWinPanel, drawReplayBadge,
+    drawHud, drawPausePanel, drawChoices, drawLoot, drawGameOver, drawWinPanel, drawReplayBadge, drawSandbox,
     drawMenu, drawHeroSelect, drawShop, drawAchievements, drawHelpScreen,
     statBars, WEAPON_NAME, clock,
   };

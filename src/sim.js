@@ -2,7 +2,7 @@
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
 import { findWeapon } from './weapons.js';
 import { rollChoices, rerollChoices, banishChoice, rollLoot, TRAITS, CURSES } from './upgrades.js';
-import { KINDS, tickEnemy, tickSpawns, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from './enemies.js';
+import { KINDS, tickEnemy, tickSpawns, spawnEnemy, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from './enemies.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
@@ -408,6 +408,17 @@ const skillCtx = {
 };
 
 export const DASH = DASH_TUNING;
+
+// 武器沙盒（调武器看效果的工具屏）用的口子：在指定方向/距离上放一只怪。
+// 放在 sim 里是因为刷怪要用内部的 enemyCtx，而沙盒本身在渲染层（game.js）。
+// 走的是真正的 spawnEnemy，所以血量、精英/Boss 原型的抽取和实战完全一致
+export function sandboxSpawn(w, kind, dist = 220, angle = 0) {
+  const e = spawnEnemy(w, enemyCtx, kind, angle);
+  if (!e) return null;
+  e.x = w.player.x + Math.cos(angle) * dist;
+  e.y = w.player.y + Math.sin(angle) * dist;
+  return e;
+}
 
 export function update(w, dt, input) {
   if (w.over || w.paused) return;
