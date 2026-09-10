@@ -9,11 +9,13 @@
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
 import { TERRAIN_TUNING, LOOP } from './tuning.js';
 
-// 每个区域的时长，走完一轮再从头循环（难度靠时间继续涨）。
-// 它同时决定通关线：要打最后一个区域的 Boss，至少得活到 ZONE_SECONDS × (区域数 - 1)。
-// 100 秒时通关线是 200 秒，而中位局长只有 90 秒——通关变成了"先刷几十局强化"的后置目标，
-// 所以压到 75 秒（通关线 150 秒），让强化到一半的存档就有机会摸到
-export const ZONE_SECONDS = 75;
+// 每个区域的"清场时长"：走完这么久，本区域的 Boss 就来堵门（见 tickZone）。
+// 打倒它才进下一段，所以一段的实际长度是 ZONE_SECONDS + Boss 战时长。
+//
+// 从 75 秒压到 45 秒是因为交界 Boss 战本身要花时间：三段各 75 秒的话，
+// 通关线会被推到 240 秒开外，比校准过的 150 秒远得多。
+// 45 秒 + Boss 战之后，两只 Boss 之间的间隔正好回到改造前 bossEvery 的 55 秒附近
+export const ZONE_SECONDS = 45;
 
 export const ZONES = [
   {
@@ -92,11 +94,23 @@ export function loopScale(w) {
   };
 }
 
-// 推进区域。切换的那一帧返回新区域，让 sim 去登记横幅和音效
+// 区域推进：清场时间走完 → 本区域的 Boss 堵门（返回 'boss'），打倒它才换区。
+//
+// 改造前换区和刷 Boss 是两条独立时间线（区域 75s / Boss 55s），
+// "进了沼泽"和"遇到裂变者"经常错开，一局没有段落感。现在合成一条：
+// 清场 → Boss → 换景。Boss 战期间区域时间冻结（zoneT 不涨），
+// 所以下一段照样有完整的 ZONE_SECONDS 清场时间
 export function tickZone(w, dt) {
+  if (w.zoneBoss) return null; // Boss 还站着，这一段不往前走
   w.zoneT += dt;
   if (w.zoneT < ZONE_SECONDS) return null;
-  w.zoneT -= ZONE_SECONDS;
+  return 'boss';
+}
+
+// Boss 倒下（或这一局根本没开 Boss）之后真正换区。
+// 切换的那一帧返回新区域，让 sim 去登记横幅和音效
+export function advanceZone(w) {
+  w.zoneT = 0; // 不留余数：Boss 战占掉的时间不该算进下一段的清场时间
   w.zoneIndex++;
   w.loop = loopOf(w);
   return currentZone(w);

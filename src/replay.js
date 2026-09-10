@@ -15,8 +15,9 @@ import { cardByKey } from './upgrades.js';
 // v5：加了 Boss 原型（boss/gen 决定行为）；
 // v6：加了难度（difficulty 改敌人数值）和通关状态；
 // v7：加了无尽轮次（loop 决定敌人额外倍率）；
-// v8：加了精英原型（elite）、统一的减伤字段（armor 取代 shielded）、子弹引信（fuse）
-export const REPLAY_VERSION = 8;
+// v8：加了精英原型（elite）、统一的减伤字段（armor 取代 shielded）、子弹引信（fuse）；
+// v9：区域交界 Boss 战（zoneBoss 决定区域时间是否冻结）
+export const REPLAY_VERSION = 9;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -86,6 +87,7 @@ export function snapshot(w) {
     phase: w.phase,
     zoneIndex: w.zoneIndex,
     zoneT: w.zoneT,
+    zoneBoss: w.zoneBoss,
     loop: w.loop,
     slowT: w.slowT,
     slowMul: w.slowMul,
@@ -117,7 +119,8 @@ export function restore(snap) {
     spawnTimer: snap.spawnTimer, eliteTimer: snap.eliteTimer, bossTimer: snap.bossTimer,
     terrainTimer: snap.terrainTimer, chestTimer: snap.chestTimer,
     cycleT: snap.cycleT, phase: snap.phase, slowT: snap.slowT, slowMul: snap.slowMul,
-    zoneIndex: snap.zoneIndex, zoneT: snap.zoneT, loop: snap.loop || 0, won: snap.won, wonAt: snap.wonAt,
+    zoneIndex: snap.zoneIndex, zoneT: snap.zoneT, zoneBoss: snap.zoneBoss || 0,
+    loop: snap.loop || 0, won: snap.won, wonAt: snap.wonAt,
   });
   Object.assign(w.player, snap.player);
   Object.assign(w.stats, snap.stats);

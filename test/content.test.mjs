@@ -59,7 +59,10 @@ test('调参表里的数值都在合理范围（防手滑打错小数点）', ()
   assert.ok(WAVE.surgeAt < WAVE.calmAt && WAVE.calmAt < WAVE.cycle, '波次三段的时间点顺序不对');
   assert.ok(SPAWN.intervalMin < SPAWN.intervalBase, '刷怪间隔下限必须小于起点');
   assert.ok(BOSS.interruptFrac > 0 && BOSS.interruptFrac < 1, '打断阈值应该是 0~1 的比例');
-  assert.ok(SPAWN_TIMERS.firstBoss > 0 && SPAWN_TIMERS.bossEvery > 0);
+  assert.ok(SPAWN_TIMERS.firstElite > 0 && SPAWN_TIMERS.eliteEvery > 0);
+  // Boss 由区域交界召唤，bossTimer 平时停在 bossIdle；bossOff 以上表示整局关掉 Boss
+  assert.ok(SPAWN_TIMERS.bossIdle > 0 && SPAWN_TIMERS.bossIdle < SPAWN_TIMERS.bossOff,
+    'bossIdle 必须是"永远不刷"但又没到"关掉 Boss"那个阈值的大数');
   assert.ok(TERRAIN_TUNING.mudSlow > 0 && TERRAIN_TUNING.mudSlow < 1, '泥地减速倍率应该是 0~1');
 });
 
@@ -100,6 +103,7 @@ test('给不存在的角色 id 会退回基准角色，而不是崩', () => {
 test('区域按时间推进、循环，切换报 zone、进新一轮报 loop', () => {
   const w = createWorld(1);
   w.player.maxHp = w.player.hp = 1e9;
+  w.bossTimer = 1e9; // 关掉 Boss：这条用例只看时间线，交界 Boss 战另有用例
   assert.equal(w.zoneIndex, 0);
   assert.equal(w.loop, 0);
   let zoneEvents = 0;
@@ -121,6 +125,47 @@ test('区域按时间推进、循环，切换报 zone、进新一轮报 loop', (
   assert.equal(w.loop, 1, '跑完一轮之后轮次应该是 1');
   // 走完一轮要循环回第一个区域
   assert.equal(currentZone({ zoneIndex: ZONES.length }).id, ZONES[0].id);
+});
+
+test('清场时间走完是本区域的 Boss 堵门，不打倒就不换区', () => {
+  const w = createWorld(1);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.eliteTimer = 1e9;
+  // 一直跑到清场时间走完，Boss 应该出场，并且区域被钉住
+  for (let i = 0; i < (ZONE_SECONDS + 20) * 60 && !w.zoneBoss; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, 1 / 60, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  assert.equal(w.zoneBoss, 1, '清场时间走完却没进 Boss 战');
+  assert.equal(w.zoneIndex, 0, 'Boss 还站着就换区了');
+  assert.ok(w.bossCount >= 1, '交界没有刷出 Boss');
+  assert.ok(w.enemies.some((e) => e.active && e.kind === 'boss'), '场上没有活着的 Boss');
+  // Boss 战期间区域时间冻结，不会越涨越多
+  assert.ok(w.zoneT <= ZONE_SECONDS + 1 / 30, `Boss 战期间区域时间还在涨：${w.zoneT}`);
+  // 把 Boss（含裂变子体）削到一滴血，让武器打死它——直接改 hp 不会触发死亡结算
+  for (let i = 0; i < 60 * 60 && w.zoneIndex === 0; i++) {
+    for (const e of w.enemies) if (e.active && e.kind === 'boss') e.hp = 1;
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, 1 / 60, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  assert.equal(w.zoneIndex, 1, 'Boss 清完了还是没换区');
+  assert.equal(w.zoneBoss, 0, 'Boss 战标记没清掉');
+  assert.equal(w.zoneT, 0, '换区后清场时间应该从 0 重新开始');
+});
+
+test('关掉 Boss 的那种局（测试/平衡工具）区域到点就换', () => {
+  const w = createWorld(1);
+  w.player.maxHp = w.player.hp = 1e9;
+  w.bossTimer = 1e9;
+  for (let i = 0; i < (ZONE_SECONDS + 2) * 60; i++) {
+    if (w.paused) chooseUpgrade(w, 0);
+    update(w, 1 / 60, { dx: 0, dy: 0 });
+    for (const f of w.fx) f.active = false;
+  }
+  assert.equal(w.zoneIndex, 1, '关掉 Boss 之后区域应该照旧按时间换');
+  assert.equal(w.bossCount, 0, '关掉 Boss 却刷出来了');
 });
 
 test('轮次会给敌人叠加成，第 0 轮没有加成', () => {

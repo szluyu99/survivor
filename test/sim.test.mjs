@@ -625,15 +625,16 @@ test('素材没到等级时不会出现进化卡', () => {
 test('素材达标后能抽到进化卡，选了就合成并腾出槽位', () => {
   const w = forceMaterials(3, ['orbit', 'chain']);
   assert.equal(findEvolution(w).length, 1, '应该刚好有一项可进化');
-  // 进化卡只是权重高，不是必出（卡池里还有 9 词条 + 3 诅咒 + 武器升级），所以多抽几次
+  // 进化卡只是权重高，不是必出（卡池里还有 9 词条 + 3 诅咒 + 武器升级），所以多抽几次。
+  // 单次没抽到的概率约 0.73，抽 24 次全空的概率不到 0.1%——10 次的话有约 4% 会无故变红
   let k = -1;
-  for (let round = 0; round < 10 && k < 0; round++) {
+  for (let round = 0; round < 24 && k < 0; round++) {
     const cards = rollUntilChoices(w);
     assert.ok(cards, '没能升级');
     k = cards.findIndex((c) => c.evo);
     if (k < 0) chooseUpgrade(w, cards.length - 1);
   }
-  assert.ok(k >= 0, '连抽 10 次都没出现进化卡，权重可能太低');
+  assert.ok(k >= 0, '连抽 24 次都没出现进化卡，权重可能太低');
   const slotsBefore = w.weapons.length;
   chooseUpgrade(w, k);
   const ids = w.weapons.map((x) => x.id);

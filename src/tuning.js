@@ -69,10 +69,15 @@ export const WAVE = {
   rusherShare: 0.7,    // 冲锋潮里冲锋兵的比例
 };
 
-// 精英与 Boss 的出场节奏
+// 精英与 Boss 的出场节奏。
+// Boss 已经不按固定间隔刷了——区域清场时间走完就由 zones.js 叫它出场（交界 Boss 战）。
+// bossTimer 保留下来当"下一只 Boss 的倒计时"，两个哨兵值：
+//   bossIdle：没有 Boss 要刷（默认值，等区域交界把它归零）。取一个真实对局里到不了的大数，
+//             这样即使有人忘了归零也只是"永远不刷"，而不是某局突然冒一只
+//   >= bossOff：这一局整个关掉 Boss（测试和平衡工具用它排除 Boss 干扰，此时区域到点直接换）
 export const SPAWN_TIMERS = {
   firstElite: 30, eliteEvery: 40,
-  firstBoss: 45, bossEvery: 55,
+  bossIdle: 1e6, bossOff: 1e8,
 };
 
 // Boss 行为

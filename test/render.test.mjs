@@ -539,6 +539,7 @@ test('右键和触摸双击都能触发冲刺且不炸', () => {
 test('HUD 画出当前区域，换区域时弹横幅', () => {
   const w = globalThis.__survivorWorld;
   const realMaxHp = w.player.maxHp;
+  const realBossTimer = w.bossTimer;
   w.player.hp = w.player.maxHp = 1e9; // 别在采样中途死掉
   try {
     calls.length = 0;
@@ -546,9 +547,18 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
     const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
     assert.ok(texts.some((t) => t.includes(ZONES[w.zoneIndex % ZONES.length].name)), `HUD 没画区域名：${texts.slice(0, 14)}`);
 
-    // 把世界推到切换点，横幅应该弹出来
-    const nextName = ZONES[(w.zoneIndex + 1) % ZONES.length].name;
+    // 清场时间走完先是一场交界 Boss 战，HUD 的倒计时要换成"Boss 战"
     w.zoneT = ZONE_SECONDS - 0.005;
+    calls.length = 0;
+    runFrames(10);
+    const fighting = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+    assert.equal(w.zoneBoss, 1, '推到切换点却没进 Boss 战');
+    assert.ok(fighting.some((t) => t.includes('Boss 战')), `Boss 战期间 HUD 没提示：${fighting.slice(0, 14)}`);
+
+    // 把世界推到真正的切换：关掉 Boss 并清场，横幅应该弹出来
+    const nextName = ZONES[(w.zoneIndex + 1) % ZONES.length].name;
+    w.bossTimer = 1e9;
+    for (const e of w.enemies) if (e.active && e.kind === 'boss') e.active = false;
     calls.length = 0;
     runFrames(20);
     const banner = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -557,6 +567,7 @@ test('HUD 画出当前区域，换区域时弹横幅', () => {
   } finally {
     w.player.maxHp = realMaxHp;
     w.player.hp = Math.min(w.player.hp, realMaxHp);
+    w.bossTimer = realBossTimer;
   }
 });
 

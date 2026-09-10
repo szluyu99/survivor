@@ -13,7 +13,7 @@ import { isFxEvent } from './fx-events.js';
 import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
 import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
 import { applyPerks, PERKS, earnShards } from './meta.js';
-import { ZONES, ZONE_SECONDS, currentZone, tickZone } from './zones.js';
+import { ZONES, ZONE_SECONDS, currentZone, tickZone, advanceZone } from './zones.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, applyDifficulty, WIN_BONUS } from './difficulty.js';
 
 // 区域表定义在 zones.js，这里转出去
@@ -86,14 +86,15 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0 })),
     spawnTimer: 0,
     eliteTimer: SPAWN_TIMERS.firstElite,
-    bossTimer: SPAWN_TIMERS.firstBoss,
+    bossTimer: SPAWN_TIMERS.bossIdle, // Boss 由区域交界召唤，不自己计时
     bossCount: 0,
     // 波次节奏：22 秒常规 → 5 秒冲锋 → 3 秒喘息，循环
     cycleT: 0,
     phase: 'normal',
-    // 区域：每 ZONE_SECONDS 换一段，兵种配比和地形风格跟着换
+    // 区域：清场 ZONE_SECONDS 秒 → 本区 Boss 堵门 → 打倒它才进下一段
     zoneIndex: 0,
     zoneT: 0,
+    zoneBoss: 0,          // 1 = 正在打交界 Boss，这段区域时间冻结
     loop: 0,              // 无尽轮次：区域循环完一整轮算一轮，敌人再叠一档强度
     choices: null,
     evolved: [],
@@ -220,6 +221,15 @@ function dropGem(w, x, y, value = 1) {
   g.y = y;
   g.value = value;
   g.r = value > 1 ? 7 : 4;
+}
+
+// 场上还有活着的 Boss 吗（含裂变者裂出的子体）。交界 Boss 战靠它判断结束
+function anyBossAlive(w) {
+  const list = w.enemies;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].active && list[i].kind === 'boss') return true;
+  }
+  return false;
 }
 
 function killEnemy(w, e) {
@@ -438,8 +448,22 @@ export function update(w, dt, input) {
 
   // 区域推进要排在刷怪和地形之前：切换的那一帧起，新刷的怪和新长的地形就该按新区域来
   const loopBefore = w.loop;
-  const nextZone = tickZone(w, dt);
-  if (nextZone) {
+  let entered = null;
+  if (tickZone(w, dt) === 'boss') {
+    if (w.bossTimer >= SPAWN_TIMERS.bossOff) {
+      // 这一局关掉了 Boss（测试 / 平衡工具）：没人堵门，到点就换区
+      entered = advanceZone(w);
+    } else {
+      // 交界 Boss：让 tickSpawns 这一帧就把它放出来，之后区域时间冻结
+      w.zoneBoss = 1;
+      w.bossTimer = 0;
+    }
+  } else if (w.zoneBoss && !anyBossAlive(w)) {
+    // Boss（含裂变者裂出的子体）全清了才换景
+    w.zoneBoss = 0;
+    entered = advanceZone(w);
+  }
+  if (entered) {
     // 进入新一轮时报轮次，否则只报区域——两条横幅同时弹会互相盖掉
     if (w.loop > loopBefore) emit(w, 'loop', p.x, p.y, w.loop);
     else emit(w, 'zone', p.x, p.y, w.zoneIndex);

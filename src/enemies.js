@@ -444,9 +444,11 @@ export function tickSpawns(w, dt, ctx) {
     while (w.spawnTimer <= 0) { spawnEnemy(w, ctx); w.spawnTimer += interval; }
   }
 
+  // Boss 不再按固定间隔刷：区域清场时间走完时 sim 会把 bossTimer 归零（见 zones.js 的交界 Boss 战）。
+  // 刷完就回到 bossIdle 等下一次召唤。测试和工具直接改 bossTimer 就能手动召一只
   w.bossTimer -= dt;
   if (w.bossTimer <= 0) {
-    w.bossTimer += SPAWN_TIMERS.bossEvery;
+    w.bossTimer = SPAWN_TIMERS.bossIdle;
     const b = spawnEnemy(w, ctx, 'boss');
     if (b) { w.bossCount++; ctx.emit(w, 'boss', w.player.x, w.player.y); }
   }

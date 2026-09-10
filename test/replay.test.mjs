@@ -177,6 +177,7 @@ test('无尽轮次会跟着快照走（否则恢复出来的敌人强度不对�
 test('区域进度会跟着快照走（否则恢复出来的是另一个区域）', () => {
   const w = createWorld(2);
   w.player.maxHp = w.player.hp = 1e9;
+  w.bossTimer = 1e9; // 关掉交界 Boss：这条用例只关心快照里的区域进度
   // 跑过第一次区域切换
   run(w, 0, (ZONE_SECONDS + 5) * 60);
   assert.equal(w.zoneIndex, 1, '没跑到第二个区域');

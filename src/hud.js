@@ -83,13 +83,16 @@ export function createHud(ctx, deps) {
     ctx.fillStyle = P.text;
     ctx.fillText(`${m}:${String(s).padStart(2, '0')}`, VIEW_W - 16, 34);
     // 当前区域 + 还剩多久换：换区域会改兵种配比，值得让人提前知道。
+    // 倒计时归零后是本区域的 Boss 堵门（打倒它才换景），这时候倒计时换成"Boss 战"，
+    // 否则一个不动的 0s 会让人以为卡住了。
     // 进了无尽轮次之后前面加上轮数，它是这一局"打到哪儿了"的刻度。
     // 其余次要信息（装备、最好成绩、阶段、精英倒计时）都收进 Tab 详情浮层，
     // 常显的只留"这一秒要做决定"用得上的
     ctx.font = 'bold 13px sans-serif';
-    ctx.fillStyle = w.loop > 0 ? P.danger : P.accent;
+    ctx.fillStyle = w.zoneBoss ? P.danger : (w.loop > 0 ? P.danger : P.accent);
     const loopTag = w.loop > 0 ? `第${w.loop + 1}轮 ` : '';
-    ctx.fillText(`${loopTag}${currentZone(w).name}　${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`, VIEW_W - 16, 52);
+    const zoneTag = w.zoneBoss ? 'Boss 战' : `${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`;
+    ctx.fillText(`${loopTag}${currentZone(w).name}　${zoneTag}`, VIEW_W - 16, 52);
     // 顶部 Boss 血条：场上有 Boss 就显示，多只取血最多的那只
     let boss = null;
     for (const e of w.enemies) if (e.active && e.kind === 'boss' && (!boss || e.hp > boss.hp)) boss = e;
@@ -394,7 +397,9 @@ export function createHud(ctx, deps) {
       ['场上敌人', String(live)],
       ['当前阶段', w.phase === 'surge' ? '冲锋期' : w.phase === 'calm' ? '喘息期' : '常规'],
       ['下一只精英', `${Math.max(0, w.eliteTimer).toFixed(0)}s`],
-      ['区域', `${currentZone(w).name}（${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s 后切换）`],
+      ['区域', w.zoneBoss
+        ? `${currentZone(w).name}（Boss 堵门，打倒才换区）`
+        : `${currentZone(w).name}（清场还剩 ${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s）`],
       ['轮次', w.loop > 0 ? `第 ${w.loop + 1} 轮（敌人已叠 ${w.loop} 档）` : '第 1 轮'],
       ['难度', findDifficulty(w.difficulty).name],
       ['角色', findHero(w.hero).name],

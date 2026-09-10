@@ -317,11 +317,18 @@ console.log('== 11. 通关要够远但可达，噩梦要更难 ==');
 {
   const maxed = {};
   for (const p of PERKS) maxed[p.id] = p.maxLevel;
-  const need = ZONE_SECONDS * (ZONES.length - 1);   // 走到最后一个区域至少要活这么久
-  const buffed = SEEDS.map((seed) => play(seed, { perks: maxed }).w.t);
-  const best = Math.max(...buffed);
-  console.log(`  通关需要活到 ${need}s（走进最后一个区域）；满级强化下最长一局 ${best.toFixed(0)}s`);
-  check(best >= need, `满级强化下最长也只活了 ${best.toFixed(0)}s，通关（需要 ${need}s）根本摸不到`);
+  // 通关不再是"活够 ZONE_SECONDS × (区域数-1)"：现在每段交界都有一场 Boss 战，
+  // 必须真的打倒三只 Boss。所以直接看满级强化下有没有人真通关，以及通关在什么时候
+  const runs = RATIO_SEEDS.map((seed) => play(seed, { perks: maxed, maxSeconds: 900 }).w);
+  const wins = runs.filter((w) => w.won).map((w) => w.wonAt);
+  const floor = ZONE_SECONDS * ZONES.length; // 三段清场时间，Boss 战另算，所以通关一定晚于这个数
+  console.log(`  满级强化 ${RATIO_SEEDS.length} 局里通关 ${wins.length} 局`
+    + `${wins.length ? `，通关时刻中位 ${medOf(wins).toFixed(0)}s` : ''}；最长一局 ${Math.max(...runs.map((w) => w.t)).toFixed(0)}s`);
+  check(wins.length >= 1, `满级强化下 ${RATIO_SEEDS.length} 局一次都没通关，通关线太远了`);
+  if (wins.length) {
+    check(medOf(wins) > floor, `通关时刻中位 ${medOf(wins).toFixed(0)}s 不该早于三段清场时间 ${floor}s，区域门禁可能失效了`);
+    check(medOf(wins) < 400, `通关时刻中位 ${medOf(wins).toFixed(0)}s，太久了`);
+  }
 
   // 和角色、轮次那两条一样用中位数：平均值会被偶尔一局 300+ 秒的雪球抬飞，
   // 出现过"噩梦比普通还长"这种结论
