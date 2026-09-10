@@ -49,8 +49,8 @@ const REPLAY_BTN = { x: VIEW_W / 2 - 176, y: 502, w: 150, h: 28 };
 const inReplayBtn = (x, y) => x >= REPLAY_BTN.x && x <= REPLAY_BTN.x + REPLAY_BTN.w
   && y >= REPLAY_BTN.y && y <= REPLAY_BTN.y + REPLAY_BTN.h;
 
-// 首屏的角色卡：点哪张就用哪个角色开局
-const HERO_CARD = { w: 210, h: 132, y: 180, gap: 12, count: 4 };
+// 角色选择屏的卡片。单独一屏之后可以铺得更开，描述不用挤成两行
+const HERO_CARD = { w: 214, h: 250, y: 112, gap: 14, count: 4 };
 function heroCardX(i) {
   const total = HERO_CARD.count * HERO_CARD.w + (HERO_CARD.count - 1) * HERO_CARD.gap;
   return (VIEW_W - total) / 2 + i * (HERO_CARD.w + HERO_CARD.gap);
@@ -63,46 +63,66 @@ function heroCardHit(x, y) {
   return -1;
 }
 
-// 首屏的永久强化按钮：点一下买一级
-const PERK_BTN = { w: 190, h: 46, y: 344, gap: 14, count: 3 };
-function perkBtnX(i) {
-  const total = PERK_BTN.count * PERK_BTN.w + (PERK_BTN.count - 1) * PERK_BTN.gap;
-  return (VIEW_W - total) / 2 + i * (PERK_BTN.w + PERK_BTN.gap);
-}
-function perkBtnHit(x, y) {
-  if (y < PERK_BTN.y || y > PERK_BTN.y + PERK_BTN.h) return -1;
-  for (let i = 0; i < PERK_BTN.count; i++) {
-    if (x >= perkBtnX(i) && x <= perkBtnX(i) + PERK_BTN.w) return i;
+// 商店（局外强化）里的一行 = 一个可买的东西。左栏永久强化，右栏角色解锁
+const SHOP_ROW = { w: 380, h: 54, gap: 10, leftX: 70, rightX: VIEW_W - 70 - 380, y0: 130 };
+const shopRowY = (i) => SHOP_ROW.y0 + i * (SHOP_ROW.h + SHOP_ROW.gap);
+function shopRowHit(x, y, col, count) {
+  const rx = col === 'left' ? SHOP_ROW.leftX : SHOP_ROW.rightX;
+  if (x < rx || x > rx + SHOP_ROW.w) return -1;
+  for (let i = 0; i < count; i++) {
+    if (y >= shopRowY(i) && y <= shopRowY(i) + SHOP_ROW.h) return i;
   }
   return -1;
 }
 
-// 首屏的难度按钮（点一下切换）和帮助按钮（操作说明和兵种图例都收进浮层里，
-// 否则首屏放不下：标题 + 残片 + 4 张角色卡 + 3 个强化 + 难度 + 提示）
-const DIFF_BTN = { x: VIEW_W / 2 - 150, y: 410, w: 180, h: 32 };
-const inDiffBtn = (x, y) => x >= DIFF_BTN.x && x <= DIFF_BTN.x + DIFF_BTN.w
-  && y >= DIFF_BTN.y && y <= DIFF_BTN.y + DIFF_BTN.h;
-const HELP_BTN = { x: VIEW_W / 2 + 30, y: 410, w: 120, h: 32 };
-const inHelpBtn = (x, y) => x >= HELP_BTN.x && x <= HELP_BTN.x + HELP_BTN.w
-  && y >= HELP_BTN.y && y <= HELP_BTN.y + HELP_BTN.h;
+// 主菜单：竖排大按钮。以前所有东西都堆在一屏上（残片 + 4 张角色卡 + 3 个强化 +
+// 难度 + 帮助 + 三行提示），信息太密；现在拆成菜单 → 各功能屏
+const MENU_BTN = { w: 340, h: 40, gap: 10, y0: 150, count: 6 };
+const menuBtnY = (i) => MENU_BTN.y0 + i * (MENU_BTN.h + MENU_BTN.gap);
+const menuBtnX = () => (VIEW_W - MENU_BTN.w) / 2;
+function menuBtnHit(x, y) {
+  if (x < menuBtnX() || x > menuBtnX() + MENU_BTN.w) return -1;
+  for (let i = 0; i < MENU_BTN.count; i++) {
+    if (y >= menuBtnY(i) && y <= menuBtnY(i) + MENU_BTN.h) return i;
+  }
+  return -1;
+}
+
+// 子屏左下角的返回按钮（ESC 也能返回）
+const BACK_BTN = { x: 24, y: VIEW_H - 44, w: 130, h: 30 };
+const inBackBtn = (x, y) => x >= BACK_BTN.x && x <= BACK_BTN.x + BACK_BTN.w
+  && y >= BACK_BTN.y && y <= BACK_BTN.y + BACK_BTN.h;
+
+// 面板分页标签（暂停面板、结算面板都用它）。居中排一排
+const TAB_BTN = { w: 128, h: 30, y: 84, gap: 8 };
+function tabBtnX(i, count) {
+  const total = count * TAB_BTN.w + (count - 1) * TAB_BTN.gap;
+  return (VIEW_W - total) / 2 + i * (TAB_BTN.w + TAB_BTN.gap);
+}
+function tabBtnHit(x, y, count) {
+  if (y < TAB_BTN.y || y > TAB_BTN.y + TAB_BTN.h) return -1;
+  for (let i = 0; i < count; i++) {
+    if (x >= tabBtnX(i, count) && x <= tabBtnX(i, count) + TAB_BTN.w) return i;
+  }
+  return -1;
+}
+
+// 局内 HUD 上的"详情"开关：次要信息（装备、最好成绩、阶段、精英倒计时）收进浮层
+const INFO_BTN = { x: VIEW_W - 150, y: VIEW_H - 40, w: 134, h: 26 };
+const inInfoBtn = (x, y) => x >= INFO_BTN.x && x <= INFO_BTN.x + INFO_BTN.w
+  && y >= INFO_BTN.y && y <= INFO_BTN.y + INFO_BTN.h;
 
 // 暂停面板里的「返回主界面」（退出时会自动存档）
 const EXIT_BTN = { x: VIEW_W / 2 - 90, y: VIEW_H - 52, w: 180, h: 30 };
 const inExitBtn = (x, y) => x >= EXIT_BTN.x && x <= EXIT_BTN.x + EXIT_BTN.w
   && y >= EXIT_BTN.y && y <= EXIT_BTN.y + EXIT_BTN.h;
 
-// 首屏的「继续上一局」和「放弃存档」
-const RESUME_BTN = { x: VIEW_W / 2 - 250, y: 132, w: 400, h: 34 };
-const inResumeBtn = (x, y) => x >= RESUME_BTN.x && x <= RESUME_BTN.x + RESUME_BTN.w
-  && y >= RESUME_BTN.y && y <= RESUME_BTN.y + RESUME_BTN.h;
-const DISCARD_BTN = { x: VIEW_W / 2 + 160, y: 132, w: 90, h: 34 };
-const inDiscardBtn = (x, y) => x >= DISCARD_BTN.x && x <= DISCARD_BTN.x + DISCARD_BTN.w
-  && y >= DISCARD_BTN.y && y <= DISCARD_BTN.y + DISCARD_BTN.h;
-
 export {
   CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit,
   REROLL_BTN, inRerollBtn, banishBtn, banishHit, REPLAY_BTN, inReplayBtn,
-  HERO_CARD, heroCardX, heroCardHit, PERK_BTN, perkBtnX, perkBtnHit,
-  DIFF_BTN, inDiffBtn, HELP_BTN, inHelpBtn,
-  EXIT_BTN, inExitBtn, RESUME_BTN, inResumeBtn, DISCARD_BTN, inDiscardBtn,
+  HERO_CARD, heroCardX, heroCardHit,
+  SHOP_ROW, shopRowY, shopRowHit,
+  MENU_BTN, menuBtnX, menuBtnY, menuBtnHit, BACK_BTN, inBackBtn,
+  TAB_BTN, tabBtnX, tabBtnHit, INFO_BTN, inInfoBtn,
+  EXIT_BTN, inExitBtn,
 };

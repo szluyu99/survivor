@@ -5,7 +5,7 @@ import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, perkBtnHit, PERK_BTN, inDiffBtn, inHelpBtn, inExitBtn, inResumeBtn, inDiscardBtn } from './layout.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuBtnHit, MENU_BTN, inBackBtn, tabBtnHit, inInfoBtn, inExitBtn } from './layout.js';
 import { createHud } from './hud.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk, PERKS, difficultyUnlocked, noteWin } from './meta.js';
@@ -69,11 +69,13 @@ const hud = createHud(ctx, {
   getHero: () => heroId,
   getMeta: () => meta,
   getDifficulty: () => difficulty,
-  getHelpOpen: () => helpOpen,
   getSave: () => saveInfo,
+  getInfoOpen: () => infoOpen,
+  getPauseTab: () => pauseTab,
+  getOverTab: () => overTab,
   getReplayReady: () => !!lastReplay,
 });
-const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawTitle, drawReplayBadge, drawWinPanel, WEAPON_NAME, clock } = hud;
+const { drawHud, drawPausePanel, drawChoices, drawGameOver, drawWinPanel, drawReplayBadge, drawMenu, drawHeroSelect, drawShop, drawHelpScreen, WEAPON_NAME, clock } = hud;
 
 // ?seed=123：固定这一局的随机种子。同一个链接进来的人打到的是同一张地图、同一波刷怪，
 // 分享"我这局"和复现 bug 都靠它。没带参数就按时间戳随机
@@ -128,8 +130,13 @@ const activeHero = () => (isUnlocked(meta, heroId) ? heroId : DEFAULT_HERO);
 // 难度：首屏切换，记在 localStorage 里。没解锁的难度同样兜一层
 const DIFF_KEY = 'survivor.difficulty';
 let difficulty = loadDifficulty();
-let helpOpen = false;     // 首屏的操作说明浮层
+// 局外的屏：menu / heroes / shop / help。以前所有内容挤在一屏上，现在拆开
+let screen = 'menu';
+let menuCursor = 0;
 let winPanel = false;     // 通关那一刻的面板（选继续无尽还是重开）
+let infoOpen = false;     // 局内的详情浮层（Tab）
+let pauseTab = 0;         // 暂停面板：0 装备 / 1 属性 / 2 战况
+let overTab = 0;          // 结算面板：0 总览 / 1 详情
 function loadDifficulty() {
   try {
     const id = findDifficulty(localStorage.getItem(DIFF_KEY)).id;
@@ -236,8 +243,9 @@ function resumeSave() {
 function exitToTitle() {
   if (!world.over) writeSave(world);
   started = false;
+  screen = 'menu';
+  menuCursor = 0;
   uiPaused = false;
-  helpOpen = false;
   winPanel = false;
   player = null;
   keys.clear();
@@ -307,10 +315,62 @@ globalThis.__survivorUi = {
   get started() { return started; },
   get uiPaused() { return uiPaused; },
   get winPanel() { return winPanel; },
-  get helpOpen() { return helpOpen; },
+  get screen() { return screen; },
+  get infoOpen() { return infoOpen; },
+  get pauseTab() { return pauseTab; },
   get hasSave() { return !!saveInfo; },
   get recording() { return recording; },
 };
+
+// 主菜单的条目。note 是右侧的小字，disabled 的条目点了不响应
+function menuItems() {
+  const unlockedHeroes = HEROES.filter((h) => isUnlocked(meta, h.id)).length;
+  const openDiffs = DIFFICULTIES.filter((d) => difficultyUnlocked(meta, d.id)).length;
+  return [
+    { id: 'start', label: '开始游戏', note: `角色：${findHero(activeHero()).name}` },
+    { id: 'heroes', label: '选择角色', note: `已解锁 ${unlockedHeroes}/${HEROES.length}` },
+    {
+      id: 'resume',
+      label: '继续上一局',
+      note: saveInfo ? `${saveInfo.zone} ${clock(saveInfo.t)} · ${saveInfo.heroName}` : '没有存档',
+      disabled: !saveInfo,
+    },
+    { id: 'shop', label: '局外强化', note: `残片 ${meta.shards}` },
+    {
+      id: 'difficulty',
+      label: `难度：${findDifficulty(difficulty).name}`,
+      note: openDiffs > 1 ? '点击切换' : '通关后解锁噩梦',
+      disabled: openDiffs <= 1,
+    },
+    { id: 'help', label: '操作说明', note: 'H' },
+  ];
+}
+
+// 商店里的两类购买。买不动就什么都不发生（价格那一行本来就是灰的）
+function buyPerkAt(i) {
+  const perk = PERKS[i];
+  if (!perk) return;
+  const next = buyPerk(meta, perk.id);
+  if (next) saveMeta(next);
+}
+
+function unlockHeroAt(i) {
+  const h = HEROES[i];
+  if (!h || isUnlocked(meta, h.id)) return;
+  const next = unlockHero(meta, h.id);
+  if (next) { saveMeta(next); setHero(h.id); }
+}
+
+function activateMenu(i) {
+  const it = menuItems()[i];
+  if (!it || it.disabled) return;
+  if (it.id === 'start') beginGame();
+  else if (it.id === 'heroes') screen = 'heroes';
+  else if (it.id === 'resume') resumeSave();
+  else if (it.id === 'shop') screen = 'shop';
+  else if (it.id === 'difficulty') cycleDifficulty();
+  else if (it.id === 'help') screen = 'help';
+}
 
 addEventListener('keydown', (e) => {
   // 首屏只认"明确的开局意图"：1–4 选角色开局，方向键换选中，回车用选中的角色开局。
@@ -318,34 +378,53 @@ addEventListener('keydown', (e) => {
   if (!started) {
     unlock(); // 音频必须在用户手势里启动，这一步不代表开局
     keys.add(e.code);
-    // 帮助浮层开着时先处理关闭，别让下面的开局分支抢走按键
-    if (helpOpen) {
-      if (e.code === 'KeyH' || e.code === 'Escape' || e.code === 'Enter') helpOpen = false;
-      return;
-    }
-    if (e.code === 'KeyH') { helpOpen = true; return; }
-    if (e.code === 'KeyD') { cycleDifficulty(); return; }
-    // C 继续上一局。读档失败（版本不匹配/坏档）就当没这个档，留在首屏
-    if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
-    const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
-    if (hi >= 0 && hi < HERO_CARD.count) {
-      // 没解锁的按一下是"花残片买下来"，买完停在首屏，再按一次才开局
-      if (pickOrUnlockHero(HEROES[hi].id)) beginGame();
-      return;
-    }
-    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-      const cur = HEROES.findIndex((h) => h.id === heroId);
-      const n = Math.min(HEROES.length, HERO_CARD.count);
-      // 只在已解锁的角色之间切换
-      for (let step = 1; step <= n; step++) {
-        const next = HEROES[(cur + (e.code === 'ArrowRight' ? step : n - step) + n) % n];
-        if (isUnlocked(meta, next.id)) { setHero(next.id); break; }
+    if (e.code === 'KeyM') { mutedHint = toggleMute(); return; }
+    // 子屏：ESC 回主菜单
+    if (screen !== 'menu') {
+      if (e.code === 'Escape' || e.code === 'Backspace') { screen = 'menu'; return; }
+      if (screen === 'heroes') {
+        const hi = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+        if (hi >= 0 && hi < HERO_CARD.count) {
+          // 没解锁的角色要去「局外强化」买，这里只提示不扣钱
+          if (isUnlocked(meta, HEROES[hi].id)) { setHero(HEROES[hi].id); beginGame(); }
+          return;
+        }
+        if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+          const cur = HEROES.findIndex((h) => h.id === heroId);
+          const n = Math.min(HEROES.length, HERO_CARD.count);
+          for (let step = 1; step <= n; step++) {
+            const next = HEROES[(cur + (e.code === 'ArrowRight' ? step : n - step) + n) % n];
+            if (isUnlocked(meta, next.id)) { setHero(next.id); break; }
+          }
+          e.preventDefault();
+          return;
+        }
+        if (e.code === 'Enter' || e.code === 'NumpadEnter') beginGame();
+        return;
       }
+      if (screen === 'shop') {
+        // 1–3 买永久强化，4–7 解锁角色
+        const pi = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
+        if (pi >= 0 && pi < PERKS.length) { buyPerkAt(pi); return; }
+        const hi = ['Digit4', 'Digit5', 'Digit6', 'Digit7'].indexOf(e.code);
+        if (hi >= 0 && hi < HEROES.length) { unlockHeroAt(hi); return; }
+        return;
+      }
+      return; // help 屏只认 ESC / 点击
+    }
+    // 主菜单
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      const n = MENU_BTN.count;
+      menuCursor = (menuCursor + (e.code === 'ArrowDown' ? 1 : n - 1)) % n;
       e.preventDefault();
       return;
     }
-    if (e.code === 'Enter' || e.code === 'NumpadEnter') { beginGame(); return; }
-    if (e.code === 'KeyM') mutedHint = toggleMute();
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') { activateMenu(menuCursor); return; }
+    const mi = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'].indexOf(e.code);
+    if (mi >= 0 && mi < MENU_BTN.count) { menuCursor = mi; activateMenu(mi); return; }
+    if (e.code === 'KeyH') { screen = 'help'; return; }
+    if (e.code === 'KeyD') { cycleDifficulty(); return; }
+    if (e.code === 'KeyC' && saveInfo) { resumeSave(); return; }
     return;
   }
   keys.add(e.code);
@@ -373,6 +452,24 @@ addEventListener('keydown', (e) => {
   }
   // 暂停面板里的 Q = 返回主界面（自动存档）。Q 在局内是技能槽 0，所以只在暂停时接管
   if (uiPaused && e.code === 'KeyQ') { exitToTitle(); return; }
+  // 暂停面板分三页：1–3 直达，Tab 循环
+  if (uiPaused) {
+    const t = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
+    if (t >= 0) { pauseTab = t; return; }
+    if (e.code === 'Tab') { pauseTab = (pauseTab + 1) % 3; e.preventDefault(); return; }
+  }
+  // 结算面板分两页
+  if (world.over) {
+    const t = ['Digit1', 'Digit2'].indexOf(e.code);
+    if (t >= 0) { overTab = t; return; }
+    if (e.code === 'Tab') { overTab = (overTab + 1) % 2; e.preventDefault(); return; }
+  }
+  // 局内 Tab = 详情浮层（次要信息都收在里面）
+  if (e.code === 'Tab' && !world.over && !uiPaused) {
+    infoOpen = !infoOpen;
+    e.preventDefault();
+    return;
+  }
   // ESC / P 手动暂停：world.paused 是升级选卡用的，这里单独一个 UI 层的暂停
   if ((e.code === 'Escape' || e.code === 'KeyP') && !world.over && !world.paused) uiPaused = !uiPaused;
   if (world.paused && world.choices) {
@@ -400,25 +497,33 @@ const STICK_R = 46;
 let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
-  // 首屏只有点在角色卡或永久强化按钮上才有反应：点空白处只解锁音频
+  // 局外各屏的点击。点空白处只解锁音频，什么都不发生（以前点任意处就开局，太容易误触）
   if (!started) {
     unlock();
     const at = viewPos(e);
-    if (helpOpen) { helpOpen = false; pointer = null; return; }
-    if (inHelpBtn(at.x, at.y)) { helpOpen = true; pointer = null; return; }
-    if (inDiffBtn(at.x, at.y)) { cycleDifficulty(); pointer = null; return; }
-    if (saveInfo && inDiscardBtn(at.x, at.y)) { clearSave(); pointer = null; return; }
-    if (saveInfo && inResumeBtn(at.x, at.y)) { resumeSave(); pointer = null; return; }
-    const pi = perkBtnHit(at.x, at.y);
-    if (pi >= 0 && pi < PERK_BTN.count) {
-      const next = buyPerk(meta, PERKS[pi].id);
-      if (next) saveMeta(next);
-      pointer = null;
-      return;
-    }
-    const hi = heroCardHit(at.x, at.y);
-    if (hi >= 0 && hi < HEROES.length) {
-      if (pickOrUnlockHero(HEROES[hi].id)) beginGame();
+    if (screen === 'menu') {
+      const mi = menuBtnHit(at.x, at.y);
+      if (mi >= 0) { menuCursor = mi; activateMenu(mi); }
+    } else if (screen === 'heroes') {
+      if (inBackBtn(at.x, at.y)) screen = 'menu';
+      else {
+        const hi = heroCardHit(at.x, at.y);
+        // 没解锁的卡点了不开局：解锁要去「局外强化」屏，避免在这里手滑花掉残片
+        if (hi >= 0 && hi < HEROES.length && isUnlocked(meta, HEROES[hi].id)) {
+          setHero(HEROES[hi].id);
+          beginGame();
+        }
+      }
+    } else if (screen === 'shop') {
+      if (inBackBtn(at.x, at.y)) screen = 'menu';
+      else {
+        const pi = shopRowHit(at.x, at.y, 'left', PERKS.length);
+        if (pi >= 0) buyPerkAt(pi);
+        const hi = shopRowHit(at.x, at.y, 'right', HEROES.length);
+        if (hi >= 0) unlockHeroAt(hi);
+      }
+    } else {
+      screen = 'menu';   // 说明屏点哪儿都返回
     }
     pointer = null;
     return;
@@ -430,9 +535,20 @@ canvas.addEventListener('pointerdown', (e) => {
   if (winPanel) { winPanel = false; pointer = null; return; }
   // 回放中：点一下就退出回放，回到死亡结算
   if (player) { exitReplay(); pointer = null; return; }
+  // 结算面板的分页标签要先判：它盖在最上面
+  if (world.over) {
+    const t = tabBtnHit(pointer.x, pointer.y, 2);
+    if (t >= 0) { overTab = t; pointer = null; return; }
+  }
   const sb = skillBtnHit(pointer.x, pointer.y);
   if (sb >= 0 && !world.over && !world.paused && !uiPaused) {
     skillQueued = sb;
+    pointer = null;
+    return;
+  }
+  // 详情浮层的开关（手机没有 Tab 键）
+  if (inInfoBtn(pointer.x, pointer.y) && !world.over && !world.paused && !uiPaused) {
+    infoOpen = !infoOpen;
     pointer = null;
     return;
   }
@@ -442,7 +558,9 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (uiPaused) {
-    // 返回主界面的判定要排在"点面板任意处继续"之前，否则永远点不到
+    // 换页和返回主界面都要排在"点面板任意处继续"之前，否则永远点不到
+    const t = tabBtnHit(pointer.x, pointer.y, 3);
+    if (t >= 0) { pauseTab = t; pointer = null; return; }
     if (inExitBtn(pointer.x, pointer.y)) { exitToTitle(); pointer = null; return; }
     uiPaused = false;
     pointer = null;
@@ -859,7 +977,10 @@ function frame(now) {
   if (!crashed) {
     try {
       if (!started) {
-        drawTitle();
+        if (screen === 'heroes') drawHeroSelect();
+        else if (screen === 'shop') drawShop();
+        else if (screen === 'help') drawHelpScreen();
+        else drawMenu(menuItems(), menuCursor);
       } else if (player) {
         // 回放：不读输入，按录像逐帧推进，其余（fx、音效、HUD）和正常游戏一样
         acc += dt;

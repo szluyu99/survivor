@@ -12,7 +12,7 @@ import { TERRAIN } from './terrain.js';
 import { TRAITS, CURSES } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
-import { HERO_CARD, PERK_BTN } from './layout.js';
+import { HERO_CARD } from './layout.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
@@ -132,9 +132,7 @@ export function validateContent() {
   for (const h of HEROES) {
     if (!(heroCost(h.id) >= 0)) errors.push(`角色 ${h.id}：解锁价不合法`);
   }
-  if (PERKS.length < PERK_BTN.count) {
-    errors.push(`永久强化只有 ${PERKS.length} 项，首屏按 ${PERK_BTN.count} 个按钮布局，会画出空按钮`);
-  }
+  if (PERKS.length < 1) errors.push('永久强化表是空的，局外强化屏会是空白');
   const perkIds = PERKS.map((p) => p.id);
   if (new Set(perkIds).size !== perkIds.length) errors.push('永久强化 id 有重复');
   for (const p of PERKS) {

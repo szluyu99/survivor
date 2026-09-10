@@ -77,12 +77,19 @@ const { PERKS } = await import('../src/meta.js');
 const { ZONES, ZONE_SECONDS } = await import('../src/zones.js');
 const { DIFFICULTIES } = await import('../src/difficulty.js');
 
+// 帧时间戳必须单调递增：主循环的 dt 会被夹在 [0, 0.25]，
+// 传一个比上次小的 now 会让 dt 变成 0，那一段世界根本不动
+// （用例里写死的绝对时间戳很容易被新插入的用例挤到"过去"，就是这么坑过好几次）
+let lastFrameMs = 0;
 function runFrames(n, startMs = 0, stepMs = 16.7) {
+  // stepMs 为 0 的调用（"同一时刻画几帧"）也要往前挪一帧，否则夹完 dt 恒为 0
+  if (startMs <= lastFrameMs) startMs = lastFrameMs + (stepMs || 16.7);
   for (let i = 0; i < n; i++) {
     const cb = rafCb;
     assert.ok(cb, 'rAF 回调断了，主循环已经停了');
     rafCb = null;
-    cb(startMs + i * stepMs);
+    lastFrameMs = startMs + i * stepMs;
+    cb(lastFrameMs);
     // 主循环里的 try/catch 会吞掉异常，只能靠这个标记发现崩溃
     assert.equal(globalThis.__survivorCrash, undefined, `主循环抛异常了：${globalThis.__survivorCrash?.stack}`);
   }
@@ -93,49 +100,82 @@ test('game.js 能正常 import 并起主循环', () => {
   assert.ok(calls.length > 0, '第一帧之前就该有 resize 的 setTransform');
 });
 
-test('坏存档被静默丢掉：首屏不该出现"继续上一局"', () => {
+test('坏存档被静默丢掉：主菜单里"继续上一局"应该是灰的', () => {
   // 顶部预置了一个 version: -1 的存档
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.some((t) => t.includes('选择角色')), '首屏没画出来');
-  assert.ok(!texts.some((t) => t.includes('继续上一局')), '版本不匹配的存档不该被当成可读档');
+  assert.ok(texts.includes('色块幸存者'), '主菜单没画出来');
+  assert.ok(texts.includes('继续上一局'), '菜单里应该有这一项（只是不可用）');
+  assert.ok(texts.includes('没有存档'), '版本不匹配的存档不该被当成可读档');
   assert.equal(store.has('survivor.save'), false, '坏存档没被清掉');
 });
 
-test('开始前是首屏：目标、角色卡、强化、难度都在', () => {
+test('主菜单只有一排入口，具体内容都在子屏里', () => {
   calls.length = 0;
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('色块幸存者'), '标题没画');
   assert.ok(texts.some((t) => t.includes('通关')), '没写清这一局的目标');
-  assert.ok(texts.some((t) => t.includes('开始')), '没有开始提示');
-  assert.ok(texts.some((t) => t.includes('选择角色')), '角色选择区没画');
-  assert.ok(texts.some((t) => t.includes('残片')), '没显示残片余额');
-  for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
-  // 新存档只有基准角色，其余三张卡要标价格
-  assert.ok(texts.filter((t) => t.includes('需要') && t.includes('片')).length >= 3, '没解锁的角色卡没标价');
-  for (const p of PERKS) assert.ok(texts.some((t) => t.includes(p.name)), `永久强化「${p.name}」没画`);
-  assert.ok(texts.some((t) => t.includes('难度')), '难度按钮没画');
-  // 操作说明和兵种图例收进帮助浮层了，首屏不该再有
-  assert.ok(!texts.includes('冲锋兵'), '兵种图例应该只在帮助浮层里');
+  for (const label of ['开始游戏', '选择角色', '继续上一局', '局外强化', '操作说明']) {
+    assert.ok(texts.includes(label), `菜单少了「${label}」`);
+  }
+  assert.ok(texts.some((t) => t.startsWith('难度：')), '难度那一项没画');
+  assert.ok(texts.some((t) => t.startsWith('残片 ')), '没显示残片余额');
+  // 角色卡、永久强化、兵种图例都搬到子屏了，主菜单上不该再有
+  assert.ok(!texts.includes('冲锋兵'), '兵种图例应该只在说明屏里');
+  assert.ok(!texts.some((t) => t.includes('起手：')), '角色卡应该只在角色选择屏里');
 });
 
-test('首屏按 H 开帮助浮层：操作说明和兵种图例在里面，再按 H 关掉', () => {
+test('主菜单 → 角色选择屏 → 开局', () => {
+  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });   // 选择角色
+  calls.length = 0;
+  runFrames(3);
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.some((t) => t.includes('起手：')), `角色选择屏没画：${texts.slice(0, 10)}`);
+  for (const h of HEROES) assert.ok(texts.includes(h.name), `角色卡「${h.name}」没画`);
+  assert.ok(texts.some((t) => t.includes('未解锁')), '没解锁的卡要标价');
+  // ESC 回主菜单
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  calls.length = 0;
+  runFrames(2);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('色块幸存者'), 'ESC 没回到主菜单');
+});
+
+test('局外强化是独立一屏：永久强化和角色解锁都在里面', () => {
+  fire(handlers.window, 'keydown', { code: 'Digit4', preventDefault() {} });   // 局外强化
+  calls.length = 0;
+  runFrames(3);
+  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('局外强化'), `没进局外强化屏：${texts.slice(0, 10)}`);
+  for (const p of PERKS) assert.ok(texts.some((t) => t.startsWith(p.name)), `永久强化「${p.name}」没画`);
+  assert.ok(texts.includes('角色解锁'), '角色解锁那一栏没画');
+  // 残片不够时点一行不该扣钱
+  const before = JSON.stringify(store.get('survivor.meta') || null);
+  fire(handlers.canvas, 'pointerdown', { pointerId: 21, clientX: 200, clientY: 150 });
+  fire(handlers.canvas, 'pointerup', { pointerId: 21 });
+  runFrames(2);
+  assert.equal(JSON.stringify(store.get('survivor.meta') || null), before, '钱不够却买成了');
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+  runFrames(2);
+});
+
+test('说明屏：操作说明、兵种图例、区域说明都在里面，ESC 回菜单', () => {
   fire(handlers.window, 'keydown', { code: 'KeyH', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
   let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(texts.includes('操作说明'), '帮助浮层没打开');
-  assert.ok(texts.some((t) => t.includes('攻击是自动的')), '帮助里没有操作说明');
-  assert.ok(texts.includes('冲锋兵'), '帮助里没有兵种图例');
-  // 浮层开着时按 H 只是关闭，不该开局
-  fire(handlers.window, 'keydown', { code: 'KeyH', preventDefault() {} });
+  assert.ok(texts.includes('操作说明'), '说明屏没打开');
+  assert.ok(texts.some((t) => t.includes('攻击是自动的')), '说明里没有操作说明');
+  assert.ok(texts.includes('冲锋兵'), '说明里没有兵种图例');
+  assert.ok(texts.some((t) => t.includes('荒野')), '说明里没有区域说明');
+  fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
   calls.length = 0;
   runFrames(3);
   texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-  assert.ok(!texts.includes('操作说明'), '帮助浮层没关掉');
-  assert.ok(texts.some((t) => t.includes('选择角色')), '关掉帮助后应该回到首屏，而不是开局');
+  assert.ok(!texts.includes('操作说明') || texts.includes('色块幸存者'), '说明屏没关掉');
+  assert.ok(texts.includes('色块幸存者'), 'ESC 之后应该回主菜单，而不是开局');
 });
 
 test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间轮转）', () => {
@@ -144,7 +184,7 @@ test('噩梦难度没通关前切不出来（按 D 只在已解锁的难度间�
   runFrames(3);
   const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.some((t) => t.includes(`难度：${DIFFICULTIES[0].name}`)), `新存档只该有基准难度：${texts.slice(0, 14)}`);
-  assert.ok(texts.some((t) => t.includes('选择角色')), '按 D 不该开局');
+  assert.ok(texts.includes('色块幸存者'), '按 D 不该开局');
 });
 
 test('首屏不会误触：按无关的键、点空白处都不开局', () => {
@@ -279,19 +319,58 @@ test('死亡结算能进回放，回放画面在跑，ESC 能退回结算', () =
   assert.ok(texts.includes('阵亡'), 'ESC 之后没回到结算');
 });
 
-test('ESC 暂停后世界停住，面板画得出来，再按继续', () => {
+test('暂停面板分三页：装备 / 属性 / 战况，1–3 换页', () => {
   // 上一个测试已经打到阵亡，阵亡状态下不允许暂停，先空格重开
   fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
   runFrames(5);
   calls.length = 0;
   fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
   runFrames(10);
-  const paused = calls.filter(([m]) => m === 'fillText').map(([, a]) => a[0]);
+  const paused = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(paused.includes('已暂停'), `暂停面板没画出来，画到的文字：${paused.slice(0, 12)}`);
-  assert.ok(paused.some((t) => String(t).includes('装备（')), '装备栏没画出来');
-  assert.ok(paused.some((t) => String(t) === '属性'), '属性栏没画出来');
+  for (const tab of ['1 装备', '2 属性', '3 战况']) {
+    assert.ok(paused.includes(tab), `少了「${tab}」标签`);
+  }
+  assert.ok(paused.some((t) => t.includes('装备（')), '第一页应该是装备');
+  // 第二页：属性
+  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  calls.length = 0;
+  runFrames(4);
+  let now = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(now.includes('伤害倍率'), `属性页没画出来：${now.slice(0, 12)}`);
+  assert.ok(now.includes('词条速查'), '属性页里没有词条速查');
+  // 第三页：战况
+  fire(handlers.window, 'keydown', { code: 'Digit3', preventDefault() {} });
+  calls.length = 0;
+  runFrames(4);
+  now = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(now.includes('区域'), `战况页没画出来：${now.slice(0, 12)}`);
+  assert.ok(now.includes('本局残片'), '战况页里没有残片结算');
+  // 回到第一页，别影响后面的用例
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
   runFrames(10);
+});
+
+test('局内 Tab 开详情浮层：装备、阶段、精英倒计时都在里面', () => {
+  calls.length = 0;
+  runFrames(3);
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('详情（Tab）'), `HUD 上没有详情开关：${texts.slice(0, 12)}`);
+  assert.ok(!texts.includes('本局详情'), '详情浮层默认应该是收起的');
+  fire(handlers.window, 'keydown', { code: 'Tab', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(texts.includes('本局详情'), '详情浮层没打开');
+  for (const k of ['装备', '难度', '轮次', '下一只精英', '最好成绩']) {
+    assert.ok(texts.includes(k), `详情里少了「${k}」`);
+  }
+  fire(handlers.window, 'keydown', { code: 'Tab', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  assert.ok(!texts.includes('本局详情'), '再按 Tab 应该收起来');
 });
 
 test('点击左下角的暂停框也能暂停（手机没有 ESC）', () => {
@@ -465,14 +544,43 @@ function texts() {
   return calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
 }
 
-// 确保当前是"活着的一局"。前面的用例可能把人玩死了（阵亡状态下 ESC 不生效），
-// 空格在阵亡界面才是重开
-function ensureAlive(ms) {
-  if (globalThis.__survivorWorld.over) {
-    fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
-    runFrames(3, ms, 0);
+// 拿到"一局活着的游戏"。这份烟测是一条长会话，前面的用例可能把状态留在
+// 阵亡 / 暂停 / 通关面板 / 主菜单上，后面的用例不该去猜自己接手时是什么状态
+function freshRun() {
+  const ui = globalThis.__survivorUi;
+  for (let i = 0; i < 8; i++) {
+    const w = globalThis.__survivorWorld;
+    if (!ui.started) {
+      // 主菜单：1 = 开始游戏；子屏先 ESC 回菜单
+      fire(handlers.window, 'keydown', { code: ui.screen === 'menu' ? 'Digit1' : 'Escape', preventDefault() {} });
+    } else if (ui.winPanel) {
+      fire(handlers.window, 'keydown', { code: 'Enter', preventDefault() {} });
+    } else if (w.over) {
+      fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
+    } else if (ui.uiPaused) {
+      fire(handlers.window, 'keydown', { code: 'Escape', preventDefault() {} });
+    } else {
+      w.player.hp = w.player.maxHp;
+      return true;
+    }
+    runFrames(3);
   }
-  return !globalThis.__survivorWorld.over;
+  return false;
+}
+
+// 跑一段"确定活得下来"的游戏：后期一秒挨的伤害就能超过一条命，只靠补血不够，
+// 所以整段设成无敌，跑完再把血量还原
+function warmUp(seconds) {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.maxHp = w.player.hp = 1e9;
+  for (let i = 0; i < seconds * 60; i++) {
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1);
+  }
+  w.player.maxHp = realMaxHp;
+  w.player.hp = realMaxHp;
+  return w;
 }
 
 // 打开暂停面板。选卡界面弹着时 ESC 不生效（world.paused 优先），所以先把卡选掉再试。
@@ -491,15 +599,10 @@ function openPause(ms) {
 }
 
 test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () => {
-  assert.ok(ensureAlive(4.19e6), '重开失败，测不了');
-  const w = globalThis.__survivorWorld;
-  // 先玩一会儿攒出可识别的进度。中途把血补满：这条用例测的是存档，
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  // 先玩一会儿攒出可识别的进度。这条用例测的是存档，
   // 不该因为"这一局运气不好 15 秒就死了"而变红
-  for (let i = 0; i < 60 * 15; i++) {
-    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
-    if (i % 30 === 0) w.player.hp = w.player.maxHp;
-    runFrames(1, 4.2e6 + i * 16.7, 0);
-  }
+  const w = warmUp(12);
   assert.ok(w.t > 5, '没跑起来');
 
   // 暂停 → 面板里要有返回主界面的入口 → 按 Q 退出
@@ -521,7 +624,9 @@ test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () =>
   runFrames(3);
   const w2 = globalThis.__survivorWorld;
   assert.ok(Math.abs(w2.t - tAtExit) < 1, `读档后时间没接上：退出时 ${tAtExit.toFixed(1)}s，读档后 ${w2.t.toFixed(1)}s`);
-  assert.equal(w2.kills, killsAtExit, '读档后击杀数没接上');
+  // 读档后又跑了几帧才检查，期间可能又杀掉一两只，所以只要求"接着上"而不是完全相等
+  assert.ok(w2.kills >= killsAtExit && w2.kills <= killsAtExit + 5,
+    `读档后击杀数没接上：退出时 ${killsAtExit}，读档后 ${w2.kills}`);
   assert.equal(store.has('survivor.save'), false, '读出来之后应该消档，避免反复读同一个档');
   calls.length = 0;
   runFrames(3);
@@ -529,9 +634,8 @@ test('暂停里按 Q 返回主界面会存档，首屏按 C 能接着打', () =>
 });
 
 test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
-  assert.ok(ensureAlive(4.49e6), '重开失败，测不了');
-  const w = globalThis.__survivorWorld;
-  w.player.hp = w.player.maxHp;   // 同上：先保证活着，死是后面故意让它死
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  const w = warmUp(3);
   // 先退出到主界面写一个档，再读回来把人玩死
   assert.ok(openPause(4.5e6), '打不开暂停面板');
   fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
@@ -543,7 +647,7 @@ test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
   w2.player.hp = 1;
   for (let i = 0; i < 60 * 60 && !w2.over; i++) {
     if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
-    runFrames(1, 4.6e6 + i * 16.7, 0);
+    runFrames(1);
   }
   assert.ok(w2.over, '没死成');
   assert.equal(store.has('survivor.save'), false, '阵亡后存档还在');
@@ -610,6 +714,9 @@ test('长局结算图表会合并时间桶（不然柱子和标签会叠在一�
     // （把血设成 0 并不会死，over 是在受到伤害那一刻才置的）
     w.log.killsPer15s = Array.from({ length: 40 }, (_, i) => i + 1);
     w.over = true;
+    // 图表挪到结算的第二页了，先切过去
+    runFrames(2, 5.19e6, 0);
+    fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
     calls.length = 0;
     runFrames(4, 5.2e6, 0);
     const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
@@ -625,23 +732,39 @@ test('长局结算图表会合并时间桶（不然柱子和标签会叠在一�
     assert.ok(texts.includes(`${step * bars}s`), `最后一根柱子的标签应该是 ${step * bars}s`);
     assert.ok(!texts.includes(`${step * (bars + 1)}s`), '柱子画多了');
   } finally {
+    // 换回总览页再收尾：分页状态是全局的，留在详情页会让后面的用例看错面板
+    fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1, 5.21e6, 0);
     w.log.killsPer15s = realBuckets;
     w.over = realOver;
   }
 });
 
 test('死亡结算画出伤害来源、承受来源和击杀柱图', () => {
-  // 让它一路打到死
-  for (let i = 0; i < 200 * 60; i++) {
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  // 先打一会儿攒出伤害记录，再把血压到 1 让它确定性地死
+  for (let i = 0; i < 60 * 20; i++) {
     if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
-    runFrames(1, 900000 + i * 16.7, 0);
-    const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
-    if (texts.includes('阵亡')) break;
-    calls.length = 0;
+    if (i % 30 === 0) globalThis.__survivorWorld.player.hp = globalThis.__survivorWorld.player.maxHp;
+    runFrames(1);
   }
+  globalThis.__survivorWorld.player.hp = 1;
+  for (let i = 0; i < 60 * 60 && !globalThis.__survivorWorld.over; i++) {
+    if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+    runFrames(1);
+  }
+  // 死了之后按 1 明确回到总览页（分页状态是全局的）
+  fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
+  calls.length = 0;
   runFrames(3);
-  const texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
+  let texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('阵亡'), '没死成，结算面板没出来');
+  assert.ok(texts.some((t) => t.includes('本局装备')), '总览页没画装备');
+  // 详情页（第二页）才有三张图表
+  fire(handlers.window, 'keydown', { code: 'Digit2', preventDefault() {} });
+  calls.length = 0;
+  runFrames(3);
+  texts = calls.filter(([m]) => m === 'fillText').map(([, a]) => String(a[0]));
   assert.ok(texts.includes('伤害来源'), '没画伤害来源');
   assert.ok(texts.includes('承受伤害'), '没画承受伤害');
   assert.ok(texts.some((t) => /^每 \d+ 秒击杀$/.test(t)), '没画击杀柱图');
@@ -716,8 +839,7 @@ test('固定步长：帧间隔忽快忽慢也不会让世界跑得更快或更�
 });
 
 test('Q/E 和右下角按钮都能放技能，HUD 画出技能槽', () => {
-  fire(handlers.window, 'keydown', { code: 'Space', preventDefault() {} });
-  runFrames(3);
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
   calls.length = 0;
   fire(handlers.window, 'keydown', { code: 'KeyQ', preventDefault() {} });
   runFrames(3);
