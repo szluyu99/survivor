@@ -83,12 +83,17 @@ export function tickTerrain(w, dt, ctx) {
 // 把一个圆形实体推出所有实心地形。返回是否发生过推挤
 export function resolveBlock(w, ent, radius) {
   let pushed = false;
-  for (const t of w.terrain) {
+  const list = w.terrain;
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i];
     if (!t.active || !TERRAIN[t.kind].blocks) continue;
     const dx = ent.x - t.x, dy = ent.y - t.y;
     const min = t.r + radius;
-    const d = Math.hypot(dx, dy);
-    if (d < min && d > 0.0001) {
+    if (dx > min || dx < -min || dy > min || dy < -min) continue;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= min * min) continue;
+    const d = Math.sqrt(d2);
+    if (d > 0.0001) {
       const k = (min - d) / d;
       ent.x += dx * k;
       ent.y += dy * k;
@@ -101,19 +106,27 @@ export function resolveBlock(w, ent, radius) {
 // 泥地减速：返回速度倍率
 export function slowFactor(w, x, y) {
   let mul = 1;
-  for (const t of w.terrain) {
+  const list = w.terrain;
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i];
     if (!t.active || t.kind !== 'mud') continue;
-    if (Math.hypot(x - t.x, y - t.y) <= t.r) mul = Math.min(mul, TERRAIN.mud.slow);
+    const dx = x - t.x, dy = y - t.y;
+    if (dx > t.r || dx < -t.r || dy > t.r || dy < -t.r) continue;
+    if (dx * dx + dy * dy <= t.r * t.r) mul = Math.min(mul, TERRAIN.mud.slow);
   }
   return mul;
 }
 
 // 子弹是否撞到实心地形（宝箱要吃伤害，所以单独返回它）
 export function bulletHitTerrain(w, b) {
-  for (const t of w.terrain) {
+  // 每发子弹每帧都要来一趟（后期 400 发 × 35 块地形），所以先 AABB 粗筛
+  const list = w.terrain;
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i];
     if (!t.active || !TERRAIN[t.kind].blocks) continue;
     const rr = t.r + b.r;
     const dx = t.x - b.x, dy = t.y - b.y;
+    if (dx > rr || dx < -rr || dy > rr || dy < -rr) continue;
     if (dx * dx + dy * dy <= rr * rr) return t;
   }
   return null;

@@ -131,9 +131,15 @@ function tickBoss(w, e, dt, ctx) {
   // 不然每次命中都要扫一遍敌人池（Boss 一帧能被打十几次）
   if (arch.guard) {
     let guards = 0;
-    for (const o of w.enemies) {
+    const radius = arch.guard.radius;
+    const r2 = radius * radius;
+    const list = w.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
       if (!o.active || o === e || o.kind !== arch.guard.kind) continue;
-      if (Math.hypot(o.x - e.x, o.y - e.y) <= arch.guard.radius) guards++;
+      const dx = o.x - e.x, dy = o.y - e.y;
+      if (dx > radius || dx < -radius || dy > radius || dy < -radius) continue;
+      if (dx * dx + dy * dy <= r2) guards++;
     }
     e.armor = guards > 0 ? arch.guard.damageTaken : 0;
   }

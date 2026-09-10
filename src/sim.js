@@ -247,13 +247,18 @@ function killEnemy(w, e) {
   dropGem(w, x, y, gem);
 }
 
+// 热循环全部用索引 for，不用 for...of：后者每次进入都要分配一个迭代器对象，
+// 600 只怪 × 每帧两三个这样的循环 = 每帧几千字节垃圾（实测 3.5KB/帧 → 28B/帧）。
+// 顺便都用"先 AABB 粗筛、再比平方距离"的写法，省掉绝大多数开方。
 // 武器 tick 用的接口，避免 weapons.js 反过来 import sim.js
 const api = {
   dmgMul: (w) => w.stats.damageMul,
   rateMul: (w) => w.stats.rateMul,
   nearestEnemy(w, x, y) {
     let best = null, bestD = Infinity;
-    for (const e of w.enemies) {
+    const list = w.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y;
       const d = dx * dx + dy * dy;
@@ -285,9 +290,12 @@ const api = {
   nearestN(w, x, y, n, maxDist) {
     const found = [];
     const max2 = maxDist * maxDist;
-    for (const e of w.enemies) {
+    const list = w.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y;
+      if (dx > maxDist || dx < -maxDist || dy > maxDist || dy < -maxDist) continue;
       const d = dx * dx + dy * dy;
       if (d <= max2) found.push({ e, d });
     }
@@ -297,9 +305,12 @@ const api = {
   // 单次范围伤害，无视 orbCd（爆炸不该被光环的冷却吃掉）
   blast(w, x, y, r, dmg0, src = '') {
     emit(w, 'blast', x, y, r);
-    for (const e of w.enemies) {
+    const list = w.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
       if (!e.active) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
+      if (dx > rr || dx < -rr || dy > rr || dy < -rr) continue;
       if (dx * dx + dy * dy <= rr * rr) damageEnemy(w, e, dmg0, src);
     }
   },
@@ -321,9 +332,12 @@ const api = {
   },
   // 持续伤害区域：每个敌人有独立冷却，不然一帧能被打十几下
   damageArea(w, x, y, r, dmg0, cd, src = '') {
-    for (const e of w.enemies) {
+    const list = w.enemies;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
       if (!e.active || e.orbCd > 0) continue;
       const dx = e.x - x, dy = e.y - y, rr = e.r + r;
+      if (dx > rr || dx < -rr || dy > rr || dy < -rr) continue;
       if (dx * dx + dy * dy <= rr * rr) {
         const [dmg, crit] = rollDmg(w, dmg0);
         const real = Math.min(dmg, e.hp);
@@ -435,11 +449,13 @@ export function update(w, dt, input) {
   tickSpawns(w, dt, enemyCtx);
 
   // 光球每帧重算位置，先全部回收
-  for (const o of w.orbs) o.active = false;
+  for (let i = 0; i < w.orbs.length; i++) w.orbs[i].active = false;
   for (const inst of w.weapons) findWeapon(inst.id).tick(w, inst, dt, api);
 
   // 敌人追人 + 接触伤害
-  for (const e of w.enemies) {
+  const enemies = w.enemies;
+  for (let ei = 0; ei < enemies.length; ei++) {
+    const e = enemies[ei];
     if (!e.active) continue;
     const ex = p.x - e.x, ey = p.y - e.y;
     const d = Math.hypot(ex, ey) || 1;
@@ -451,13 +467,15 @@ export function update(w, dt, input) {
       if (e.orbCd > 0) e.orbCd -= dt;
       continue;
     }
-    const before = { x: e.x, y: e.y };
+    // 记住位移前的位置。这里以前是 `const before = { x, y }`——每只怪每帧一个临时对象，
+    // 600 只怪就是每帧 600 次分配
+    const bx0 = e.x, by0 = e.y;
     tickEnemy(w, e, dt, enemyCtx);
     // 泥地和时缓都是"把这一帧的位移按倍率折回去"，两者叠乘
     const emul = slowFactor(w, e.x, e.y) * (w.slowT > 0 ? w.slowMul : 1);
     if (emul < 1) {
-      e.x = before.x + (e.x - before.x) * emul;
-      e.y = before.y + (e.y - before.y) * emul;
+      e.x = bx0 + (e.x - bx0) * emul;
+      e.y = by0 + (e.y - by0) * emul;
     }
     resolveBlock(w, e, e.r);
     if (e.flash > 0) e.flash -= dt;
@@ -475,7 +493,9 @@ export function update(w, dt, input) {
   }
 
   // 子弹：朴素两两检测，几百个实体够用了
-  for (const b of w.bullets) {
+  const bullets = w.bullets;
+  for (let bi = 0; bi < bullets.length; bi++) {
+    const b = bullets[bi];
     if (!b.active) continue;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
@@ -528,9 +548,11 @@ export function update(w, dt, input) {
       // 基本没有敌人会正好踩上（实测 20 秒只炸出 3 个击杀）
       const trigger = b.blast * 0.5;
       let boom = false;
-      for (const e of w.enemies) {
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i];
         if (!e.active) continue;
         const dx = e.x - b.x, dy = e.y - b.y, rr = trigger + e.r;
+        if (dx > rr || dx < -rr || dy > rr || dy < -rr) continue;
         if (dx * dx + dy * dy <= rr * rr) { boom = true; break; }
       }
       if (boom) {
@@ -560,10 +582,14 @@ export function update(w, dt, input) {
       }
       continue;
     }
-    for (const e of w.enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
       if (!e.active || e.lastBulletId === b.id) continue; // 穿透弹不重复打同一个目标
       const rr = e.r + b.r;
       const ddx = e.x - b.x, ddy = e.y - b.y;
+      // 先用 AABB 粗筛：600 只怪 × 400 发子弹是每帧最热的一段，
+      // 两次比较就能把绝大多数组合挡掉
+      if (ddx > rr || ddx < -rr || ddy > rr || ddy < -rr) continue;
       if (ddx * ddx + ddy * ddy <= rr * rr) {
         if (b.blast > 0) {
           api.blast(w, b.x, b.y, b.blast, b.dmg, b.src);
@@ -582,7 +608,9 @@ export function update(w, dt, input) {
   }
 
   // 经验球吸附与结算
-  for (const g of w.gems) {
+  const gems = w.gems;
+  for (let gi = 0; gi < gems.length; gi++) {
+    const g = gems[gi];
     if (!g.active) continue;
     const gx = p.x - g.x, gy = p.y - g.y;
     const d = Math.hypot(gx, gy) || 1;
