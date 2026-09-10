@@ -21,6 +21,7 @@ npm run balance    # 平衡回归报告（给人看的）：武器强度、局�
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 105 秒
 npm run check:quick # 快速档：3 个 seed + 跳过两组重型检查，约 20 秒。样本量敏感的断言降级成提醒
 npm run size       # 体积检查：零构建，源码原样下发，gzip 后不许超 220KB
+npm run selftest   # 确定性自检：录 3 局再原地重演，比对结果（约 2 秒）
 npm run validate   # 内容表结构校验
 npm run arch       # 架构约束：确定性、依赖方向、颜色来源、fx 事件登记（约 0.1 秒）
 node tools/make-og.mjs   # 重新生成分享卡片图 og.png
@@ -89,8 +90,9 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 渲染层：
 
 - `src/game.js` —— 只剩装配和主循环：输入、固定步长累加器、异常兜底。
-- `src/render` 相关：`src/shapes.js`（形状/描边/网格/暗角）、`src/hud.js`（HUD、暂停面板、
-  选卡、死亡结算、首屏）、`src/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、
+- `src/render` 相关：`src/shapes.js`（形状/描边/网格/暗角）、`src/hud.js`（局内 HUD、暂停/选卡/战利品/结算面板）、
+  `src/screens.js`（局外的几屏：主菜单 / 开局前的角色屏 / 局外强化 / 成就与统计 / 操作说明——
+  它和局内 HUD 的关注点完全不同，前者一帧只画一屏、几乎只是排版，后者每帧都画、要抠调用数）、`src/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、
   `src/layout.js`（UI 命中区域，绘制和点击判定共用一套坐标）。
 - `src/progress.js` —— 局外进度的持久化层：最好成绩、选中的角色、残片与解锁、难度。
   只跟 localStorage 和 `meta.js` 的纯函数打交道，不碰世界也不碰画面；每个写入都吞掉异常

@@ -51,8 +51,38 @@ if (cmd === 'record') {
     console.log('不一致：世界行为变了（可能是有意的数值调整，也可能是回归）');
     process.exit(1);
   }
+} else if (cmd === 'selftest') {
+  // 确定性自检：录几局再原地重演，比对结果。
+  // 以前录像只在本地手跑，CI 里没有任何人验"世界还是确定性的"——
+  // 而这条性质是快照、存档、平衡工具、崩溃复现全部的地基，坏了却不会有任何报错
+  const cases = [
+    { seed: 7, seconds: 90 },
+    { seed: 21, seconds: 90, hero: 'ranger' },
+    { seed: 33, seconds: 60, hero: 'warden' },
+  ];
+  let bad = 0;
+  for (const c of cases) {
+    const { replay, world } = record(c.seed, c.seconds, c.hero);
+    const { ok, expected, actual } = verify(replay);
+    const tag = `seed ${c.seed} / ${c.seconds}s / ${replay.hero}`;
+    if (ok) {
+      console.log(`  ${tag}：一致（${world.t.toFixed(1)}s ${world.kills} 杀 ${replay.steps.length} 段输入）`);
+    } else {
+      bad++;
+      console.error(`  ${tag}：不一致`);
+      console.error(`    期望 ${JSON.stringify(expected)}`);
+      console.error(`    实际 ${JSON.stringify(actual)}`);
+    }
+  }
+  if (bad) {
+    console.error(`确定性自检失败：${bad}/${cases.length} 局重演不出同一结果。`
+      + '常见原因是逻辑层用了 Math.random / Date.now，或者往世界里加了快照没覆盖的字段');
+    process.exit(1);
+  }
+  console.log(`确定性自检通过（${cases.length} 局都能逐字节重演）`);
 } else {
   console.error('用法：node tools/replay.mjs record [seed] [seconds] [out.json] [hero]');
   console.error('      node tools/replay.mjs verify run.json');
+  console.error('      node tools/replay.mjs selftest');
   process.exit(2);
 }

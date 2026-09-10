@@ -25,6 +25,8 @@ jobs:
         run: npm run arch
       - name: 体积检查（零构建，源码原样下发）
         run: npm run size
+      - name: 确定性自检（录几局再原地重演，比对结果）
+        run: npm run selftest
       - name: 平衡回归断言（每级升级必须有用、一局必须结束、帧率无关性等）
         run: npm run check
       - name: 平衡回归报告（只输出，不做断言）

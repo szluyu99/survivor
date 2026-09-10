@@ -29,7 +29,7 @@ jobs:
       - name: 跑测试
         run: npm test
       - name: 内容与平衡检查
-        run: npm run validate && npm run arch && npm run size && npm run check
+        run: npm run validate && npm run arch && npm run size && npm run selftest && npm run check
       - uses: actions/configure-pages@v5
         with:
           # 仓库还没开 Pages 时，让 action 自己去开（否则报 Get Pages site failed / Not Found）
