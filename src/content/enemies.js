@@ -1,8 +1,8 @@
 // 敌人：兵种表、刷怪、各兵种行为（含 Boss 状态机）、波次节奏。
 // 这个模块不 import sim.js——需要的能力（生成子弹、登记 fx 事件、从池里取对象）
 // 都由 sim.js 通过 ctx 注入，这样两边就不会形成循环依赖。
-import { VIEW_W, VIEW_H } from './view.js';
-import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from './tuning.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
+import { SPAWN, WAVE, SPAWN_TIMERS, BOSS } from '../core/tuning.js';
 import { zoneWeight, zoneBurst, zoneBoss, loopScale } from './zones.js';
 import { BOSS_KINDS, findBossKind, rollPlan, DEFAULT_BOSS } from './bosses.js';
 import { ELITE_KINDS, findEliteKind, rollElite, DEFAULT_ELITE } from './elites.js';

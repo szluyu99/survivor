@@ -1,13 +1,13 @@
 // 内容表与调参表的契约测试：用新的公共夹具写（test/fixtures.mjs）
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateContent } from '../src/validate.js';
-import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, AWAKEN_WEAPONS, findWeapon } from '../src/weapons.js';
-import { SKILLS, findSkill } from '../src/skills.js';
-import { loopOf, loopScale } from '../src/zones.js';
-import { PLAYER, DASH, XP, SPAWN, WAVE, SPAWN_TIMERS, BOSS, TERRAIN_TUNING, CARDS } from '../src/tuning.js';
+import { validateContent } from '../src/content/validate.js';
+import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, AWAKEN_WEAPONS, findWeapon } from '../src/content/weapons.js';
+import { SKILLS, findSkill } from '../src/content/skills.js';
+import { loopOf, loopScale } from '../src/content/zones.js';
+import { PLAYER, DASH, XP, SPAWN, WAVE, SPAWN_TIMERS, BOSS, TERRAIN_TUNING, CARDS } from '../src/core/tuning.js';
 import { labWorld, putEnemy, putTerrain, run, movers, countActive } from './fixtures.mjs';
-import { createWorld, HEROES, findHero, DEFAULT_HERO, ZONES, ZONE_SECONDS, currentZone, update, chooseUpgrade } from '../src/sim.js';
+import { createWorld, HEROES, findHero, DEFAULT_HERO, ZONES, ZONE_SECONDS, currentZone, update, chooseUpgrade } from '../src/core/sim.js';
 
 test('所有内容表都通过校验', () => {
   const errors = validateContent();

@@ -7,17 +7,24 @@ import { gzipSync } from 'node:zlib';
 const ROOT = new URL('../', import.meta.url);
 const LIMIT_KB = 220;
 
-const files = [];
-for (const dir of ['src', '']) {
+// src 现在分了层级目录，要递归走
+function collect(dir) {
+  const out = [];
   const base = new URL(dir ? `${dir}/` : '', ROOT);
   for (const f of readdirSync(base)) {
-    if (dir === '' && !/\.(html|css)$/.test(f)) continue;
-    if (dir === 'src' && !f.endsWith('.js')) continue;
     const url = new URL(f, base);
-    if (statSync(url).isDirectory()) continue;
-    files.push({ name: dir ? `${dir}/${f}` : f, buf: readFileSync(url) });
+    const name = dir ? `${dir}/${f}` : f;
+    if (statSync(url).isDirectory()) {
+      if (dir.startsWith('src')) out.push(...collect(name));
+      continue;
+    }
+    if (dir === '' && !/\.(html|css)$/.test(f)) continue;
+    if (dir.startsWith('src') && !f.endsWith('.js')) continue;
+    out.push({ name, buf: readFileSync(url) });
   }
+  return out;
 }
+const files = [...collect('src'), ...collect('')];
 
 let raw = 0;
 let gz = 0;

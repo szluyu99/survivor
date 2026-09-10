@@ -12,14 +12,14 @@ import { TERRAIN } from './terrain.js';
 import { TRAITS, CURSES, LOOT } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
-import { HERO_CARD } from './layout.js';
+import { HERO_CARD } from '../view/layout.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
 import { ELITE_KINDS } from './elites.js';
 import { DIFFICULTIES, WIN_BONUS } from './difficulty.js';
 import { ACHIEVEMENTS, defaultStats } from './achievements.js';
-import { TERRAIN_TUNING } from './tuning.js';
+import { TERRAIN_TUNING } from '../core/tuning.js';
 
 function checkWeapon(def, errors) {
   const at = `武器 ${def.id}`;

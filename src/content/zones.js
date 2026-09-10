@@ -7,8 +7,8 @@
 //
 // 写法和其他内容表一致：一条配置就是一个区域。weights 是"在基础权重上乘多少"，
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
-import { TERRAIN_TUNING, LOOP } from './tuning.js';
-import { P } from './palette.js';
+import { TERRAIN_TUNING, LOOP } from '../core/tuning.js';
+import { P } from '../shared/palette.js';
 
 // 每个区域的"清场时长"：走完这么久，本区域的 Boss 就来堵门（见 tickZone）。
 // 打倒它才进下一段，所以一段的实际长度是 ZONE_SECONDS + Boss 战时长。

@@ -3,7 +3,7 @@
 // 改完色板后重新跑：node tools/make-og.mjs
 import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
-import { P } from '../src/palette.js';
+import { P } from '../src/shared/palette.js';
 
 const W = 1200, H = 630;
 const buf = Buffer.alloc(W * H * 3);

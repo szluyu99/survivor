@@ -3,15 +3,15 @@
 // 从 hud.js 拆出来是因为它已经 1200 行，而这两拨东西的关注点完全不同：
 // 局内 HUD 每帧都画、要抠调用数；局外屏一帧只画一个、几乎只是排版。
 // hud.js 负责把它们组装起来对外，所以 game.js 那边的调用方式没有变化。
-import { P } from './palette.js';
-import { VIEW_W, VIEW_H } from './view.js';
+import { P } from '../shared/palette.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 import { HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_CARD, menuCardRect, BACK_BTN, START_BTN } from './layout.js';
-import { HEROES } from './heroes.js';
-import { PERKS, perkCost, heroCost, isUnlocked, difficultyUnlocked } from './meta.js';
-import { ZONES } from './zones.js';
-import { ACHIEVEMENTS, achievementRows, statRows, doneCount } from './achievements.js';
-import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
-import { KINDS } from './enemies.js';
+import { HEROES } from '../content/heroes.js';
+import { PERKS, perkCost, heroCost, isUnlocked, difficultyUnlocked } from '../content/meta.js';
+import { ZONES } from '../content/zones.js';
+import { ACHIEVEMENTS, achievementRows, statRows, doneCount } from '../content/achievements.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from '../content/difficulty.js';
+import { KINDS } from '../content/enemies.js';
 
 // ui: { shapes, best, meta, getHero, getDifficulty, clock, WEAPON_NAME }
 export function createScreens(ctx, ui) {

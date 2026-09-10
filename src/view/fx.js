@@ -1,10 +1,10 @@
 // 表现层特效：粒子、伤害跳字、闪电折线、震屏、闪白。
 // 逻辑层（sim.js）只往 w.fx 里登记"发生了什么"，这里消费成画面和声音。
 // 全部走对象池，帧里不 new。
-import { P } from './palette.js';
+import { P } from '../shared/palette.js';
 import { sfx } from './audio.js';
-import { currentZone, zoneBoss as zoneBossId } from './zones.js';
-import { findBossKind } from './bosses.js';
+import { currentZone, zoneBoss as zoneBossId } from '../content/zones.js';
+import { findBossKind } from '../content/bosses.js';
 
 // onDeath / onWin 由 game.js 传进来（写最好成绩、记通关解锁），fx 模块自己不碰 localStorage
 export function createFx({ onDeath, onWin } = {}) {

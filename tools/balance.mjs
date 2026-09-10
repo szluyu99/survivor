@@ -1,7 +1,7 @@
 // 平衡回归报告：改完数值跑 `npm run balance`，一眼看出哪把武器废了、局长有没有跑偏。
 // 之前每次调数值都手写一次性的 node -e 脚本，这里固化下来。
-import { createWorld, update, chooseUpgrade, KINDS, HEROES, ZONES } from '../src/sim.js';
-import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
+import { createWorld, update, chooseUpgrade, KINDS, HEROES, ZONES } from '../src/core/sim.js';
+import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/content/weapons.js';
 
 const DT = 1 / 60;
 const SEEDS = [1, 5, 9, 13, 21];

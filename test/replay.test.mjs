@@ -6,10 +6,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, update, chooseUpgrade, DEFAULT_HERO, ZONE_SECONDS } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, DEFAULT_HERO, ZONE_SECONDS } from '../src/core/sim.js';
 import {
   snapshot, restore, createRecorder, playback, verify, quantizeInput, REPLAY_VERSION, MIGRATABLE_FROM,
-} from '../src/replay.js';
+} from '../src/core/replay.js';
 
 const DT = 1 / 60;
 const circling = (i) => ({ dx: Math.cos((i / 60) * 1.6), dy: Math.sin((i / 60) * 1.6) });

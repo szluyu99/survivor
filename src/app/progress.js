@@ -3,13 +3,13 @@
 // 单独成文件是因为 game.js 同时扛着输入 / 主循环 / 渲染编排 / 局外状态四件事，
 // 而这一块的特征很清楚：只跟 localStorage 和 meta.js 的纯函数打交道，不碰世界、不碰画面。
 // 每个 setter 都吞掉写入异常——无痕模式和容量满都会抛，但"存不下"不该让游戏崩。
-import { findHero, DEFAULT_HERO } from './heroes.js';
-import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
+import { findHero, DEFAULT_HERO } from '../content/heroes.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from '../content/difficulty.js';
 import {
   defaultMeta, normalizeMeta, earnShards, isUnlocked, unlockHero, buyPerk,
   difficultyUnlocked, noteWin,
-} from './meta.js';
-import { recordRun } from './achievements.js';
+} from '../content/meta.js';
+import { recordRun } from '../content/achievements.js';
 
 const BEST_KEY = 'survivor.best';
 const HERO_KEY = 'survivor.hero';

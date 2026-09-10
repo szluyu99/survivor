@@ -1,6 +1,6 @@
 // UI 布局与命中区域。抽出来是因为绘制（hud.js）和点击判定（game.js 的输入）
 // 必须共用同一套坐标，分散写两份迟早会不一致。
-import { VIEW_W, VIEW_H } from './view.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 
 const CARD_W = 200, CARD_H = 150, CARD_Y = VIEW_H / 2 - CARD_H / 2;
 const PAUSE_BTN = { x: 16, y: VIEW_H - 40, w: 132, h: 26 };

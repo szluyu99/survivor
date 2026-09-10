@@ -13,7 +13,7 @@
     "record": "node tools/replay.mjs record",
     "replay": "node tools/replay.mjs verify",
     "selftest": "node tools/replay.mjs selftest",
-    "validate": "node -e \"import('./src/validate.js').then(m=>{const e=m.validateContent();if(e.length){console.error(e.join(String.fromCharCode(10)));process.exit(1);}console.log('内容表校验通过');})\"",
+    "validate": "node -e \"import('./src/content/validate.js').then(m=>{const e=m.validateContent();if(e.length){console.error(e.join(String.fromCharCode(10)));process.exit(1);}console.log('内容表校验通过');})\"",
     "arch": "node tools/arch-check.mjs",
     "serve": "python3 -m http.server 8080"
   }

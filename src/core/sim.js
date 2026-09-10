@@ -1,20 +1,20 @@
 // 纯逻辑层：不碰 DOM，方便在 node 里跑测试。
 // 所有实体走对象池，热循环里不做新分配（避免 GC 抖动）。
-import { findWeapon } from './weapons.js';
-import { rollChoices, rerollChoices, banishChoice, rollLoot, TRAITS, CURSES } from './upgrades.js';
-import { KINDS, tickEnemy, tickSpawns, spawnEnemy, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from './enemies.js';
-import { VIEW_W, VIEW_H } from './view.js';
-import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
-import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from './terrain.js';
+import { findWeapon } from '../content/weapons.js';
+import { rollChoices, rerollChoices, banishChoice, rollLoot, TRAITS, CURSES } from '../content/upgrades.js';
+import { KINDS, tickEnemy, tickSpawns, spawnEnemy, splitOnDeath, bossFissionOnDeath, eliteOnDeath, makeEnemy, BOSS_KINDS, findBossKind, ELITE_KINDS, findEliteKind } from '../content/enemies.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
+import { SKILLS, MAX_SKILL_SLOTS, findSkill } from '../content/skills.js';
+import { TERRAIN, makeTerrain, tickTerrain, resolveBlock, slowFactor, bulletHitTerrain, chestTouched } from '../content/terrain.js';
 
 export { VIEW_W, VIEW_H };
 import { mulberry32, pool, alloc } from './pool.js';
-import { isFxEvent } from './fx-events.js';
+import { isFxEvent } from '../content/fx-events.js';
 import { PLAYER, XP, SPAWN, DASH as DASH_TUNING, SPAWN_TIMERS, CARDS, TERRAIN_TUNING } from './tuning.js';
-import { HEROES, findHero, DEFAULT_HERO } from './heroes.js';
-import { applyPerks, PERKS, earnShards } from './meta.js';
-import { ZONES, ZONE_SECONDS, currentZone, tickZone, advanceZone } from './zones.js';
-import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, applyDifficulty, WIN_BONUS } from './difficulty.js';
+import { HEROES, findHero, DEFAULT_HERO } from '../content/heroes.js';
+import { applyPerks, PERKS, earnShards } from '../content/meta.js';
+import { ZONES, ZONE_SECONDS, currentZone, tickZone, advanceZone } from '../content/zones.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, applyDifficulty, WIN_BONUS } from '../content/difficulty.js';
 
 // 区域表定义在 zones.js，这里转出去
 export { ZONES, ZONE_SECONDS, currentZone };

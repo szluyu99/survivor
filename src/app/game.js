@@ -1,20 +1,20 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone } from './sim.js';
-import { VIEW_W, VIEW_H } from './view.js';
-import { unlock, toggleMute, sfx } from './audio.js';
-import { P } from './palette.js';
-import { createShapes } from './shapes.js';
-import { createFx } from './fx.js';
-import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
-import { createHud } from './hud.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone } from '../core/sim.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
+import { unlock, toggleMute, sfx } from '../view/audio.js';
+import { P } from '../shared/palette.js';
+import { createShapes } from '../view/shapes.js';
+import { createFx } from '../view/fx.js';
+import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from '../view/layout.js';
+import { createHud } from '../view/hud.js';
 import { createSandbox } from './sandbox.js';
 import { createProgress } from './progress.js';
-import { createWorldRender } from './world-render.js';
+import { createWorldRender } from '../view/world-render.js';
 import { createInput } from './input.js';
-import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
-import { isUnlocked, PERKS, difficultyUnlocked } from './meta.js';
-import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
-import { ACHIEVEMENTS, doneCount, recordRun } from './achievements.js';
+import { createRecorder, createPlayer, snapshot, restore } from '../core/replay.js';
+import { isUnlocked, PERKS, difficultyUnlocked } from '../content/meta.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from '../content/difficulty.js';
+import { ACHIEVEMENTS, doneCount, recordRun } from '../content/achievements.js';
 
 
 const ENEMY_COLOR = P.enemy; // 兼容旧引用，实际颜色定义在 palette.js

@@ -2,7 +2,7 @@
 // 地图是无限的，所以这些东西不是"关卡摆好的"，而是围着玩家动态生成、走远了回收。
 // 和 enemies.js 一样，这个模块不 import sim.js，需要的能力由 ctx 注入。
 
-import { TERRAIN_TUNING as T } from './tuning.js';
+import { TERRAIN_TUNING as T } from '../core/tuning.js';
 import { zoneTerrain } from './zones.js';
 
 export const TERRAIN = {

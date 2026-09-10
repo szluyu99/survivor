@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, update, chooseUpgrade, TRAITS, KINDS } from '../src/sim.js';
-import { WEAPONS, MAX_SLOTS, findWeapon } from '../src/weapons.js';
+import { createWorld, update, chooseUpgrade, TRAITS, KINDS } from '../src/core/sim.js';
+import { WEAPONS, MAX_SLOTS, findWeapon } from '../src/content/weapons.js';
 
 const DT = 1 / 60;
 function run(w, seconds, input = { dx: 0, dy: 0 }, onPause) {
@@ -421,7 +421,7 @@ test('info() 会跟着通用词条倍率变化', () => {
 });
 
 // ---- 冲刺 ----
-import { DASH } from '../src/sim.js';
+import { DASH } from '../src/core/sim.js';
 
 test('冲刺会把玩家推出比正常跑动更远的距离', () => {
   const a = createWorld(2), b = createWorld(2);
@@ -598,7 +598,7 @@ test('召唤技能会在 Boss 身边产小怪', () => {
 });
 
 // ---- 武器进化 ----
-import { EVOLUTIONS, EVO_LEVEL, EVO_WEAPONS, ALL_WEAPONS, AWAKEN_WEAPONS, AWAKENINGS, AWAKEN_ZONES, findEvolution, findAwakening } from '../src/weapons.js';
+import { EVOLUTIONS, EVO_LEVEL, EVO_WEAPONS, ALL_WEAPONS, AWAKEN_WEAPONS, AWAKENINGS, AWAKEN_ZONES, findEvolution, findAwakening } from '../src/content/weapons.js';
 
 function forceMaterials(seed, ids, level = EVO_LEVEL) {
   const w = createWorld(seed);
@@ -728,7 +728,7 @@ test('每把进化武器的 info() 都能给出可读数值', () => {
 });
 
 // ---- 光束：持续单体，越照越烫，脱靶降温 ----
-import { rollLoot } from '../src/upgrades.js';
+import { rollLoot } from '../src/content/upgrades.js';
 
 test('光束照得越久越疼，脱靶之后会降温', () => {
   const w = labWorld(1);
@@ -955,7 +955,7 @@ test('每 15 秒击杀分桶之和等于总击杀', () => {
 });
 
 // ---- 特殊词条与诅咒卡 ----
-import { CURSES } from '../src/sim.js';
+import { CURSES } from '../src/core/sim.js';
 
 test('暴击会显著抬高输出，并发 crit 事件', () => {
   // 必须打固定靶：打杂兵时溢出伤害不计入账，暴击的收益会被 min(dmg, hp) 吃掉
@@ -1127,7 +1127,7 @@ test('召唤者会不断产小怪', () => {
 });
 
 // ---- 地图元素 ----
-import { TERRAIN } from '../src/sim.js';
+import { TERRAIN } from '../src/core/sim.js';
 
 function putTerrain(w, kind, x, y, r) {
   const t = w.terrain.find((x2) => !x2.active);
@@ -1242,8 +1242,8 @@ test('TERRAIN 配置表里每种元素都有合法的半径区间', () => {
 });
 
 // ---- 主动技能 ----
-import { SKILLS, MAX_SKILL_SLOTS } from '../src/sim.js';
-import { findSkill } from '../src/skills.js';
+import { SKILLS, MAX_SKILL_SLOTS } from '../src/core/sim.js';
+import { findSkill } from '../src/content/skills.js';
 
 function withSkill(seed, id, level = 1) {
   const w = createWorld(seed);
@@ -1389,8 +1389,8 @@ test('冷却结束后可以再放', () => {
 });
 
 // ---- Boss 打断 ----
-import { reroll, banish } from '../src/sim.js';
-import { interruptNeed } from '../src/enemies.js';
+import { reroll, banish } from '../src/core/sim.js';
+import { interruptNeed } from '../src/content/enemies.js';
 
 function bossAtTelegraph(seed, plan = 'charge') {
   const w = createWorld(seed);
@@ -1524,7 +1524,7 @@ test('排除次数用完后不再生效', () => {
 });
 
 // ---- fx 事件契约 ----
-import { FX_EVENTS, isFxEvent } from '../src/fx-events.js';
+import { FX_EVENTS, isFxEvent } from '../src/content/fx-events.js';
 
 test('emit 只接受登记过的事件类型', () => {
   const w = createWorld(1);
@@ -1549,8 +1549,8 @@ test('登记表里没有重复项', () => {
 
 // ---- Boss 原型 ----
 import { labWorld, putEnemy as placeEnemy } from './fixtures.mjs';
-import { BOSS_KINDS, findBossKind, rollPlan } from '../src/bosses.js';
-import { ZONES } from '../src/zones.js';
+import { BOSS_KINDS, findBossKind, rollPlan } from '../src/content/bosses.js';
+import { ZONES } from '../src/content/zones.js';
 
 test('区域决定 Boss 原型', () => {
   for (const [zi, z] of ZONES.entries()) {
@@ -1667,7 +1667,7 @@ test('基准 Boss 原型的招式权重和加原型之前一致（历史平衡�
 });
 
 // ---- 精英原型 ----
-import { ELITE_KINDS, findEliteKind, rollElite } from '../src/elites.js';
+import { ELITE_KINDS, findEliteKind, rollElite } from '../src/content/elites.js';
 
 test('每只精英都会抽一个原型，三种都抽得到', () => {
   const seen = new Set();

@@ -4,7 +4,7 @@
 // 后者（各屏的路由）留在 game.js，因为那需要知道当前在哪一屏、有没有暂停、面板开着没。
 // 这条分界线是拆 game.js 时唯一需要设计的地方：前三刀（沙盒 / 局外进度 / 世界层绘制）
 // 都是整块搬走，而输入和路由原本是逐行交织的。
-import { VIEW_W, VIEW_H } from './view.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 
 const STICK_R = 46;
 const DOUBLE_TAP_MS = 320;   // 手机上没有 Shift，双击当冲刺

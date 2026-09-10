@@ -5,15 +5,15 @@
 // 冲锋潮和敌人成长用了两套时间档。数据其实都摆在报告里，但靠人逐行看不可靠。
 // 这里把那几类问题写成硬规则。
 
-import { createWorld, update, chooseUpgrade, HEROES, BOSS_KINDS } from '../src/sim.js';
-import { PERKS, earnShards, heroCost } from '../src/meta.js';
-import { ZONES, ZONE_SECONDS } from '../src/zones.js';
-import { DIFFICULTIES } from '../src/difficulty.js';
-import { LOOP } from '../src/tuning.js';
-import { ELITE_KINDS } from '../src/elites.js';
-import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/weapons.js';
-import { KINDS } from '../src/enemies.js';
-import { validateContent } from '../src/validate.js';
+import { createWorld, update, chooseUpgrade, HEROES, BOSS_KINDS } from '../src/core/sim.js';
+import { PERKS, earnShards, heroCost } from '../src/content/meta.js';
+import { ZONES, ZONE_SECONDS } from '../src/content/zones.js';
+import { DIFFICULTIES } from '../src/content/difficulty.js';
+import { LOOP } from '../src/core/tuning.js';
+import { ELITE_KINDS } from '../src/content/elites.js';
+import { WEAPONS, EVO_WEAPONS, EVOLUTIONS, EVO_LEVEL } from '../src/content/weapons.js';
+import { KINDS } from '../src/content/enemies.js';
+import { validateContent } from '../src/content/validate.js';
 
 const DT = 1 / 60;
 // --quick：本地调数值时用的快速档。全量要 100 秒开外，改一个数字等这么久没法迭代；

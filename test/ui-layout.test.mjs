@@ -9,18 +9,18 @@
 //   2. 密集场面里伤害跳字几十个叠在一起糊成一片（见文件末尾那组断言）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHud } from '../src/hud.js';
-import { createWorld, update, chooseUpgrade } from '../src/sim.js';
-import { createFx } from '../src/fx.js';
-import { defaultMeta } from '../src/meta.js';
-import { recordRun } from '../src/achievements.js';
-import { VIEW_W, VIEW_H } from '../src/view.js';
-import { WEAPONS, MAX_SLOTS, EVO_WEAPONS as EVO_WEAPONS_ALL, AWAKEN_WEAPONS as AWAKEN_ALL } from '../src/weapons.js';
-import { SKILLS, MAX_SKILL_SLOTS } from '../src/skills.js';
-import { PERKS } from '../src/meta.js';
-import { HEROES } from '../src/heroes.js';
-import { DIFFICULTIES } from '../src/difficulty.js';
-import { PAUSE_BTN, INFO_BTN, SKILL_BTN } from '../src/layout.js';
+import { createHud } from '../src/view/hud.js';
+import { createWorld, update, chooseUpgrade } from '../src/core/sim.js';
+import { createFx } from '../src/view/fx.js';
+import { defaultMeta } from '../src/content/meta.js';
+import { recordRun } from '../src/content/achievements.js';
+import { VIEW_W, VIEW_H } from '../src/shared/viewport.js';
+import { WEAPONS, MAX_SLOTS, EVO_WEAPONS as EVO_WEAPONS_ALL, AWAKEN_WEAPONS as AWAKEN_ALL } from '../src/content/weapons.js';
+import { SKILLS, MAX_SKILL_SLOTS } from '../src/content/skills.js';
+import { PERKS } from '../src/content/meta.js';
+import { HEROES } from '../src/content/heroes.js';
+import { DIFFICULTIES } from '../src/content/difficulty.js';
+import { PAUSE_BTN, INFO_BTN, SKILL_BTN } from '../src/view/layout.js';
 
 const texts = [];
 let font = '13px sans-serif';

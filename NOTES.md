@@ -193,6 +193,17 @@
     密集场面下每帧 fill/stroke 仍然 < 100（逐个画会退回几百次，那正是当年掉帧的原因）。
 
 ### 工程层
+- ~~src 按层分目录 + 再拆 hud.js~~ 已完成（2026-09-10）：31 个模块从平铺的 `src/` 分成五层——
+  `core/`（世界与规则）`content/`（内容表）`view/`（表现层）`app/`（装配与外围）`shared/`（跨层数据）。
+  意外收获：**架构检查从此不用维护文件名清单**——层级就是目录，`arch-check.mjs` 直接按目录判。
+  这一步也逼出一个之前含糊的问题：内容表 import 色板、sim import 视野尺寸，算不算"逻辑层依赖表现层"？
+  结论是不算（它们是数据不是行为），所以单独立了 `shared/` 层，让规则能干净地写成
+  "逻辑层不许 import view/ 和 app/"。
+  `hud.js` 878 → 264 行：各种面板（暂停/选卡/战利品/结算/通关/沙盒控制台，657 行）搬进 `view/panels.js`，
+  分界线是"每帧都画 vs 一帧只开一个"。`hud.js` 现在同时负责把 panels/screens 组装成一套对外 API，
+  所以 `app/game.js` 那边只认识 `createHud`。
+  搬迁照例漏了三处模块级常量（`TAKEN_NAME`、`ZONE_SECONDS`、`statBars`），渲染烟测三次报 `ReferenceError`——
+  这已经是这类重构的固定剧本了。
 - ~~架构约束进 CI~~ 已完成（2026-09-10）：`tools/arch-check.mjs`（零依赖，读文件 + 正则 + 断言）。
   守四条：①逻辑层不许 `Math.random` / `Date.now` / `performance.now`（录像和快照会静默不可重演）；
   ②逻辑层不许碰 DOM、不许 import 表现层；③`enemies/weapons/skills/terrain/upgrades/zones/bosses/elites`

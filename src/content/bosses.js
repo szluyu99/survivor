@@ -6,7 +6,7 @@
 //
 // 写法和其他内容表一致：一条配置 + 可选的钩子。加原型只要往 BOSS_KINDS 里加一项，
 // 内容校验和平衡断言会自动带上它。
-import { P } from './palette.js';
+import { P } from '../shared/palette.js';
 
 export const BOSS_KINDS = [
   {

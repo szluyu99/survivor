@@ -7,8 +7,8 @@
 // 不给 out.json 就打到 stdout。注意走 npm 的时候必须给文件名：
 // npm 自己会往 stdout 打一行 banner，重定向出来的 JSON 是坏的
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createWorld, update, chooseUpgrade, DEFAULT_HERO } from '../src/sim.js';
-import { createRecorder, verify, REPLAY_VERSION } from '../src/replay.js';
+import { createWorld, update, chooseUpgrade, DEFAULT_HERO } from '../src/core/sim.js';
+import { createRecorder, verify, REPLAY_VERSION } from '../src/core/replay.js';
 
 const DT = 1 / 60;
 const circling = (i) => ({ dx: Math.cos((i / 60) * 1.6), dy: Math.sin((i / 60) * 1.6) });

@@ -4,7 +4,7 @@
 // （spawnAt / putEnemy / putTerrain / withSkill / forceMaterials / bossAtTelegraph），
 // 字段列表互相抄、有的漏字段。加新内容时写测试的成本主要花在这上面，所以收口到这里。
 
-import { createWorld, update, chooseUpgrade, KINDS } from '../src/sim.js';
+import { createWorld, update, chooseUpgrade, KINDS } from '../src/core/sim.js';
 
 export const DT = 1 / 60;
 

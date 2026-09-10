@@ -8,7 +8,7 @@
 //    直接看行为差异，而不是靠平均值猜。
 
 import { createWorld, update, chooseUpgrade, reroll, banish, DEFAULT_HERO, DEFAULT_DIFFICULTY } from './sim.js';
-import { cardByKey, lootByKey } from './upgrades.js';
+import { cardByKey, lootByKey } from '../content/upgrades.js';
 
 // v2：加了角色（seed 之外还要记 hero）；v3：加了永久强化（perks 改初始属性）；
 // v4：加了区域（zoneIndex/zoneT 决定兵种配比和地形）；

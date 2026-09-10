@@ -70,13 +70,13 @@ globalThis.localStorage = {
 // 预置一个版本对不上的坏存档：首屏必须静默丢掉它，而不是卡在读不出来的档上
 store.set('survivor.save', JSON.stringify({ version: -1, seed: 1 }));
 
-await import('../src/game.js');
-const { HEROES } = await import('../src/heroes.js');
-const { ALL_WEAPONS } = await import('../src/weapons.js');
-const { PERKS } = await import('../src/meta.js');
-const { ZONES, ZONE_SECONDS } = await import('../src/zones.js');
-const { DIFFICULTIES } = await import('../src/difficulty.js');
-const { ACHIEVEMENTS } = await import('../src/achievements.js');
+await import('../src/app/game.js');
+const { HEROES } = await import('../src/content/heroes.js');
+const { ALL_WEAPONS } = await import('../src/content/weapons.js');
+const { PERKS } = await import('../src/content/meta.js');
+const { ZONES, ZONE_SECONDS } = await import('../src/content/zones.js');
+const { DIFFICULTIES } = await import('../src/content/difficulty.js');
+const { ACHIEVEMENTS } = await import('../src/content/achievements.js');
 
 // 帧时间戳必须单调递增：主循环的 dt 会被夹在 [0, 0.25]，
 // 传一个比上次小的 now 会让 dt 变成 0，那一段世界根本不动
@@ -223,9 +223,9 @@ test('说明屏：操作说明、兵种图例、区域说明都在里面，ESC �
 });
 
 test('武器沙盒：调等级、放靶子、时间倍速、ESC 退出', async () => {
-  const { WEAPONS: BASE, MAX_SLOTS: SLOTS } = await import('../src/weapons.js');
+  const { WEAPONS: BASE, MAX_SLOTS: SLOTS } = await import('../src/content/weapons.js');
   const ui = globalThis.__survivorUi;
-  const L = await import('../src/layout.js');
+  const L = await import('../src/view/layout.js');
   const mid = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
   const rowCenter = (i) => ({ x: L.sandboxRowRect(i).x + 30, y: L.sandboxRowRect(i).y + 12 });
   const plusAt = (i) => mid(L.sandboxPlusRect(i));
@@ -345,7 +345,7 @@ test('首屏不会误触：按无关的键、点空白处都不开局', () => {
 });
 
 test('残片不够时点没解锁的角色卡：不开局、也不扣残片', async () => {
-  const { heroCardX, HERO_CARD } = await import('../src/layout.js');
+  const { heroCardX, HERO_CARD } = await import('../src/view/layout.js');
   // 先进角色屏（坐标写死会随主菜单布局变化而失灵，所以用数字键直达）
   fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(2);
@@ -440,7 +440,7 @@ test('长时间跑到死亡结算，最好成绩会写进 localStorage', () => {
 });
 
 test('这一局的录像能原样重演（真实输入路径，不是脚本造的）', async () => {
-  const { verify } = await import('../src/replay.js');
+  const { verify } = await import('../src/core/replay.js');
   const replay = globalThis.__survivorReplay;
   assert.ok(replay, '死亡时没有生成录像');
   const { ok, expected, actual } = verify(replay);
@@ -612,7 +612,7 @@ test('密集场面下绘制调用不随敌人数量线性增长（同色实体�
 });
 
 test('子弹按武器分形状，高速弹带拖尾', async () => {
-  const { P } = await import('../src/palette.js');
+  const { P } = await import('../src/shared/palette.js');
   const w = globalThis.__survivorWorld;
   const realMaxHp = w.player.maxHp;
   w.player.hp = w.player.maxHp = 1e9;
@@ -797,7 +797,7 @@ test('玩家有朝向和挤压：内环偏心、移动时形状被拉长', () =>
 });
 
 test('Boss 预警会在地上画指示（冲撞画带子、弹幕画放射线、召唤画圈）', async () => {
-  const { BOSS } = await import('../src/tuning.js');
+  const { BOSS } = await import('../src/core/tuning.js');
   const w = globalThis.__survivorWorld;
   const realMaxHp = w.player.maxHp;
   w.player.hp = w.player.maxHp = 1e9;
@@ -876,7 +876,7 @@ test('新加的特效也走批量绘制（碎片、时缓光环、残影都不�
 });
 
 test('色板里没有重复色值（撞色会让人分不清语义）', async () => {
-  const { P } = await import('../src/palette.js');
+  const { P } = await import('../src/shared/palette.js');
   const flat = [];
   const walk = (obj, path = '') => {
     for (const [k, v] of Object.entries(obj)) {
@@ -1346,7 +1346,7 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
 });
 
 test('崩溃时把复现材料写进 localStorage（这游戏是确定性的，录像就能重演）', async () => {
-  const { verify } = await import('../src/replay.js');
+  const { verify } = await import('../src/core/replay.js');
   assert.ok(freshRun(), '拿不到一局活着的游戏');
   const w = warmUp(4);
   store.delete?.('survivor.crash');
@@ -1370,8 +1370,8 @@ test('崩溃时把复现材料写进 localStorage（这游戏是确定性的，�
 });
 
 test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没声没画面）', async () => {
-  const { FX_EVENTS } = await import('../src/fx-events.js');
-  const { createFx } = await import('../src/fx.js');
+  const { FX_EVENTS } = await import('../src/content/fx-events.js');
+  const { createFx } = await import('../src/view/fx.js');
   const fx = createFx({});
   const missing = FX_EVENTS.filter((t) => typeof fx.handlers[t] !== 'function');
   assert.deepEqual(missing, [], `这些事件没有表现层处理：${missing.join(', ')}`);
@@ -1382,8 +1382,8 @@ test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没�
 // 屏幕外的 Boss / 精英指示箭头。三角必须落在视口里、贴着目标那一侧的边，
 // 不然它要么看不见，要么指错方向
 test('边缘指示箭头贴着目标那一侧的边，且不画到屏幕外', async () => {
-  const { createShapes } = await import('../src/shapes.js');
-  const { VIEW_W, VIEW_H } = await import('../src/view.js');
+  const { createShapes } = await import('../src/view/shapes.js');
+  const { VIEW_W, VIEW_H } = await import('../src/shared/viewport.js');
   const pts = [];
   const stub = {
     beginPath() {}, closePath() {}, fill() {}, stroke() {}, arc() {}, rect() {},

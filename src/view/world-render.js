@@ -7,13 +7,13 @@
 // 这里也是全项目对 canvas 调用数最敏感的地方：同色实体攒一条路径、
 // 粒子透明度量化成 8 档、碎片按颜色分组——密集场面下每帧 fill/stroke 必须保持在 100 次以内
 // （有断言守着）。改这个文件前先看一眼 test/render.test.mjs 里那两条批量绘制断言。
-import { P } from './palette.js';
-import { VIEW_W, VIEW_H } from './view.js';
-import { BOSS, PLAYER } from './tuning.js';
-import { currentZone } from './zones.js';
-import { EVO_WEAPONS, AWAKEN_WEAPONS } from './weapons.js';
-import { findBossKind } from './bosses.js';
-import { findEliteKind } from './elites.js';
+import { P } from '../shared/palette.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
+import { BOSS, PLAYER } from '../core/tuning.js';
+import { currentZone } from '../content/zones.js';
+import { EVO_WEAPONS, AWAKEN_WEAPONS } from '../content/weapons.js';
+import { findBossKind } from '../content/bosses.js';
+import { findEliteKind } from '../content/elites.js';
 
 // deps: { shapes, fx }
 export function createWorldRender(ctx, deps) {

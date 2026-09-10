@@ -1,8 +1,8 @@
 // 几何绘制：所有实体都是纯形状，这里集中处理形状、描边、网格和暗角。
 // 形状比颜色识别得更快，也对色盲友好：圆=杂兵 三角=冲锋兵 方=肉盾 五边=射手
 // 八边=召唤者 菱=精英 六边=Boss。
-import { P } from './palette.js';
-import { VIEW_W, VIEW_H } from './view.js';
+import { P } from '../shared/palette.js';
+import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 
 // 用工厂函数拿到绑定了 canvas context 的一组画笔，避免每个函数都传 ctx
 export function createShapes(ctx) {

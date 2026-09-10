@@ -1,7 +1,7 @@
 // 武器定义。每把武器是一条配置 + 一个 tick，加新武器只需往 WEAPONS 里加一项。
 // tick 拿到的 api 由 sim.js 注入，避免和 sim.js 循环依赖。
 
-import { P } from './palette.js';
+import { P } from '../shared/palette.js';
 
 export const MAX_SLOTS = 3;
 

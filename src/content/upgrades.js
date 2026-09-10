@@ -2,7 +2,7 @@
 // 逻辑层的其他部分只通过 rollChoices / rollLoot / chooseUpgrade 和这里打交道。
 import { WEAPONS, MAX_SLOTS, findWeapon, findEvolution, findAwakening, awakenWeapon, AWAKENINGS } from './weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
-import { CARDS } from './tuning.js';
+import { CARDS } from '../core/tuning.js';
 
 export const TRAITS = [
   { id: 'damage', name: '狠', desc: '全体伤害 +25%', apply: (w) => { w.stats.damageMul *= 1.25; } },

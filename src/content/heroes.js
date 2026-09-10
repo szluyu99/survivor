@@ -4,7 +4,7 @@
 //
 // 写法和 TRAITS / CURSES 一致：一条配置 + 一个 apply。加角色只需往 HEROES 里加一项，
 // 平衡脚本和内容校验会自动带上它。
-import { PLAYER } from './tuning.js';
+import { PLAYER } from '../core/tuning.js';
 
 export const HEROES = [
   {

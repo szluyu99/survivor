@@ -6,7 +6,7 @@
 //
 // 写法和 Boss 原型一致：一条配置 + 可选钩子。加原型只要往 ELITE_KINDS 里加一项，
 // 内容校验和平衡断言会自动带上它。
-import { P } from './palette.js';
+import { P } from '../shared/palette.js';
 
 export const ELITE_KINDS = [
   {

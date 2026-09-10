@@ -7,8 +7,8 @@
 //
 // 单独成文件是因为 game.js 已经 1700 行、同时扛着输入 / 主循环 / 渲染编排 / 局外状态四件事。
 // 这里通过 host 拿它需要的一切（世界的读写、开局收尾），自己只持有沙盒自己的状态
-import { WEAPONS, EVO_WEAPONS, AWAKEN_WEAPONS, MAX_SLOTS } from './weapons.js';
-import { sandboxSpawn } from './sim.js';
+import { WEAPONS, EVO_WEAPONS, AWAKEN_WEAPONS, MAX_SLOTS } from '../content/weapons.js';
+import { sandboxSpawn } from '../core/sim.js';
 
 // host: { getWorld, beginSandboxRun, exitToMenu }
 export function createSandbox(host) {

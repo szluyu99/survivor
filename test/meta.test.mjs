@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 import {
   earnShards, defaultMeta, normalizeMeta, isUnlocked, unlockHero, buyPerk,
   applyPerks, perkCost, findPerk, heroCost, PERKS,
-} from '../src/meta.js';
-import { createWorld, HEROES, DEFAULT_HERO } from '../src/sim.js';
-import { PLAYER } from '../src/tuning.js';
+} from '../src/content/meta.js';
+import { createWorld, HEROES, DEFAULT_HERO } from '../src/core/sim.js';
+import { PLAYER } from '../src/core/tuning.js';
 
 test('残片按存活时长和击杀结算，空局是 0', () => {
   assert.equal(earnShards({ t: 0, kills: 0 }), 0);
@@ -119,10 +119,10 @@ test('applyPerks 传 null / 空对象都不炸', () => {
 });
 
 // ---- 难度与通关 ----
-import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from '../src/difficulty.js';
-import { difficultyUnlocked, noteWin } from '../src/meta.js';
-import { ZONES } from '../src/zones.js';
-import { update, chooseUpgrade } from '../src/sim.js';
+import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from '../src/content/difficulty.js';
+import { difficultyUnlocked, noteWin } from '../src/content/meta.js';
+import { ZONES } from '../src/content/zones.js';
+import { update, chooseUpgrade } from '../src/core/sim.js';
 
 test('基准难度什么都不改（历史平衡数据的锚点）', () => {
   const base = createWorld(3);
@@ -244,8 +244,8 @@ test('不在最后一个区域打死 Boss 不算通关', () => {
 // ---- 成就与累计统计 ----
 import {
   ACHIEVEMENTS, defaultStats, normalizeStats, recordRun, achievementDone, doneCount, achievementRows, statRows,
-} from '../src/achievements.js';
-import { HEROES as ALL_HEROES } from '../src/heroes.js';
+} from '../src/content/achievements.js';
+import { HEROES as ALL_HEROES } from '../src/content/heroes.js';
 
 const fakeRun = (over = {}) => ({
   t: 100, kills: 200, bossCount: 2, chests: 3, evolved: ['arcfield'], loop: 0, hero: DEFAULT_HERO, ...over,
