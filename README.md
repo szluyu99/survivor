@@ -16,7 +16,7 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（233 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（234 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 105 秒
 npm run check:quick # 快速档：3 个 seed + 跳过两组重型检查，约 20 秒。样本量敏感的断言降级成提醒
@@ -89,8 +89,12 @@ npm run replay -- run.json                # 重放并核对 { 时长, 击杀, �
 
 渲染层：
 
-- `src/game.js` —— 装配 + 主循环 + 输入 + 各屏路由（811 行）。世界层绘制、局外屏、沙盒、
-  局外进度分别在 `world-render.js` / `screens.js` / `sandbox.js` / `progress.js`。
+- `src/game.js` —— 装配 + 主循环 + 各屏路由（756 行，从 1743 行拆到这里）。
+  世界层绘制、局外屏、沙盒、局外进度、输入设备分别在 `world-render.js` / `screens.js` /
+  `sandbox.js` / `progress.js` / `input.js`。
+- `src/input.js` —— 输入设备层：键盘按下的集合、指针位置、触摸摇杆、边沿触发的冲刺与技能。
+  它只回答"玩家的手在做什么"，不回答"这一下点在了哪个按钮上"——后者是各屏路由，留在 `game.js`
+  （那需要知道当前在哪一屏、有没有暂停、面板开着没）。
 - `src/world-render.js` —— 世界层绘制：背景、地形、实体、投射物、特效、相机、暗角与全屏覆盖。
   它一个 UI 状态都不读（HUD 和面板要读 `uiPaused` / `winPanel`，留在 `game.js` 编排）。
   **全项目对 canvas 调用数最敏感的地方**：同色实体攒一条路径、粒子透明度量化 8 档、碎片按颜色分组，

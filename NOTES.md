@@ -6,7 +6,7 @@
 ## 一、现状速览
 
 - 纯静态 Web 游戏，零依赖零构建（ES module + Canvas 2D），`npm run serve` 起本地服务，GitHub Pages 部署。
-- 233 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）、
+- 234 个测试（`npm test`）、13 条平衡断言（`npm run check`）、内容表校验（`npm run validate`）、
   架构约束（`npm run arch`）、体积检查（`npm run size`）、确定性自检（`npm run selftest`）都在 CI 里。
   本地调数值用 `npm run check:quick`（约 20 秒，全量要 105 秒）。
 - 一局的完整链路：首屏选角色/难度 → 走四个区域 → 打倒最后一个区域的 Boss 通关 → 继续无尽或重开 → 结算残片 → 局外解锁。
@@ -220,6 +220,17 @@
   渲染烟测立刻报 `ReferenceError`——这已经是同一类错误第三次被它抓到了。
   现在的分布：game.js 811 / world-render.js 793 / hud.js 878 / weapons.js 744 / sim.js 709 / screens.js 364。
   **`input.js` 仍然没动**：raw input 和 UI 路由交织，需要先设计"当前屏 → 处理函数"的路由表。
+- ~~拆 `game.js`（第四刀：输入设备层）~~ 已完成（2026-09-10）：`src/input.js`（109 行）接走
+  键盘集合 / 指针 / 触摸摇杆 / 边沿触发的冲刺与技能，`game.js` 811 → 756 行（从最初的 1743 行拆完）。
+  这一刀是四刀里唯一需要**设计**的：前三刀都是整块搬走，而输入和 UI 路由原本逐行交织。
+  分界线定成"设备只回答玩家的手在做什么，不回答这一下点在了哪个按钮上"。
+  落地时的关键改动：`pointerdown` 里原来用同一个 `pointer` 变量兼做"命中判定坐标"和
+  "按住朝这儿走的指针"，拆开成局部 `at`（判定用）+ `inputDev.setPointer(at)`（移动用），
+  每个分支消费掉这一下之后 `clearPointer()` 表示"这是 UI 操作，不是移动"。
+- ~~存档迁移的固化快照~~ 已完成（2026-09-10）：`test/fixtures/save-v10.json`（3.3KB）是 v10 时
+  真跑出来的快照，冻在仓库里。之前那条用例是"把当前快照改个版本号"，证明不了真实旧档还能读——
+  旧档里可能有当时特有的字段组合。新用例除了读得进来，还要求"读进来能接着跑"
+  （"能读但一动就炸"是最难查的那种坏）。
 - ~~平衡报告产物化~~ 已完成（2026-09-10）：CI 里 `npm run balance | tee balance-report.txt` 并上传 artifact，
   改数值前后可以直接 diff 两次构建的报告，而不用本地重跑两遍。
 - ~~CI 加确定性自检~~ 已完成（2026-09-10）：`npm run selftest` 录 3 局（不同 seed / 角色）再原地重演比对，

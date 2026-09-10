@@ -1,5 +1,5 @@
 // 渲染 + 输入 + 主循环。逻辑都在 sim.js，这里只负责画和收键。
-import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone, findBossKind, findEliteKind, sandboxSpawn } from './sim.js';
+import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_HERO, HEROES, currentZone } from './sim.js';
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
@@ -10,6 +10,7 @@ import { createHud } from './hud.js';
 import { createSandbox } from './sandbox.js';
 import { createProgress } from './progress.js';
 import { createWorldRender } from './world-render.js';
+import { createInput } from './input.js';
 import { createRecorder, createPlayer, snapshot, restore } from './replay.js';
 import { isUnlocked, PERKS, difficultyUnlocked } from './meta.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY } from './difficulty.js';
@@ -50,6 +51,11 @@ const { consumeFx, stepFx, state: fxState } = fx;
 // 世界层绘制在 world-render.js（它一个 UI 状态都不读；HUD 和面板留在这里编排）
 const { drawWorld } = createWorldRender(ctx, { shapes: { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker }, fx });
 
+// 输入设备层在 input.js（键盘集合 / 指针 / 摇杆 / 边沿触发的冲刺与技能）。
+// 这里只保留"这一下点在了哪个按钮上"那部分路由
+const inputDev = createInput(canvas, { ctx, circle });
+const { keys, readInput, viewPos, drawStick } = inputDev;
+
 const hud = createHud(ctx, {
   shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain },
   fxState,
@@ -88,10 +94,6 @@ let pauseTab = 0;         // 暂停面板：0 装备 / 1 属性 / 2 战况
 let overTab = 0;          // 结算面板：0 总览 / 1 详情
 let world = createWorld(newSeed(), activeHero(), progress.meta.perks, progress.difficulty);
 globalThis.__survivorWorld = world;
-const keys = new Set();
-const input = { dx: 0, dy: 0, dash: false, skill: null };
-let dashQueued = false;   // 冲刺是边沿触发，按住不会连续冲
-let skillQueued = null;   // 待释放的技能槽位，同样是边沿触发
 let mutedHint = false;
 let uiPaused = false;
 let started = false; // 开始遮罩，顺便满足 iOS 必须在用户手势里解锁音频的要求
@@ -177,11 +179,7 @@ function exitToTitle() {
   uiPaused = false;
   winPanel = false;
   player = null;
-  keys.clear();
-  pointer = null;
-  stick.active = false;
-  dashQueued = false;
-  skillQueued = null;
+  inputDev.reset();
   acc = 0;
   fx.reset();
 }
@@ -409,7 +407,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') && started && !world.over && !world.paused && !uiPaused) {
-    if (!e.repeat) dashQueued = true;
+    if (!e.repeat) inputDev.queueDash();
   }
   // 沙盒的按键要排在局内那套之前：Tab 在局内是详情浮层、数字键是选卡，
   // 排在后面的话沙盒永远收不到（折叠面板就是这么失灵的）
@@ -421,8 +419,8 @@ addEventListener('keydown', (e) => {
   }
   // Q / E 放技能，边沿触发
   if (!e.repeat && started && !world.over && !world.paused && !uiPaused) {
-    if (e.code === 'KeyQ') skillQueued = 0;
-    if (e.code === 'KeyE') skillQueued = 1;
+    if (e.code === 'KeyQ') inputDev.queueSkill(0);
+    if (e.code === 'KeyE') inputDev.queueSkill(1);
   }
   // 暂停面板里的 Q = 返回主界面（自动存档）。Q 在局内是技能槽 0，所以只在暂停时接管
   if (uiPaused && e.code === 'KeyQ') { exitToTitle(); return; }
@@ -459,16 +457,12 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 
 // 切窗口时 keyup 会丢，回来后角色会一直朝一个方向跑，必须清空
-addEventListener('blur', () => { keys.clear(); pointer = null; stick.active = false; dashQueued = false; skillQueued = null; });
+addEventListener('blur', () => inputDev.reset());
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { keys.clear(); pointer = null; stick.active = false; }
+  if (document.hidden) inputDev.reset();
 });
 
 // 鼠标：按住朝指针方向走。触摸：落点为原点的虚拟摇杆（手机上"朝指针走"很难精细控制）
-let pointer = null;
-const stick = { active: false, ox: 0, oy: 0, x: 0, y: 0 };
-const STICK_R = 46;
-let lastTouchDown = -1e9;
 
 canvas.addEventListener('pointerdown', (e) => {
   // 局外各屏的点击。点空白处只解锁音频，什么都不发生（以前点任意处就开局，太容易误触）
@@ -481,7 +475,7 @@ canvas.addEventListener('pointerdown', (e) => {
     } else if (screen === 'heroes') {
       if (inBackBtn(at.x, at.y)) screen = 'menu';
       else {
-        if (inStartBtn(at.x, at.y)) { beginGame(); pointer = null; return; }
+        if (inStartBtn(at.x, at.y)) { beginGame(); inputDev.clearPointer(); return; }
         const hi = heroCardHit(at.x, at.y);
         // 点卡片只是选中；没解锁的卡点了没反应（解锁要去「局外强化」屏，避免在这儿手滑花钱）
         if (hi >= 0 && hi < HEROES.length && isUnlocked(progress.meta, HEROES[hi].id)) progress.setHero(HEROES[hi].id);
@@ -497,101 +491,100 @@ canvas.addEventListener('pointerdown', (e) => {
     } else {
       screen = 'menu';   // 说明屏点哪儿都返回
     }
-    pointer = null;
+    inputDev.clearPointer();
     return;
   }
   beginGame();
   canvas.setPointerCapture(e.pointerId);
-  pointer = viewPos(e);
+  // at 是这一下点在哪（逻辑坐标）；同时把它交给输入层当"按住朝这儿走"的指针。
+  // 下面每个分支消费掉这一下之后都会 clearPointer()，表示"这次点击是 UI 操作，不是移动"
+  const at = viewPos(e);
+  inputDev.setPointer(at);
   // 沙盒面板盖在最上层，先判它：左栏调等级，右栏开关和放靶子
   if (sandbox.on) {
     // 折叠把手：展开时在面板上沿，收起时贴屏幕最下面
-    if (sandbox.open ? inSandboxHandle(pointer.x, pointer.y) : inSandboxHandleMin(pointer.x, pointer.y)) {
+    if (sandbox.open ? inSandboxHandle(at.x, at.y) : inSandboxHandleMin(at.x, at.y)) {
       sandbox.toggle();
-      pointer = null;
+      inputDev.clearPointer();
       return;
     }
     if (sandbox.open) {
       const rows = sandbox.rows();
-      const hitRow = sandboxRowHit(pointer.x, pointer.y, rows.length);
+      const hitRow = sandboxRowHit(at.x, at.y, rows.length);
       if (hitRow) {
         // delta 是 0 表示点在行上（不是 [+]/[-]），那就按 +1；Shift 点仍然是 -1
         const down = hitRow.delta < 0 || (hitRow.delta === 0 && e.shiftKey);
         sandbox.bump(hitRow.index, down);
-        pointer = null;
+        inputDev.clearPointer();
         return;
       }
       const btns = sandbox.buttons();
-      const bi = sandboxBtnHit(pointer.x, pointer.y, btns.length);
-      if (bi >= 0) { sandbox.action(btns[bi].id); pointer = null; return; }
+      const bi = sandboxBtnHit(at.x, at.y, btns.length);
+      if (bi >= 0) { sandbox.action(btns[bi].id); inputDev.clearPointer(); return; }
     }
   }
   // 通关面板：点一下继续无尽
-  if (winPanel) { winPanel = false; pointer = null; return; }
+  if (winPanel) { winPanel = false; inputDev.clearPointer(); return; }
   // 回放中：点一下就退出回放，回到死亡结算
-  if (player) { exitReplay(); pointer = null; return; }
+  if (player) { exitReplay(); inputDev.clearPointer(); return; }
   // 结算面板的分页标签要先判：它盖在最上面
   if (world.over) {
-    const t = tabBtnHit(pointer.x, pointer.y, 2);
-    if (t >= 0) { overTab = t; pointer = null; return; }
+    const t = tabBtnHit(at.x, at.y, 2);
+    if (t >= 0) { overTab = t; inputDev.clearPointer(); return; }
   }
-  const sb = skillBtnHit(pointer.x, pointer.y);
+  const sb = skillBtnHit(at.x, at.y);
   if (sb >= 0 && !world.over && !world.paused && !uiPaused) {
-    skillQueued = sb;
-    pointer = null;
+    inputDev.queueSkill(sb);
+    inputDev.clearPointer();
     return;
   }
   // 详情浮层的开关（手机没有 Tab 键）
-  if (inInfoBtn(pointer.x, pointer.y) && !world.over && !world.paused && !uiPaused) {
+  if (inInfoBtn(at.x, at.y) && !world.over && !world.paused && !uiPaused) {
     infoOpen = !infoOpen;
-    pointer = null;
+    inputDev.clearPointer();
     return;
   }
-  if (inPauseBtn(pointer.x, pointer.y) && !world.over && !world.paused) {
+  if (inPauseBtn(at.x, at.y) && !world.over && !world.paused) {
     uiPaused = !uiPaused;
-    pointer = null;
+    inputDev.clearPointer();
     return;
   }
   if (uiPaused) {
     // 换页和返回主界面都要排在"点面板任意处继续"之前，否则永远点不到
-    const t = tabBtnHit(pointer.x, pointer.y, 3);
-    if (t >= 0) { pauseTab = t; pointer = null; return; }
-    if (inExitBtn(pointer.x, pointer.y)) { exitToTitle(); pointer = null; return; }
+    const t = tabBtnHit(at.x, at.y, 3);
+    if (t >= 0) { pauseTab = t; inputDev.clearPointer(); return; }
+    if (inExitBtn(at.x, at.y)) { exitToTitle(); inputDev.clearPointer(); return; }
     uiPaused = false;
-    pointer = null;
+    inputDev.clearPointer();
     return;
   }
   if (world.paused && world.loot) {
     // 战利品只有"挑一张"，没有重抽和排除
-    const i = cardHit(pointer.x, pointer.y);
-    if (i >= 0) { queueAction('pick', i); pointer = null; }
+    const i = cardHit(at.x, at.y);
+    if (i >= 0) { queueAction('pick', i); inputDev.clearPointer(); }
   } else if (world.paused && world.choices) {
-    const bi = banishHit(pointer.x, pointer.y);
-    if (bi >= 0 && world.banishes > 0) { queueAction('banish', bi); pointer = null; return; }
-    if (inRerollBtn(pointer.x, pointer.y)) { queueAction('reroll'); pointer = null; return; }
-    const i = cardHit(pointer.x, pointer.y);
-    if (i >= 0) { queueAction('pick', i); pointer = null; }
+    const bi = banishHit(at.x, at.y);
+    if (bi >= 0 && world.banishes > 0) { queueAction('banish', bi); inputDev.clearPointer(); return; }
+    if (inRerollBtn(at.x, at.y)) { queueAction('reroll'); inputDev.clearPointer(); return; }
+    const i = cardHit(at.x, at.y);
+    if (i >= 0) { queueAction('pick', i); inputDev.clearPointer(); }
   } else if (world.over) {
     // 点"看回放"看录像，点别处重开
-    if (lastReplay && inReplayBtn(pointer.x, pointer.y)) startReplay();
+    if (lastReplay && inReplayBtn(at.x, at.y)) startReplay();
     else restart();
-    pointer = null;
+    inputDev.clearPointer();
   } else if (e.pointerType === 'touch') {
     // 双击冲刺：手机上没有 Shift
     const nowMs = e.timeStamp || 0;
-    if (nowMs - lastTouchDown < 320) dashQueued = true;
+    if (nowMs - lastTouchDown < 320) inputDev.queueDash();
     lastTouchDown = nowMs;
     stick.active = true;
-    stick.ox = stick.x = pointer.x;
-    stick.oy = stick.y = pointer.y;
+    stick.ox = stick.x = at.x;
+    stick.oy = stick.y = at.y;
   }
 });
-canvas.addEventListener('pointermove', (e) => {
-  if (!pointer) return;
-  pointer = viewPos(e);
-  if (stick.active) { stick.x = pointer.x; stick.y = pointer.y; }
-});
-canvas.addEventListener('pointerup', () => { pointer = null; stick.active = false; });
+canvas.addEventListener('pointermove', (e) => inputDev.pointerMove(viewPos(e)));
+canvas.addEventListener('pointerup', () => inputDev.clearPointer());
 // 右键冲刺，顺便屏蔽右键菜单
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -602,57 +595,9 @@ canvas.addEventListener('contextmenu', (e) => {
     if (hitRow) sandbox.bump(hitRow.index, true);
     return;
   }
-  if (started && !world.over && !world.paused && !uiPaused) dashQueued = true;
+  if (started && !world.over && !world.paused && !uiPaused) inputDev.queueDash();
 });
-canvas.addEventListener('pointercancel', () => { pointer = null; stick.active = false; });
-
-function viewPos(e) {
-  const r = canvas.getBoundingClientRect();
-  return { x: ((e.clientX - r.left) / r.width) * VIEW_W, y: ((e.clientY - r.top) / r.height) * VIEW_H };
-}
-
-function readInput() {
-  let dx = 0, dy = 0;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) dx -= 1;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1;
-  if (keys.has('KeyW') || keys.has('ArrowUp')) dy -= 1;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) dy += 1;
-  if (dx === 0 && dy === 0 && stick.active) {
-    // 摇杆：以按下的位置为原点，拉多远就走多快（超过半径按满速）
-    const sx = stick.x - stick.ox, sy = stick.y - stick.oy;
-    const len = Math.hypot(sx, sy);
-    if (len > 6) {
-      const k = Math.min(1, len / STICK_R) / len;
-      dx = sx * k;
-      dy = sy * k;
-    }
-  } else if (dx === 0 && dy === 0 && pointer) {
-    dx = pointer.x - VIEW_W / 2;
-    dy = pointer.y - VIEW_H / 2;
-    if (Math.hypot(dx, dy) < 12) { dx = 0; dy = 0; }
-  }
-  input.dx = dx;
-  input.dy = dy;
-  input.dash = dashQueued;
-  input.skill = skillQueued;
-  dashQueued = false;
-  skillQueued = null;
-  return input;
-}
-
-// 触摸摇杆：只在按住时画出来，不占用平时的画面
-function drawStick() {
-  if (!stick.active) return;
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(stick.ox, stick.oy, STICK_R, 0, Math.PI * 2);
-  ctx.stroke();
-  const sx = stick.x - stick.ox, sy = stick.y - stick.oy;
-  const len = Math.hypot(sx, sy) || 1;
-  const k = Math.min(1, len / STICK_R) / len;
-  circle(stick.ox + sx * k * STICK_R, stick.oy + sy * k * STICK_R, 16, 'rgba(255,255,255,0.28)');
-}
+canvas.addEventListener('pointercancel', () => inputDev.clearPointer());
 
 function render(w) {
   drawWorld(w);

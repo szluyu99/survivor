@@ -213,6 +213,25 @@ test('区域进度会跟着快照走（否则恢复出来的是另一个区域�
   assert.equal(fingerprint(w2), fingerprint(w));
 });
 
+test('固化的 v10 存档还能读进来接着打（防迁移逻辑腐烂）', async () => {
+  // 上一条用例是"把当前快照改个版本号"，它证明不了"真实的旧档"还能读——
+  // 旧档里可能有当时的字段组合。这份 fixture 是 v10 时真跑出来的快照，冻在仓库里
+  const { readFileSync } = await import('node:fs');
+  const raw = JSON.parse(readFileSync(new URL('./fixtures/save-v10.json', import.meta.url), 'utf8'));
+  assert.equal(raw.version, 10, 'fixture 本身被改坏了');
+  assert.equal(raw.awakened, undefined, 'fixture 应该缺 v11 才有的字段');
+
+  const w = restore(raw);
+  assert.equal(w.zoneIndex, raw.zoneIndex);
+  assert.equal(w.kills, raw.kills);
+  assert.deepEqual(w.awakened, [], '缺失字段没补默认值');
+  // 读进来还得能接着跑（"能读但一动就炸"是最难查的那种坏）
+  const t0 = w.t;
+  run(w, 0, 120);
+  assert.ok(w.t > t0, '迁移出来的世界推不动');
+  assert.ok(Number.isFinite(w.player.hp), '玩家状态坏了');
+});
+
 test('旧版本存档靠补默认值升上来，太老的才丢', () => {
   const w = run(createWorld(5), 0, 240);
   const snap = JSON.parse(JSON.stringify(snapshot(w)));
