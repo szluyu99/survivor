@@ -12,7 +12,7 @@ export function createFx({ onDeath, onWin } = {}) {
   const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
   const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false, amount: 0 }));
   const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
-  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn, magnet: 0, levelGlow: 0 };
+  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn, magnet: 0, levelGlow: 0, surgeWarn: 0 };
   // 技能用的扩散圆环（震荡波、磁吸都用它）
   const rings = Array.from({ length: 14 }, () => ({ active: false, x: 0, y: 0, r: 0, max: 0, life: 0, color: '#fff' }));
   // 冲刺残影：冲刺期间由渲染层每隔一帧丢一个进来，渐隐。
@@ -234,10 +234,13 @@ export function createFx({ onDeath, onWin } = {}) {
       fxState.warnColor = P.warn;
       sfx.elite();
     },
+    // 冲锋潮是四面围一圈刷出来的，所以预警也画成"四边一起亮"，
+    // 而不是只在屏幕中央写一行字（等看完字人已经被围住了）
     surge: () => {
       fxState.warn = 1.4;
       fxState.warnText = '冲锋来袭';
       fxState.warnColor = P.danger;
+      fxState.surgeWarn = 1.6;
       fxState.shake = Math.max(fxState.shake, 6);
       sfx.surge();
     },
@@ -426,6 +429,7 @@ export function createFx({ onDeath, onWin } = {}) {
   }
   if (fxState.magnet > 0) fxState.magnet = Math.max(0, fxState.magnet - dt);
   if (fxState.levelGlow > 0) fxState.levelGlow = Math.max(0, fxState.levelGlow - dt);
+  if (fxState.surgeWarn > 0) fxState.surgeWarn = Math.max(0, fxState.surgeWarn - dt);
   if (fxState.shake > 0) fxState.shake = Math.max(0, fxState.shake - dt * 22);
     if (fxState.flash > 0) fxState.flash = Math.max(0, fxState.flash - dt * 1.6);
     if (fxState.warn > 0) fxState.warn = Math.max(0, fxState.warn - dt);
@@ -440,6 +444,7 @@ export function createFx({ onDeath, onWin } = {}) {
     for (const sd of shards) sd.active = false;
     fxState.magnet = 0;
     fxState.levelGlow = 0;
+    fxState.surgeWarn = 0;
     fxState.shake = 0;
     fxState.flash = 0;
     fxState.warn = 0;

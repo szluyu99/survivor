@@ -638,6 +638,40 @@ test('子弹按武器分形状，高速弹带拖尾', async () => {
   }
 });
 
+test('敌人出场有落地涟漪，被眩晕时头顶有标记', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  const slot = w.enemies.find((e) => !e.active) || w.enemies[0];
+  try {
+    // 出场涟漪：从"上一帧不在、这一帧在"推出来，所以先跑一帧建立基线
+    slot.active = false;
+    runFrames(1);
+    Object.assign(slot, {
+      active: true, kind: 'grunt', x: w.player.x + 140, y: w.player.y, r: 12,
+      maxHp: 100, hp: 100, speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 1e9, stun: 0,
+      state: 'chase', stateT: 1, armor: 0, gen: 0,
+    });
+    calls.length = 0;
+    runFrames(1);
+    // 涟漪半径从 0.6r 起步，比实体本身大：数"半径大于 r 的圈"
+    const ripples = calls.filter(([m, a]) => m === 'arc' && a[2] > slot.r && a[2] < slot.r * 3).length;
+    assert.ok(ripples > 0, '新出场的敌人没有涟漪');
+
+    // 眩晕标记：半径 3 的小圈，一只怪两个
+    slot.stun = 2;
+    calls.length = 0;
+    runFrames(1);
+    const marks = calls.filter(([m, a]) => m === 'arc' && Math.abs(a[2] - 3) < 0.01).length;
+    assert.ok(marks >= 2, `眩晕标记没画出来（半径 3 的圈只有 ${marks} 个）`);
+  } finally {
+    slot.active = false;
+    slot.stun = 0;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
 test('升级会弹金色冲击环，玩家短暂发光', () => {
   const w = globalThis.__survivorWorld;
   const realMaxHp = w.player.maxHp;

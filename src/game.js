@@ -900,6 +900,31 @@ function samplePlayerSpeed(w, dt) {
   lastPy = w.player.y;
 }
 
+// 敌人出场的落地涟漪：怪是在视野外圈生成的，进画面时缺"落地"这一下。
+// 判断方式是渲染层自己记住上一帧每个池位的 active 状态——这样既不用新增 fx 事件
+// （fx 池只有 64 格，冲锋潮一次刷 34 只会把 hit/kill 挤掉），也不用改逻辑层
+let spawnSeen = null;
+function sampleSpawns(w) {
+  const list = w.enemies;
+  if (!spawnSeen || spawnSeen.length !== list.length) spawnSeen = new Uint8Array(list.length);
+  for (let i = 0; i < list.length; i++) {
+    const on = list[i].active ? 1 : 0;
+    if (on && !spawnSeen[i]) pushSpawnRipple(list[i].x, list[i].y, list[i].r);
+    spawnSeen[i] = on;
+  }
+}
+
+// 涟漪自己用一个很小的池：同一帧最多刷 34 只，给 40 格
+const ripples = Array.from({ length: 40 }, () => ({ active: false, x: 0, y: 0, r: 0, life: 0 }));
+function pushSpawnRipple(x, y, r) {
+  for (const o of ripples) {
+    if (o.active) continue;
+    o.active = true;
+    o.x = x; o.y = y; o.r = r; o.life = 0.34;
+    return;
+  }
+}
+
 // 冲刺残影的采样：隔一帧丢一个。放在渲染层是刻意的——
 // 它一个字节都不改逻辑，所以录像重演和平衡断言都不受影响
 let ghostTick = 0;
@@ -926,6 +951,7 @@ function camLead(w) {
 function render(w) {
   sampleDashGhost(w);
   samplePlayerSpeed(w, 1 / 60);
+  sampleSpawns(w);
   camLead(w);
   const camX = w.player.x - VIEW_W / 2 + camLeadX;
   const camY = w.player.y - VIEW_H / 2 + camLeadY;
@@ -993,6 +1019,29 @@ function render(w) {
   // --- 经验球：两种大小各攒一条路径 ---
   drawGems(w, camX, camY, P.gem, false);
   drawGems(w, camX, camY, P.gemBig, true);
+
+  // 出场涟漪：一圈向外扩、渐隐的细环，攒一条路径一次 stroke
+  {
+    ctx.beginPath();
+    let n = 0;
+    for (const o of ripples) {
+      if (!o.active) continue;
+      o.life -= 1 / 60;
+      if (o.life <= 0) { o.active = false; continue; }
+      const t0 = 1 - o.life / 0.34;
+      const rr = o.r * (0.6 + t0 * 1.9);
+      ctx.moveTo(o.x - camX + rr, o.y - camY);
+      ctx.arc(o.x - camX, o.y - camY, rr, 0, Math.PI * 2);
+      n++;
+    }
+    if (n) {
+      ctx.strokeStyle = P.enemy.grunt;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // 敌人脚下的阴影：玩家一直有、敌人一个都没有，所以玩家像站在地上、怪像浮着。
   // 所有椭圆攒进一条路径，一次 fill 画完（几百只怪也只多一次调用）
@@ -1087,6 +1136,29 @@ function render(w) {
     splitters++;
   }
   if (splitters) { ctx.strokeStyle = P.outline; ctx.lineWidth = 2; ctx.stroke(); }
+
+  // 被眩晕的敌人：头顶两个小圈。震荡波的价值全在"这几秒它们不动也不咬人"，
+  // 不标出来的话玩家只能靠"怎么它们不动了"自己推断
+  {
+    ctx.beginPath();
+    let stunned = 0;
+    for (const e of w.enemies) {
+      if (!e.active || e.stun <= 0) continue;
+      const ex = e.x - camX, ey = e.y - camY - e.r - 8;
+      for (const off of [-5, 5]) {
+        ctx.moveTo(ex + off + 3, ey);
+        ctx.arc(ex + off, ey, 3, 0, Math.PI * 2);
+      }
+      stunned++;
+    }
+    if (stunned) {
+      ctx.strokeStyle = P.shock;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.85;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // 精英和 Boss 掉到 35% 血以下：外面套一圈暗红，"快死了"在余光里也看得见。
   // 只有它们才有这个（同屏最多十几只），普通杂兵靠数量说话，标了反而更乱
@@ -1495,6 +1567,19 @@ function render(w) {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   drawVignette();
+  // 冲锋潮：四条边一起亮，和"四面围一圈刷怪"这件事对上
+  if (fxState.surgeWarn > 0) {
+    const a = Math.min(1, fxState.surgeWarn / 1.6) * (0.5 + 0.5 * Math.sin(w.t * 14));
+    const band = 26;
+    ctx.globalAlpha = a * 0.5;
+    ctx.fillStyle = P.danger;
+    ctx.fillRect(0, 0, VIEW_W, band);
+    ctx.fillRect(0, VIEW_H - band, VIEW_W, band);
+    ctx.fillRect(0, 0, band, VIEW_H);
+    ctx.fillRect(VIEW_W - band, 0, band, VIEW_H);
+    ctx.globalAlpha = 1;
+  }
+
   // 低血量红边：低于 40% 开始出现，越低越明显，还带一点呼吸
   const hpRatio = w.player.hp / w.player.maxHp;
   if (hpRatio < 0.4) {
