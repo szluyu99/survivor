@@ -10,13 +10,21 @@ import { HEROES, DEFAULT_HERO } from './heroes.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
 import { defaultStats, normalizeStats } from './achievements.js';
 
-// 结算公式：存活时长为主，击杀为辅，再乘难度倍率、加通关奖励。
+// 结算公式：存活时长为主，击杀为辅，加上"打通了几段区域"，再乘难度倍率、加通关奖励。
 // 产出和价格一起校准过一次：加了精英原型之后基准局长从 116 秒掉到 90 秒，
 // 老公式（t/8 + kills/20）的中位产出只有 20 片，全解锁要 36 局，明显变成刷了。
-// 现在中位约 40 片、全解锁约 12 局。通关奖励给得比一局的自然产出还多，
+//
+// 区域段奖励是交界 Boss 战那次改造补上的：卡在 Boss 那一段既拿不到新区域的收益、
+// 也推进不了，中位产出从 43 掉到 32 片（全解锁 15 局）。把奖励挂在"打倒交界 Boss"上
+// 而不是回调系数，是因为这样多出来的收入正好对应新增的那件事。
+// 现在中位约 42 片、全解锁约 12 局。通关奖励给得比一局的自然产出还多，
 // 让"打通"明显比"苟活"划算
+export const ZONE_CLEAR_BONUS = 10;
+
 export function earnShards(w) {
-  const base = Math.floor(w.t / 6) + Math.floor(w.kills / 12);
+  // zoneIndex 就是打通的段数：区域只有在交界 Boss 倒下之后才会 +1
+  const cleared = (w.zoneIndex || 0) * ZONE_CLEAR_BONUS;
+  const base = Math.floor(w.t / 6) + Math.floor(w.kills / 12) + cleared;
   const mul = findDifficulty(w.difficulty).shardMul;
   return Math.floor(base * mul) + (w.won ? WIN_BONUS : 0);
 }

@@ -8,7 +8,7 @@ import { WEAPONS, ALL_WEAPONS, MAX_SLOTS, findWeapon } from './weapons.js';
 import { DASH } from './sim.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, PAUSE_BTN, SKILL_BTN, REROLL_BTN, banishBtn, REPLAY_BTN, HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_BTN, menuBtnX, menuBtnY, BACK_BTN, TAB_BTN, tabBtnX, INFO_BTN, EXIT_BTN } from './layout.js';
 import { HEROES, findHero } from './heroes.js';
-import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked } from './meta.js';
+import { PERKS, perkCost, heroCost, isUnlocked, defaultMeta, earnShards, difficultyUnlocked, ZONE_CLEAR_BONUS } from './meta.js';
 import { currentZone, ZONE_SECONDS, ZONES } from './zones.js';
 import { ACHIEVEMENTS, achievementRows, statRows, doneCount } from './achievements.js';
 import { DIFFICULTIES, findDifficulty, DEFAULT_DIFFICULTY, WIN_BONUS } from './difficulty.js';
@@ -552,10 +552,14 @@ export function createHud(ctx, deps) {
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText(isNew ? '新纪录！' : `最好 ${clock(bestRun.t)} / ${bestRun.kills} 杀`, VIEW_W / 2, 176);
     }
-    // 本局赚到的残片：结算时才结账，所以这里直接按公式显示
+    // 本局赚到的残片：结算时才结账，所以这里直接按公式显示。
+    // 两笔额外收入写出来，否则"这局为什么多这么多"只能靠猜
     ctx.fillStyle = P.calm;
     ctx.font = '15px ui-monospace, monospace';
-    const bonus = w.won ? `（含通关 +${WIN_BONUS}）` : '';
+    const parts = [];
+    if (w.zoneIndex > 0) parts.push(`推进 ${w.zoneIndex} 段 +${w.zoneIndex * ZONE_CLEAR_BONUS}`);
+    if (w.won) parts.push(`通关 +${WIN_BONUS}`);
+    const bonus = parts.length ? `（含${parts.join('、')}）` : '';
     ctx.fillText(
       `${findDifficulty(w.difficulty).name}难度 · ${findHero(w.hero).name}　本局 +${earnShards(w)} 残片${bonus}　共 ${meta().shards} 片`,
       VIEW_W / 2, 208,

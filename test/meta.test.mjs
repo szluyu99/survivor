@@ -167,6 +167,20 @@ test('残片按难度倍率结算，通关另外给奖励', () => {
   assert.equal(earnShards({ ...run, won: true }), plain + WIN_BONUS);
 });
 
+test('打通的区域段数也算钱，而且吃难度倍率', () => {
+  const run = { t: 90, kills: 170, difficulty: DEFAULT_DIFFICULTY, won: false };
+  const none = earnShards({ ...run, zoneIndex: 0 });
+  const one = earnShards({ ...run, zoneIndex: 1 });
+  const three = earnShards({ ...run, zoneIndex: 3 });
+  assert.ok(one > none, '打通一段应该比卡在第一段多拿');
+  assert.ok(three - one > one - none, '段数奖励不该是一次性的');
+  // 段奖励算在难度倍率之前：噩梦局打通同样段数应该多拿更多
+  const nightmare = DIFFICULTIES[1];
+  const hardNone = earnShards({ ...run, zoneIndex: 0, difficulty: nightmare.id });
+  const hardOne = earnShards({ ...run, zoneIndex: 1, difficulty: nightmare.id });
+  assert.ok(hardOne - hardNone > one - none, '噩梦难度的段奖励没有跟着倍率放大');
+});
+
 test('脏存档里的通关记录会被洗掉', () => {
   const m = normalizeMeta({ beaten: ['normal', 'normal', '不存在的难度'] });
   assert.deepEqual(m.beaten, ['normal']);
