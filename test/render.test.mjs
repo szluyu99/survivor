@@ -583,6 +583,50 @@ test('密集场面下绘制调用不随敌人数量线性增长（同色实体�
   }
 });
 
+test('新加的特效也走批量绘制（碎片、时缓光环、残影都不许逐个切状态）', () => {
+  // 击杀碎片、时缓的敌人光环、冲刺残影都是"一次可能有几十上百个"的东西，
+  // 逐个 fill / stroke 会把之前压下去的调用数吃回来（9700 → 3800 那次优化）
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  const realSlow = w.slowT;
+  w.player.hp = w.player.maxHp = 1e9;
+  // 摆一堆怪 + 打开时缓 + 把碎片池灌满
+  let placed = 0;
+  for (const e of w.enemies) {
+    if (placed >= 150) break;
+    if (e.active) continue;
+    Object.assign(e, {
+      active: true, kind: 'grunt', x: w.player.x + ((placed * 41) % 800) - 400,
+      y: w.player.y + ((placed * 61) % 460) - 230, r: 10, maxHp: 1e9, hp: 1e9,
+      speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 1e9,
+    });
+    placed++;
+  }
+  w.slowT = 3;
+  w.slowMul = 0.3;
+  for (let i = 0; i < 40; i++) {
+    for (const f of w.fx) {
+      if (f.active) continue;
+      Object.assign(f, { active: true, type: 'kill', x: w.player.x + i * 7, y: w.player.y, amount: 12, kind: 'grunt' });
+      break;
+    }
+  }
+  try {
+    calls.length = 0;
+    const FRAMES = 30;
+    runFrames(FRAMES, 1200000);
+    const strokes = calls.filter(([m]) => m === 'stroke').length / FRAMES;
+    const fills = calls.filter(([m]) => m === 'fill').length / FRAMES;
+    assert.ok(strokes < 100, `每帧 ${strokes.toFixed(0)} 次 stroke，新特效退化成逐个画了`);
+    assert.ok(fills < 100, `每帧 ${fills.toFixed(0)} 次 fill，新特效退化成逐个画了`);
+  } finally {
+    for (const e of w.enemies) if (e.maxHp === 1e9) e.active = false;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+    w.slowT = realSlow;
+  }
+});
+
 test('色板里没有重复色值（撞色会让人分不清语义）', async () => {
   const { P } = await import('../src/palette.js');
   const flat = [];

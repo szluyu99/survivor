@@ -83,7 +83,7 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     chestTimer: TERRAIN_TUNING.firstChest,
 
     // 逻辑层只登记"发生了什么"，粒子/音效/震屏交给渲染层消费后自行回收
-    fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0 })),
+    fx: pool(MAX_FX, () => ({ active: false, type: '', x: 0, y: 0, x2: 0, y2: 0, amount: 0, kind: '' })),
     spawnTimer: 0,
     eliteTimer: SPAWN_TIMERS.firstElite,
     bossTimer: SPAWN_TIMERS.bossIdle, // Boss 由区域交界召唤，不自己计时
@@ -179,7 +179,7 @@ function noteKill(w) {
   arr[bucket]++;
 }
 
-function emit(w, type, x, y, amount = 0) {
+function emit(w, type, x, y, amount = 0, kind = '') {
   // 类型必须在登记表里：拼错或者新增事件忘了登记，会在这里立刻炸出来，
   // 而不是变成"游戏照常跑但那个动作没声没画面"
   if (!isFxEvent(type)) throw new Error(`未登记的 fx 事件类型：${type}`);
@@ -190,6 +190,9 @@ function emit(w, type, x, y, amount = 0) {
   f.x = x;
   f.y = y;
   f.amount = amount;
+  // kind 只给表现层用（击杀碎片要按兵种形状和颜色来拆），逻辑不读它。
+  // fx 不进快照，所以加这个字段不影响回放确定性
+  f.kind = kind;
 }
 
 // 通用词条：不绑定具体武器
@@ -275,7 +278,7 @@ function killEnemy(w, e) {
   if (kind === 'elite') eliteOnDeath(w, e, enemyCtx);
   // 裂变者死了会裂成两只小 Boss，这时不该报"BOSS 倒下"（它还没真的倒下）
   const fissioned = kind === 'boss' && bossFissionOnDeath(w, e, enemyCtx);
-  emit(w, kind === 'boss' ? (fissioned ? 'kill' : 'bossdead') : 'kill', x, y, r);
+  emit(w, kind === 'boss' ? (fissioned ? 'kill' : 'bossdead') : 'kill', x, y, r, kind);
   // 通关：在最后一个区域打死 Boss。裂变者裂出的子体还没清完时不算
   if (kind === 'boss' && !fissioned && !w.won && w.zoneIndex === ZONES.length - 1) {
     w.won = true;

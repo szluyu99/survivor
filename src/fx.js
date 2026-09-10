@@ -12,9 +12,17 @@ export function createFx({ onDeath, onWin } = {}) {
   const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
   const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false, amount: 0 }));
   const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
-  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn };
+  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn, magnet: 0 };
   // 技能用的扩散圆环（震荡波、磁吸都用它）
-  const rings = Array.from({ length: 8 }, () => ({ active: false, x: 0, y: 0, r: 0, max: 0, life: 0, color: '#fff' }));
+  const rings = Array.from({ length: 14 }, () => ({ active: false, x: 0, y: 0, r: 0, max: 0, life: 0, color: '#fff' }));
+  // 冲刺残影：冲刺期间由渲染层每隔一帧丢一个进来，渐隐。
+  // 之前冲刺在画面上只多一圈无敌光环，"我刚才闪过去了"完全看不出来
+  const ghosts = Array.from({ length: 10 }, () => ({ active: false, x: 0, y: 0, r: 0, life: 0, max: 1 }));
+  // 击杀碎片：把死掉的敌人拆成几块同形状的小号色块飞散，
+  // 比一团圆点粒子更贴这游戏"打碎一个色块"的美术语言
+  const shards = Array.from({ length: 140 }, () => ({
+    active: false, x: 0, y: 0, vx: 0, vy: 0, r: 0, life: 0, max: 1, rot: 0, spin: 0, kind: 'grunt', color: '#fff',
+  }));
 
   function ring(x, y, max, color) {
     const o = take(rings);
@@ -26,6 +34,35 @@ export function createFx({ onDeath, onWin } = {}) {
   function take(list) {
     for (const o of list) if (!o.active) return o;
     return null;
+  }
+
+  // 冲刺残影：渲染层按帧采样调用（逻辑层不参与，所以不影响回放）
+  function pushGhost(x, y, r) {
+    const g = take(ghosts);
+    if (!g) return;
+    g.active = true;
+    g.x = x; g.y = y; g.r = r;
+    g.life = g.max = 0.26;
+  }
+
+  // 把一只死掉的敌人拆成 n 块碎片
+  function burstShards(x, y, r, kind, color, n = 4) {
+    for (let i = 0; i < n; i++) {
+      const sd = take(shards);
+      if (!sd) return;
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.6;
+      const sp = 90 + Math.random() * 130;
+      sd.active = true;
+      sd.x = x; sd.y = y;
+      sd.vx = Math.cos(a) * sp;
+      sd.vy = Math.sin(a) * sp;
+      sd.r = Math.max(3, r * (0.3 + Math.random() * 0.2));
+      sd.life = sd.max = 0.34 + Math.random() * 0.22;
+      sd.rot = Math.random() * Math.PI * 2;
+      sd.spin = (Math.random() - 0.5) * 14;
+      sd.kind = kind || 'grunt';
+      sd.color = color;
+    }
   }
 
   function burst(x, y, n, color, speed, size) {
@@ -50,6 +87,23 @@ export function createFx({ onDeath, onWin } = {}) {
   // 30 → 36 是因为后来加的范围武器（新星的脉冲、贯日炮的线）一帧命中十几只，
   // 30px 的圈已经拦不住"擦边叠在一起"的那几对
   const NUM_MERGE_R2 = 36 * 36;
+
+  // 有方向的喷溅：粒子集中在 base 方向的一个锥形里
+  function spray(x, y, n, color, speed, size, base, spread = 0.9) {
+    for (let i = 0; i < n; i++) {
+      const p = take(particles);
+      if (!p) return;
+      const a = base + (Math.random() - 0.5) * spread * 2;
+      const s = speed * (0.5 + Math.random() * 0.7);
+      p.active = true;
+      p.x = x; p.y = y;
+      p.vx = Math.cos(a) * s;
+      p.vy = Math.sin(a) * s;
+      p.life = p.max = 0.22 + Math.random() * 0.26;
+      p.r = size * (0.6 + Math.random() * 0.8);
+      p.color = color;
+    }
+  }
 
   function popNumber(x, y, amount, crit = false) {
     for (const o of numbers) {
@@ -80,18 +134,26 @@ export function createFx({ onDeath, onWin } = {}) {
   // 消费逻辑层这一帧登记的事件，转成画面和声音
   // 事件 → 表现的处理表。用表而不是 if/else 链，是为了能被测试检查"有没有漏接"
   const handlers = {
-    hit: (f) => {
-      burst(f.x, f.y, 3, P.hitSpark, 90, 2);
+    // 命中的火花沿"从玩家指向目标"的方向喷，而不是四散：
+    // 方向感是"这一下是我打的"最便宜的表达，且不需要逻辑层多传任何字段
+    hit: (f, w) => {
+      spray(f.x, f.y, 3, P.hitSpark, 110, 2, Math.atan2(f.y - w.player.y, f.x - w.player.x));
       popNumber(f.x, f.y - 12, f.amount);
       sfx.hit();
     },
-    crit: (f) => {
-      burst(f.x, f.y, 6, P.warn, 130, 2.5);
+    crit: (f, w) => {
+      spray(f.x, f.y, 6, P.warn, 150, 2.5, Math.atan2(f.y - w.player.y, f.x - w.player.x));
       popNumber(f.x, f.y - 14, f.amount, true);
       sfx.crit();
     },
+    // 击杀：碎裂成同形状的小色块 + 少量火花。
+    // f.kind 是死者的兵种（emit 时带上的），拿不到就退回圆形碎片
     kill: (f) => {
-      burst(f.x, f.y, 10, P.killSpark, 170, 3);
+      // 小怪拆 3 块、大个子拆 5 块：密集场面里小怪是绝大多数，
+      // 一律 4 块的话池子（140）几秒就见底，反而是大 Boss 的碎裂被挤掉
+      const n = f.amount >= 18 ? 5 : f.amount >= 12 ? 4 : 3;
+      burstShards(f.x, f.y, f.amount || 12, f.kind, P.enemy[f.kind] || P.killSpark, n);
+      burst(f.x, f.y, 5, P.killSpark, 150, 2.5);
       fxState.shake = Math.max(fxState.shake, 1.6);
       sfx.kill();
     },
@@ -131,18 +193,28 @@ export function createFx({ onDeath, onWin } = {}) {
       burst(f.x, f.y, 12, P.playerRing, 150, 2.5);
       sfx.dash();
     },
+    // 震荡波：三层不同大小的环叠出"厚度"，再沿一圈方向甩粒子。
+    // 单独一个圆环太薄，看不出这是全场最重的一次爆发
     shock: (f) => {
       ring(f.x, f.y, f.amount, P.shock);
-      burst(f.x, f.y, 24, P.shock, 260, 3);
+      ring(f.x, f.y, f.amount * 0.62, P.shock);
+      ring(f.x, f.y, f.amount * 1.18, P.playerRing);
+      for (let i = 0; i < 12; i++) {
+        spray(f.x, f.y, 2, P.shock, 300, 3, (i / 12) * Math.PI * 2, 0.16);
+      }
       fxState.shake = Math.max(fxState.shake, 8);
       sfx.shock();
     },
-    slow: () => {
+    slow: (f) => {
+      // 敌人残影由渲染层按 w.slowT 画，这里只负责"按下去的那一刻"
       fxState.flash = 0.12;
+      ring(f.x, f.y, 420, P.calm);
       sfx.slow();
     },
     magnet: (f) => {
       ring(f.x, f.y, 260, P.gem);
+      // 渲染层在这段时间里给每颗经验球拉一条尾迹
+      fxState.magnet = 0.5;
       sfx.magnet();
     },
     decoy: (f) => {
@@ -332,6 +404,22 @@ export function createFx({ onDeath, onWin } = {}) {
     if (o.life <= 0) { o.active = false; continue; }
     o.r += (o.max - o.r) * Math.min(1, dt * 9); // 快速扩张后减速，像冲击波
   }
+  for (const g of ghosts) {
+    if (!g.active) continue;
+    g.life -= dt;
+    if (g.life <= 0) g.active = false;
+  }
+  for (const sd of shards) {
+    if (!sd.active) continue;
+    sd.life -= dt;
+    if (sd.life <= 0) { sd.active = false; continue; }
+    sd.x += sd.vx * dt;
+    sd.y += sd.vy * dt;
+    sd.vx *= 0.9;
+    sd.vy *= 0.9;
+    sd.rot += sd.spin * dt;
+  }
+  if (fxState.magnet > 0) fxState.magnet = Math.max(0, fxState.magnet - dt);
   if (fxState.shake > 0) fxState.shake = Math.max(0, fxState.shake - dt * 22);
     if (fxState.flash > 0) fxState.flash = Math.max(0, fxState.flash - dt * 1.6);
     if (fxState.warn > 0) fxState.warn = Math.max(0, fxState.warn - dt);
@@ -342,10 +430,13 @@ export function createFx({ onDeath, onWin } = {}) {
     for (const n of numbers) n.active = false;
     for (const b of bolts) b.active = false;
     for (const o of rings) o.active = false;
+    for (const g of ghosts) g.active = false;
+    for (const sd of shards) sd.active = false;
+    fxState.magnet = 0;
     fxState.shake = 0;
     fxState.flash = 0;
     fxState.warn = 0;
   }
 
-  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts, rings, handlers };
+  return { consumeFx, stepFx, reset, state: fxState, particles, numbers, bolts, rings, ghosts, shards, pushGhost, handlers };
 }

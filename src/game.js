@@ -61,7 +61,7 @@ resize();
 window.addEventListener('resize', resize);
 
 const fx = createFx({ onDeath: (w) => saveBest(w), onWin: (w) => finishRun(w) });
-const { consumeFx, stepFx, state: fxState, particles, numbers, bolts } = fx;
+const { consumeFx, stepFx, state: fxState, particles, numbers, bolts, ghosts, shards, pushGhost } = fx;
 const hud = createHud(ctx, {
   shapes: { circle, shapePath, drawEntity, drawGrid, drawVignette, drawTerrain },
   fxState,
@@ -874,9 +874,19 @@ function drawGems(w, camX, camY, color, big) {
   if (n) { ctx.fillStyle = color; ctx.fill(); }
 }
 
+// 冲刺残影的采样：隔一帧丢一个。放在渲染层是刻意的——
+// 它一个字节都不改逻辑，所以录像重演和平衡断言都不受影响
+let ghostTick = 0;
+function sampleDashGhost(w) {
+  if (w.player.dashT <= 0) return;
+  ghostTick = (ghostTick + 1) % 2;
+  if (ghostTick === 0) pushGhost(w.player.x, w.player.y, w.player.r);
+}
+
 function render(w) {
   const camX = w.player.x - VIEW_W / 2;
   const camY = w.player.y - VIEW_H / 2;
+  sampleDashGhost(w);
   ctx.fillStyle = P.bg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
@@ -913,6 +923,27 @@ function render(w) {
     ctx.fillStyle = color;
     ctx.fill();
     ctx.stroke();
+  }
+
+  // 时缓期间给每只敌人套一圈冷色光环：比单纯闪白更能表达"它们变慢了"。
+  // 攒成一条路径，一次 stroke 画完（几百只怪也只多一次 canvas 调用）
+  if (w.slowT > 0) {
+    ctx.beginPath();
+    let slowed = 0;
+    for (const e of w.enemies) {
+      if (!e.active) continue;
+      const ex = e.x - camX, ey = e.y - camY, r = e.r + 4;
+      ctx.moveTo(ex + r, ey);
+      ctx.arc(ex, ey, r, 0, Math.PI * 2);
+      slowed++;
+    }
+    if (slowed) {
+      ctx.strokeStyle = P.calm;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.25 + 0.35 * Math.min(1, w.slowT);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
   // 分裂怪的内圈也是同色同线宽，攒成一条路径
@@ -1066,6 +1097,58 @@ function render(w) {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+  // 击杀碎片：按颜色分组，同色一次 fill（形状用死者的兵种，"打碎一个色块"）
+  bucketReset();
+  for (const sd of shards) if (sd.active) bucketPush(sd.color, sd);
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    // 透明度按剩余寿命量化成 4 档，避免逐个切 globalAlpha
+    for (let lv = 4; lv >= 1; lv--) {
+      let n = 0;
+      ctx.beginPath();
+      for (const sd of list) {
+        const a = Math.max(0, Math.min(1, sd.life / sd.max));
+        if (Math.ceil(a * 4) !== lv) continue;
+        subPath(sd.kind, sd.x - camX, sd.y - camY, sd.r, sd.rot);
+        n++;
+      }
+      if (n) {
+        ctx.globalAlpha = lv / 4;
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // 冲刺残影：越旧越淡的同形状轮廓，让"刚才那一下闪过去了"看得见
+  if (ghosts.some((g) => g.active)) {
+    ctx.strokeStyle = P.playerRing;
+    ctx.lineWidth = 2;
+    for (const g of ghosts) {
+      if (!g.active) continue;
+      ctx.globalAlpha = 0.42 * (g.life / g.max);
+      shapePath('grunt', g.x - camX, g.y - camY, g.r, 0);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // 磁吸的余韵：给每颗经验球拉一条指向玩家的细线
+  if (fxState.magnet > 0) {
+    ctx.strokeStyle = P.gem;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.2 + 0.5 * fxState.magnet;
+    ctx.beginPath();
+    for (const g of w.gems) {
+      if (!g.active) continue;
+      ctx.moveTo(g.x - camX, g.y - camY);
+      ctx.lineTo(w.player.x - camX, w.player.y - camY);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // 技能的扩散圆环
   for (const o of fx.rings) {
     if (!o.active) continue;
