@@ -110,8 +110,10 @@ function tabBtnHit(x, y, count) {
   return -1;
 }
 
-// 局内 HUD 上的"详情"开关：次要信息（装备、最好成绩、阶段、精英倒计时）收进浮层
-const INFO_BTN = { x: VIEW_W - 150, y: VIEW_H - 40, w: 134, h: 26 };
+// 局内 HUD 上的"详情"开关：次要信息（装备、最好成绩、阶段、精英倒计时）收进浮层。
+// 放在暂停按钮右边而不是右下角：右下角是两个技能槽（SKILL_BTN 占 810..942 / 462..524），
+// 之前按钮框和"收起详情（Tab）"这行字直接压在 Q / E 上
+const INFO_BTN = { x: PAUSE_BTN.x + PAUSE_BTN.w + 8, y: VIEW_H - 40, w: 134, h: 26 };
 const inInfoBtn = (x, y) => x >= INFO_BTN.x && x <= INFO_BTN.x + INFO_BTN.w
   && y >= INFO_BTN.y && y <= INFO_BTN.y + INFO_BTN.h;
 

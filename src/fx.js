@@ -9,7 +9,7 @@ import { currentZone } from './zones.js';
 export function createFx({ onDeath, onWin } = {}) {
   // ---- 表现层状态：粒子、跳字、震屏、闪白。全部对象池，不在帧里 new ----
   const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
-  const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false }));
+  const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false, amount: 0 }));
   const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
   const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn };
   // 技能用的扩散圆环（震荡波、磁吸都用它）
@@ -43,7 +43,21 @@ export function createFx({ onDeath, onWin } = {}) {
     }
   }
 
-  function popNumber(x, y, text, crit = false) {
+  // 跳字合并半径。密集场面里一秒能有几十次命中，每次都单独弹一个数字的话
+  // 屏幕上就是一片糊在一起的数字（池子 48 个也很快见底）。
+  // 近处已有跳字就把伤害累加进去，只留一个不断变大的数
+  const NUM_MERGE_R2 = 30 * 30;
+
+  function popNumber(x, y, amount, crit = false) {
+    for (const o of numbers) {
+      if (!o.active || o.crit !== crit) continue;
+      const dx = o.x - x, dy = o.y - y;
+      if (dx * dx + dy * dy > NUM_MERGE_R2) continue;
+      o.amount += amount;
+      o.text = crit ? `${Math.round(o.amount)}!` : String(Math.round(o.amount));
+      o.life = Math.max(o.life, crit ? 0.75 : 0.55); // 还在累加就续上寿命
+      return;
+    }
     const n = take(numbers);
     if (!n) return;
     n.active = true;
@@ -51,7 +65,8 @@ export function createFx({ onDeath, onWin } = {}) {
     n.y = y;
     n.vy = crit ? -62 : -46;
     n.life = crit ? 0.75 : 0.55;
-    n.text = text;
+    n.amount = amount;
+    n.text = crit ? `${Math.round(amount)}!` : String(Math.round(amount));
     n.crit = crit;
   }
 
@@ -60,12 +75,12 @@ export function createFx({ onDeath, onWin } = {}) {
   const handlers = {
     hit: (f) => {
       burst(f.x, f.y, 3, P.hitSpark, 90, 2);
-      popNumber(f.x, f.y - 12, Math.round(f.amount));
+      popNumber(f.x, f.y - 12, f.amount);
       sfx.hit();
     },
     crit: (f) => {
       burst(f.x, f.y, 6, P.warn, 130, 2.5);
-      popNumber(f.x, f.y - 14, `${Math.round(f.amount)}!`, true);
+      popNumber(f.x, f.y - 14, f.amount, true);
       sfx.crit();
     },
     kill: (f) => {

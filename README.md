@@ -16,7 +16,7 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度（191 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（209 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 14 秒
 npm run validate   # 内容表结构校验
