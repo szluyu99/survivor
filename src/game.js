@@ -4,6 +4,7 @@ import { WEAPONS, EVO_WEAPONS, AWAKEN_WEAPONS, MAX_SLOTS, findWeapon } from './w
 import { VIEW_W, VIEW_H } from './view.js';
 import { unlock, toggleMute, sfx } from './audio.js';
 import { P } from './palette.js';
+import { BOSS, PLAYER } from './tuning.js';
 import { createShapes } from './shapes.js';
 import { createFx } from './fx.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from './layout.js';
@@ -874,6 +875,20 @@ function drawGems(w, camX, camY, color, big) {
   if (n) { ctx.fillStyle = color; ctx.fill(); }
 }
 
+// 玩家速度的渲染层估算：拿相邻两帧的位置差算，只用来做挤压拉伸的幅度。
+// 逻辑层不存速度字段，这里也不该为了一个视觉效果去改它
+let playerSpeedGuess = 0;
+let lastPx = null, lastPy = null;
+function samplePlayerSpeed(w, dt) {
+  if (lastPx !== null && dt > 0) {
+    const d = Math.hypot(w.player.x - lastPx, w.player.y - lastPy);
+    // 低通滤一下，否则被岩块挡住的那一帧会突然回弹
+    playerSpeedGuess += ((d / dt) - playerSpeedGuess) * 0.25;
+  }
+  lastPx = w.player.x;
+  lastPy = w.player.y;
+}
+
 // 冲刺残影的采样：隔一帧丢一个。放在渲染层是刻意的——
 // 它一个字节都不改逻辑，所以录像重演和平衡断言都不受影响
 let ghostTick = 0;
@@ -887,6 +902,7 @@ function render(w) {
   const camX = w.player.x - VIEW_W / 2;
   const camY = w.player.y - VIEW_H / 2;
   sampleDashGhost(w);
+  samplePlayerSpeed(w, 1 / 60);
   ctx.fillStyle = P.bg;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
@@ -898,6 +914,55 @@ function render(w) {
   drawGrid(camX, camY);
   // 地形画在实体下面：泥地是"地上的水洼"，岩块也不该盖住玩家
   for (const t of w.terrain) if (t.active) drawTerrain(t, camX, camY);
+
+  // Boss 预警的地面指示：把"它要往哪打"画在地上。
+  // 以前只有屏幕顶部一行字，玩家得先认字再反应，来不及
+  for (const e of w.enemies) {
+    if (!e.active || e.kind !== 'boss' || e.state !== 'telegraph') continue;
+    const ex = e.x - camX, ey = e.y - camY;
+    // stateT 从 telegraph 时长倒数到 0，越接近出招越实
+    const total = e.rage ? BOSS.telegraph * BOSS.rageTelegraph : BOSS.telegraph;
+    const prog = Math.max(0, Math.min(1, 1 - e.stateT / total));
+    ctx.globalAlpha = 0.12 + prog * 0.3;
+    if (e.plan === 'charge') {
+      // 冲撞：沿锁定方向铺一条带子，长度就是它这一下能冲多远
+      const len = e.speed * BOSS.chargeMul * BOSS.charge * (e.rage ? BOSS.rageChargeMul : 1);
+      const hw = e.r * 1.5;
+      const nx = -e.moveY, ny = e.moveX;
+      ctx.beginPath();
+      ctx.moveTo(ex + nx * hw, ey + ny * hw);
+      ctx.lineTo(ex + e.moveX * len + nx * hw, ey + e.moveY * len + ny * hw);
+      ctx.lineTo(ex + e.moveX * len - nx * hw, ey + e.moveY * len - ny * hw);
+      ctx.lineTo(ex - nx * hw, ey - ny * hw);
+      ctx.closePath();
+      ctx.fillStyle = P.danger;
+      ctx.fill();
+    } else if (e.plan === 'shoot') {
+      // 弹幕：一圈放射线，提示"四面都要躲"
+      ctx.strokeStyle = P.bossTell;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        ctx.moveTo(ex + Math.cos(a) * (e.r + 6), ey + Math.sin(a) * (e.r + 6));
+        ctx.lineTo(ex + Math.cos(a) * (e.r + 90), ey + Math.sin(a) * (e.r + 90));
+      }
+      ctx.stroke();
+    } else {
+      // 召唤：小怪会从这几个点冒出来
+      ctx.strokeStyle = P.enemy.summoner;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + prog * 1.2;
+        const cx2 = ex + Math.cos(a) * (e.r + 42), cy2 = ey + Math.sin(a) * (e.r + 42);
+        ctx.moveTo(cx2 + 12, cy2);
+        ctx.arc(cx2, cy2, 12, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   // --- 经验球：两种大小各攒一条路径 ---
   drawGems(w, camX, camY, P.gem, false);
@@ -1178,13 +1243,24 @@ function render(w) {
     circle(o.x - camX, o.y - camY, o.r * 0.45, P.orbCore);
   }
 
-  // 玩家：脚下阴影 + 内环，保证一百只怪里也能立刻找到自己
+  // 玩家：脚下阴影 + 朝向偏心的内环 + 移动时的挤压拉伸，
+  // 保证一百只怪里也能立刻找到自己，并且看得出"我朝哪边走 / 刚才往哪冲"
   const pcx = VIEW_W / 2, pcy = VIEW_H / 2;
   ctx.fillStyle = P.shadow;
   ctx.beginPath();
   ctx.ellipse(pcx, pcy + w.player.r * 0.9, w.player.r * 0.95, w.player.r * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
-  drawEntity('grunt', pcx, pcy, w.player.r, w.player.flash > 0 ? P.hitFlash : P.player, 0, 2.5);
+  // 速度由渲染层自己按帧差算（逻辑层不用多存字段），冲刺时直接给满
+  const moveSpeed = w.player.dashT > 0 ? 1 : Math.min(1, playerSpeedGuess / PLAYER.speed);
+  const squash = 0.1 * moveSpeed;
+  const faceAng = Math.atan2(w.player.faceY, w.player.faceX);
+  ctx.save();
+  ctx.translate(pcx, pcy);
+  ctx.rotate(faceAng);
+  ctx.scale(1 + squash, 1 - squash); // 沿前进方向拉长、垂直方向压扁
+  ctx.rotate(-faceAng);
+  drawEntity('grunt', 0, 0, w.player.r, w.player.flash > 0 ? P.hitFlash : P.player, 0, 2.5);
+  ctx.restore();
   if (w.player.invuln > 0) {
     // 无敌期间套一圈光环，让"我现在能穿怪"这件事看得见
     ctx.strokeStyle = P.playerRing;
@@ -1195,10 +1271,12 @@ function render(w) {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+  // 内环偏心指向朝向：比画一个箭头含蓄，但"我面朝哪边"一眼就能读出来
+  const eye = w.player.r * (w.player.dashT > 0 ? 0.42 : 0.3);
   ctx.strokeStyle = P.playerRing;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(pcx, pcy, w.player.r * 0.5, 0, Math.PI * 2);
+  ctx.arc(pcx + w.player.faceX * eye, pcy + w.player.faceY * eye, w.player.r * 0.42, 0, Math.PI * 2);
   ctx.stroke();
 
   // 粒子：按颜色分组，透明度量化成 8 档再批量画。

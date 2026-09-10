@@ -36,7 +36,8 @@ function widthOf(str, size) {
 function makeCtx() {
   const ctx = {};
   const noop = ['setTransform', 'fillRect', 'strokeRect', 'beginPath', 'arc', 'ellipse', 'rect',
-    'fill', 'stroke', 'closePath', 'moveTo', 'lineTo', 'save', 'restore', 'translate', 'clearRect'];
+    'fill', 'stroke', 'closePath', 'moveTo', 'lineTo', 'save', 'restore', 'translate', 'clearRect',
+    'rotate', 'scale'];
   for (const m of noop) ctx[m] = () => {};
   ctx.createRadialGradient = () => ({ addColorStop() {} });
   ctx.measureText = (t) => ({ width: widthOf(t, parseFloat(font) || 13) });

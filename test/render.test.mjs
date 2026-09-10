@@ -9,7 +9,7 @@ let gradients = 0; // 暗角渐变只建一次并缓存，所以要用累计计�
 const CTX_METHODS = [
   'setTransform', 'fillRect', 'strokeRect', 'beginPath', 'arc', 'ellipse', 'rect',
   'fill', 'stroke', 'closePath', 'moveTo', 'lineTo', 'fillText', 'save', 'restore',
-  'translate', 'clearRect',
+  'translate', 'clearRect', 'rotate', 'scale',
 ];
 
 function makeCtx() {
@@ -583,6 +583,69 @@ test('密集场面下绘制调用不随敌人数量线性增长（同色实体�
   }
 });
 
+test('玩家有朝向和挤压：内环偏心、移动时形状被拉长', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  try {
+    // 朝右跑几帧
+    fire(handlers.window, 'keydown', { code: 'KeyD', preventDefault() {} });
+    runFrames(20);
+    calls.length = 0;
+    runFrames(2);
+    fire(handlers.window, 'keyup', { code: 'KeyD' });
+    // 挤压是靠 rotate + scale 做的，逐帧都该出现
+    const scales = calls.filter(([m]) => m === 'scale').map(([, a]) => a);
+    assert.ok(scales.length > 0, '玩家没有做挤压拉伸（一次 scale 都没有）');
+    const [sx, sy] = scales[0];
+    assert.ok(sx > 1 && sy < 1, `移动时该沿前进方向拉长：scale(${sx}, ${sy})`);
+    assert.ok(sx < 1.3 && sy > 0.7, `挤压幅度太夸张：scale(${sx}, ${sy})`);
+    // 内环偏心：朝右跑时环心应该在玩家中心的右边
+    assert.ok(w.player.faceX > 0.5, '前提不成立：玩家没在朝右走');
+    const arcs = calls.filter(([m]) => m === 'arc').map(([, a]) => a);
+    const eye = arcs.find(([x, y, r]) => Math.abs(y - 270) < 2 && x > 481 && r < w.player.r);
+    assert.ok(eye, `内环没有朝右偏心：${JSON.stringify(arcs.slice(0, 6))}`);
+  } finally {
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
+test('Boss 预警会在地上画指示（冲撞画带子、弹幕画放射线、召唤画圈）', async () => {
+  const { BOSS } = await import('../src/tuning.js');
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  const boss = w.enemies.find((e) => !e.active) || w.enemies[0];
+  // 这份烟测是一条长会话：这里必须自己兜住"别把区域推进/战利品状态搞乱"，
+  // 否则后面测换区横幅的用例会莫名其妙地红（第一次就是这么红的）
+  const realBossTimer = w.bossTimer;
+  const realZoneBoss = w.zoneBoss;
+  w.bossTimer = 1e9;
+  try {
+    for (const plan of ['charge', 'shoot', 'summon']) {
+      Object.assign(boss, {
+        active: true, kind: 'boss', boss: 'brute', x: w.player.x + 120, y: w.player.y,
+        r: 26, maxHp: 1e9, hp: 1e9, speed: 60, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 1e9,
+        state: 'telegraph', stateT: BOSS.telegraph * 0.4, plan, tellDmg: 0, rage: 0, armor: 0, gen: 0,
+      });
+      calls.length = 0;
+      runFrames(2);
+      // 三种招式的地面指示形状不同，但都得有"画在地上的东西"
+      const shapes = calls.filter(([m]) => ['moveTo', 'lineTo', 'arc'].includes(m)).length;
+      assert.ok(shapes > 4, `${plan} 的预警指示没画出来`);
+    }
+  } finally {
+    for (const e of w.enemies) if (e.kind === 'boss') e.active = false;
+    w.bossTimer = realBossTimer;
+    w.zoneBoss = realZoneBoss;
+    w.loot = null;
+    w.paused = false;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
 test('新加的特效也走批量绘制（碎片、时缓光环、残影都不许逐个切状态）', () => {
   // 击杀碎片、时缓的敌人光环、冲刺残影都是"一次可能有几十上百个"的东西，
   // 逐个 fill / stroke 会把之前压下去的调用数吃回来（9700 → 3800 那次优化）
@@ -832,12 +895,15 @@ test('阵亡会清掉存档（不然可以死了再读档反复刷）', () => {
   fire(handlers.window, 'keydown', { code: 'KeyC', preventDefault() {} });
   runFrames(2);
   const w2 = globalThis.__survivorWorld;
-  w2.player.hp = 1;
+  // 每帧把血压回 1：只设一次的话，选到「肉」（上限 +25 并回满）或「吸」（击杀回血）
+  // 就会一路奶回来，实测能撑满 60 秒不死。这条用例要验的是"死了之后存档被清掉"，
+  // 不是"能不能死"，所以别让它依赖抽到哪张卡
   for (let i = 0; i < 60 * 60 && !w2.over; i++) {
+    w2.player.hp = Math.min(w2.player.hp, 1);
     if (i % 20 === 0) fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
     runFrames(1);
   }
-  assert.ok(w2.over, '没死成');
+  assert.ok(w2.over, `没死成：t=${w2.t.toFixed(1)} 敌人=${w2.enemies.filter((e) => e.active).length}`);
   assert.equal(store.has('survivor.save'), false, '阵亡后存档还在');
   // 结算要把残片和累计统计一起写进存档（两件事必须一次写完）
   const meta = JSON.parse(store.get('survivor.meta'));
