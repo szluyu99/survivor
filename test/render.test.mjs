@@ -638,6 +638,59 @@ test('子弹按武器分形状，高速弹带拖尾', async () => {
   }
 });
 
+test('升级会弹金色冲击环，玩家短暂发光', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  try {
+    // 手工登记一次 levelup 事件，比等它自然升级稳定
+    for (const f of w.fx) {
+      if (f.active) continue;
+      Object.assign(f, { active: true, type: 'levelup', x: w.player.x, y: w.player.y, amount: 0, kind: '' });
+      break;
+    }
+    calls.length = 0;
+    runFrames(3);
+    // 冲击环和玩家发光都是 arc + stroke，数量上应该明显多于平时
+    const arcs = calls.filter(([m]) => m === 'arc').length;
+    assert.ok(arcs > 4, `升级没画出环（arc 只有 ${arcs} 次）`);
+  } finally {
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
+test('精英/Boss 掉到残血会套一圈暗红', () => {
+  const w = globalThis.__survivorWorld;
+  const realMaxHp = w.player.maxHp;
+  w.player.hp = w.player.maxHp = 1e9;
+  const slot = w.enemies.find((e) => !e.active) || w.enemies[0];
+  try {
+    Object.assign(slot, {
+      active: true, kind: 'elite', elite: 'bomber', x: w.player.x + 90, y: w.player.y,
+      r: 16, maxHp: 100, hp: 90, speed: 0, dmg: 0, gem: 1, hitCd: 1e9, orbCd: 1e9,
+      state: 'chase', stateT: 1, armor: 0, gen: 0,
+    });
+    // 只数"半径正好是 e.r + 5 的那种圈"：整屏 arc 的总数受别的实体影响，
+    // 单跑能过、全量跑就飘（第一版就是这么飘的）
+    const ringR = slot.r + 5;
+    const countRings = () => calls.filter(([m, a]) => m === 'arc' && Math.abs(a[2] - ringR) < 0.01).length;
+    calls.length = 0;
+    runFrames(2);
+    const healthy = countRings();
+    slot.hp = 20; // 20% → 残血
+    calls.length = 0;
+    runFrames(2);
+    const dying = countRings();
+    assert.equal(healthy, 0, '满血时不该有残血圈');
+    assert.ok(dying > 0, '残血没有套上暗红圈');
+  } finally {
+    slot.active = false;
+    w.player.maxHp = realMaxHp;
+    w.player.hp = Math.min(w.player.hp, realMaxHp);
+  }
+});
+
 test('血量低会出现红边，满血时不画', () => {
   const w = globalThis.__survivorWorld;
   const realHp = w.player.hp;

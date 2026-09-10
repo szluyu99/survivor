@@ -12,7 +12,7 @@ export function createFx({ onDeath, onWin } = {}) {
   const particles = Array.from({ length: 260 }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, r: 3, color: '#fff' }));
   const numbers = Array.from({ length: 48 }, () => ({ active: false, x: 0, y: 0, vy: 0, life: 0, text: '', crit: false, amount: 0 }));
   const bolts = Array.from({ length: 24 }, () => ({ active: false, x1: 0, y1: 0, x2: 0, y2: 0, life: 0 }));
-  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn, magnet: 0 };
+  const fxState = { shake: 0, flash: 0, warn: 0, warnText: '', warnColor: P.warn, magnet: 0, levelGlow: 0 };
   // 技能用的扩散圆环（震荡波、磁吸都用它）
   const rings = Array.from({ length: 14 }, () => ({ active: false, x: 0, y: 0, r: 0, max: 0, life: 0, color: '#fff' }));
   // 冲刺残影：冲刺期间由渲染层每隔一帧丢一个进来，渐隐。
@@ -162,9 +162,14 @@ export function createFx({ onDeath, onWin } = {}) {
       fxState.shake = Math.max(fxState.shake, 5);
       sfx.hurt();
     },
+    // 升级：两层金色冲击环 + 玩家短暂发光。
+    // 以前只有一团粒子和闪白，而"升级了"是一局里最正向的一件事，值得给足
     levelup: (f) => {
       burst(f.x, f.y, 20, P.levelSpark, 220, 3);
+      ring(f.x, f.y, 150, P.levelSpark);
+      ring(f.x, f.y, 92, P.playerRing);
       fxState.flash = 0.22;
+      fxState.levelGlow = 0.7;
       sfx.levelup();
     },
     dead: (f, w) => {
@@ -420,6 +425,7 @@ export function createFx({ onDeath, onWin } = {}) {
     sd.rot += sd.spin * dt;
   }
   if (fxState.magnet > 0) fxState.magnet = Math.max(0, fxState.magnet - dt);
+  if (fxState.levelGlow > 0) fxState.levelGlow = Math.max(0, fxState.levelGlow - dt);
   if (fxState.shake > 0) fxState.shake = Math.max(0, fxState.shake - dt * 22);
     if (fxState.flash > 0) fxState.flash = Math.max(0, fxState.flash - dt * 1.6);
     if (fxState.warn > 0) fxState.warn = Math.max(0, fxState.warn - dt);
@@ -433,6 +439,7 @@ export function createFx({ onDeath, onWin } = {}) {
     for (const g of ghosts) g.active = false;
     for (const sd of shards) sd.active = false;
     fxState.magnet = 0;
+    fxState.levelGlow = 0;
     fxState.shake = 0;
     fxState.flash = 0;
     fxState.warn = 0;

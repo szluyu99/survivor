@@ -122,6 +122,12 @@ export function createShapes(ctx) {
   function drawTerrain(t, camX, camY) {
     const x = t.x - camX, y = t.y - camY;
     if (t.kind === 'rock') {
+      // 先在右下方压一层暗影，岩块才像"立在地上"而不是贴纸
+      ctx.beginPath();
+      ctx.moveTo(x + t.r * 0.92 + 4, y + 4);
+      ctx.arc(x + 4, y + 4, t.r * 0.92, 0, Math.PI * 2);
+      ctx.fillStyle = P.shadow;
+      ctx.fill();
       const sides = 7;
       ctx.beginPath();
       for (let i = 0; i < sides; i++) {
@@ -148,6 +154,14 @@ export function createShapes(ctx) {
       ctx.lineWidth = 2;
       ctx.strokeStyle = P.mudEdge;
       ctx.stroke();
+      // 内圈再加一道细波纹：泥地和普通地面的边界更清楚，
+      // 走位时"我踩进去了没"不用靠减速手感反推
+      ctx.beginPath();
+      ctx.arc(x, y, t.r * 0.72, 0, Math.PI * 2);
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
       return;
     }
     // 宝箱：加一圈呼吸光，让人在混战里也能注意到

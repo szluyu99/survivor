@@ -875,6 +875,11 @@ function drawGems(w, camX, camY, color, big) {
 // 子弹形状表：key 是武器 id（子弹的 src），值是 shapes.js 里的形状名。
 // 'lance' 是这里特有的"拉长胶囊"，在绘制处单独处理。
 // 只在渲染层查表，所以加武器不改这里也不会崩（默认圆点）
+// 进化和觉醒武器的投射物要有"高级感"。Canvas 2D 没有着色器做真 bloom，
+// 只能在弹体外面先铺一层放大的半透明同色轮廓伪造发光——按颜色分组画，
+// 所以最多多出"颜色数"次 fill，不会随子弹数量涨
+const GLOW_SRC = new Set([...EVO_WEAPONS, ...AWAKEN_WEAPONS].map((d) => d.id));
+
 const BULLET_SHAPE = {
   lance: 'lance', blastlance: 'lance', arclance: 'lance', sunspear: 'lance', thunderstorm: 'lance',
   boomerang: 'elite', homing: 'elite', swarm: 'elite',   // 菱形：会拐弯/往返的
@@ -1083,6 +1088,28 @@ function render(w) {
   }
   if (splitters) { ctx.strokeStyle = P.outline; ctx.lineWidth = 2; ctx.stroke(); }
 
+  // 精英和 Boss 掉到 35% 血以下：外面套一圈暗红，"快死了"在余光里也看得见。
+  // 只有它们才有这个（同屏最多十几只），普通杂兵靠数量说话，标了反而更乱
+  {
+    ctx.beginPath();
+    let dying = 0;
+    for (const e of w.enemies) {
+      if (!e.active || (e.kind !== 'boss' && e.kind !== 'elite')) continue;
+      if (e.hp / e.maxHp > 0.35) continue;
+      const r = e.r + 5;
+      ctx.moveTo(e.x - camX + r, e.y - camY);
+      ctx.arc(e.x - camX, e.y - camY, r, 0, Math.PI * 2);
+      dying++;
+    }
+    if (dying) {
+      ctx.strokeStyle = P.bossRage;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.55 + 0.35 * Math.sin(w.t * 8);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // 剩下的装饰逐个画：这几种兵种同屏最多十几只，不值得再分组
   for (const e of w.enemies) {
     if (!e.active) continue;
@@ -1224,6 +1251,21 @@ function render(w) {
   }
   ctx.globalAlpha = 1;
 
+  // 进化/觉醒武器的弹体光晕
+  bucketReset();
+  for (const b of w.bullets) {
+    if (b.active && GLOW_SRC.has(b.src)) bucketPush(b.color || P.bolt, b);
+  }
+  ctx.globalAlpha = 0.22;
+  for (const [color, list] of buckets) {
+    if (!list.length) continue;
+    ctx.beginPath();
+    for (const b of list) subPath('grunt', b.x - camX, b.y - camY, b.r * 2.1, 0);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
   // 弹体：形状按发射它的武器来（b.src 是武器 id，渲染层自己查表，逻辑层不用多存字段）
   bucketReset();
   for (const b of w.bullets) {
@@ -1355,6 +1397,20 @@ function render(w) {
   ctx.beginPath();
   ctx.ellipse(pcx, pcy + w.player.r * 0.9, w.player.r * 0.95, w.player.r * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
+  // 升级后的短暂发光：两圈向外扩的亮环，和金色冲击环是同一件事的近景表达
+  if (fxState.levelGlow > 0) {
+    const t0 = 1 - fxState.levelGlow / 0.7;
+    ctx.strokeStyle = P.levelSpark;
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 2; i++) {
+      ctx.globalAlpha = fxState.levelGlow * (i === 0 ? 0.9 : 0.5);
+      ctx.beginPath();
+      ctx.arc(pcx, pcy, w.player.r + 6 + i * 9 + t0 * 14, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // 速度由渲染层自己按帧差算（逻辑层不用多存字段），冲刺时直接给满
   const moveSpeed = w.player.dashT > 0 ? 1 : Math.min(1, playerSpeedGuess / PLAYER.speed);
   const squash = 0.1 * moveSpeed;
