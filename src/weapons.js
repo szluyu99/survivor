@@ -213,6 +213,54 @@ export const WEAPONS = [
       }
     },
   },
+  {
+    // 唯一的"持续单体"武器：其余六把都是一次性判定，缺一个"盯着一个目标打"的选择。
+    // 交界 Boss 改成挡门之后，报告里显示穿透枪/回旋镖流派 5 局只打死 0–1 只 Boss，
+    // 缺的正是这种能对单体持续加压的东西。
+    // 代价是必须一直有人在射程里：脱靶就迅速降温，所以它在风筝流里强、被围住时弱
+    id: 'beam',
+    name: '光束',
+    maxLevel: 5,
+    desc: [
+      '锁定最近的敌人持续照射，照得越久越烫',
+      '伤害 +30%',
+      '射程 +13%，判定更快',
+      '伤害 +25%',
+      '过热上限 +22%（烧到最烫时更疼）',
+    ],
+    dmg: T([2.0, 2.6, 2.6, 3.2, 3.2]),
+    period: T([0.1, 0.1, 0.085, 0.085, 0.085]),
+    range: T([300, 300, 340, 340, 340]),
+    heatMax: T([1.8, 1.8, 1.8, 1.8, 2.2]),
+    heatUp: 0.5,    // 每秒升温多少
+    heatDown: 1.6,  // 脱靶后每秒降回多少
+    info(lv, w) {
+      const dps = (this.dmg(lv) * w.stats.damageMul) / this.period(lv);
+      return [
+        `每秒 ${dps.toFixed(0)} → 最烫 ${(dps * this.heatMax(lv)).toFixed(0)}`,
+        `射程 ${this.range(lv)}，脱靶就降温`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      const lv = inst.level;
+      const target = api.nearestEnemy(w, w.player.x, w.player.y);
+      const range = this.range(lv);
+      const dx = target ? target.x - w.player.x : 0;
+      const dy = target ? target.y - w.player.y : 0;
+      if (!target || dx * dx + dy * dy > range * range) {
+        inst.heat = Math.max(1, (inst.heat || 1) - dt * this.heatDown);
+        inst.timer = 0;
+        return;
+      }
+      inst.heat = Math.min(this.heatMax(lv), (inst.heat || 1) + dt * this.heatUp);
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += this.period(lv);
+        api.chainFx(w, w.player.x, w.player.y, target.x, target.y);
+        api.hurtOne(w, target, this.dmg(lv) * api.dmgMul(w) * inst.heat, this.id);
+      }
+    },
+  },
 ];
 
 
@@ -229,6 +277,10 @@ export const EVOLUTIONS = [
   { id: 'homing', from: ['boomerang', 'bolt'] },
   { id: 'arclance', from: ['lance', 'chain'] },
   { id: 'minefield', from: ['orbit', 'mine'] },
+  // 光束进两条配方，否则它在构筑里是条死路（基础武器都同时出现在两条里，
+  // "该凑哪两把"这个取舍才成立）
+  { id: 'sunspear', from: ['beam', 'lance'] },
+  { id: 'nova', from: ['beam', 'orbit'] },
 ];
 
 export const EVO_WEAPONS = [
@@ -449,9 +501,216 @@ export const EVO_WEAPONS = [
       }
     },
   },
+  {
+    // 光束 + 穿透枪：光束不再只盯一个人，而是烧穿一条线
+    id: 'sunspear',
+    name: '贯日炮',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['持续光柱烧穿一条直线上的所有敌人', '射程 +18%，伤害 +30%', '判定更快，光柱更粗'],
+    dmg: T([13, 17, 17]),
+    period: T([0.14, 0.14, 0.11]),
+    range: T([420, 495, 495]),
+    beamR: T([16, 16, 21]),
+    info(lv, w) {
+      return [
+        `每秒 ${((this.dmg(lv) * w.stats.damageMul) / this.period(lv)).toFixed(0)}，打穿整条线`,
+        `射程 ${this.range(lv)}，光柱半径 ${this.beamR(lv)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      const lv = inst.level;
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += this.period(lv);
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        if (!target) { inst.timer = 0; break; }
+        const ang = Math.atan2(target.y - w.player.y, target.x - w.player.x);
+        const range = this.range(lv);
+        const r = this.beamR(lv);
+        const dmg = this.dmg(lv) * api.dmgMul(w);
+        // 沿线取采样点做范围伤害：比发一颗穿透弹更稳（不会被岩块吃掉整条线）
+        const step = r * 1.6;
+        for (let d = r; d <= range; d += step) {
+          api.damageArea(w, w.player.x + Math.cos(ang) * d, w.player.y + Math.sin(ang) * d, r, dmg, 0.12, this.id);
+        }
+        api.chainFx(w, w.player.x, w.player.y, w.player.x + Math.cos(ang) * range, w.player.y + Math.sin(ang) * range);
+      }
+    },
+  },
+  {
+    // 光束 + 光环：把"照射"摊成一圈脉冲，从单体转成贴身清场
+    id: 'nova',
+    name: '新星',
+    evolved: true,
+    maxLevel: 3,
+    desc: ['以自身为中心不断脉冲爆发', '范围 +15%，伤害 +35%', '脉冲更密'],
+    dmg: T([46, 60, 60]),
+    radius: T([108, 124, 124]),
+    rate: T([1.5, 1.5, 2.0]),
+    info(lv, w) {
+      return [
+        `每次 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，范围 ${this.radius(lv)}`,
+        `${this.rate(lv).toFixed(1)} 次/秒，围住你的时候最强`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += 1 / this.rate(inst.level);
+        api.blast(w, w.player.x, w.player.y, this.radius(inst.level), this.dmg(inst.level) * api.dmgMul(w), this.id);
+      }
+    },
+  },
 ];
 
-export const ALL_WEAPONS = [...WEAPONS, ...EVO_WEAPONS];
+// ---- 二段进化（觉醒）----
+//
+// 起因：一局大约 9–13 次升级，凑出一把满级进化武器就已经吃掉大部分选择，
+// 所以觉醒**不从升级卡池出**（卡池从十几项涨到 25 项那次，平均存活直接从 118s 掉到 73s），
+// 而是走交界 Boss 的战利品，并且要求已经打倒三只交界 Boss（= 走完第一圈）。
+// 这样它同时补上了另一个缺口：无尽轮次以前只有"第 N 轮"这个数字在涨，没有具体目标。
+//
+// 觉醒给的是机制变形而不是数值再翻倍（maxLevel 1，就是一个终态），
+// 数值翻倍会直接顶到"局外/局内成长"那条平衡线上
+export const AWAKEN_ZONES = 3;
+
+export const AWAKENINGS = [
+  { id: 'stormfield', from: 'arcfield' },
+  { id: 'swarm', from: 'homing' },
+  { id: 'thunderstorm', from: 'arclance' },
+];
+
+export const AWAKEN_WEAPONS = [
+  {
+    id: 'stormfield',
+    name: '磁暴场',
+    evolved: true,
+    awakened: true,
+    maxLevel: 1,
+    desc: ['电场不再绕圈：以自身为中心持续放电，范围翻倍'],
+    dmg: T([56]),
+    radius: T([132]),
+    rate: T([1.8]),
+    orbs: 2,
+    orbDmg: T([34]),
+    orbRadius: 46,
+    orbRBy: 30,
+    hitCd: 0.24,
+    info(lv, w) {
+      return [
+        `每次放电 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，范围 ${this.radius(lv)}`,
+        `另有 2 颗贴身光球，每下 ${(this.orbDmg(lv) * w.stats.damageMul).toFixed(0)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      // 留两颗贴身光球：全靠脉冲的话，贴到身上那一圈会有空档
+      inst.spin = (inst.spin || 0) + dt * 2.2;
+      for (let i = 0; i < this.orbs; i++) {
+        const a = inst.spin + (i / this.orbs) * Math.PI * 2;
+        const ox = w.player.x + Math.cos(a) * this.orbRadius;
+        const oy = w.player.y + Math.sin(a) * this.orbRadius;
+        api.addOrb(w, ox, oy, this.orbRBy);
+        api.damageArea(w, ox, oy, this.orbRBy, this.orbDmg(inst.level) * api.dmgMul(w), this.hitCd, this.id);
+      }
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += 1 / this.rate(inst.level);
+        api.blast(w, w.player.x, w.player.y, this.radius(inst.level), this.dmg(inst.level) * api.dmgMul(w), this.id);
+      }
+    },
+  },
+  {
+    id: 'swarm',
+    name: '蜂群',
+    evolved: true,
+    awakened: true,
+    maxLevel: 1,
+    desc: ['归巢弹不再消失：一群弹药常驻场上，自己找人'],
+    dmg: T([30]),
+    count: 6,
+    rate: T([0.55]),
+    turn: 6.2,
+    pierce: 8,
+    life: 6,
+    info(lv, w) {
+      return [
+        `每波 ${this.count} 枚 × ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，穿透 ${this.pierce} 次`,
+        `存活 ${this.life}s，场上常驻一群`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += 1 / this.rate(inst.level);
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        const base = target ? Math.atan2(target.y - w.player.y, target.x - w.player.x) : w.rng() * Math.PI * 2;
+        const dmg = this.dmg(inst.level) * api.dmgMul(w);
+        for (let i = 0; i < this.count; i++) {
+          const a = base + (i / this.count) * Math.PI * 2;
+          api.spawnBullet(w, w.player.x, w.player.y, {
+            vx: Math.cos(a) * 300, vy: Math.sin(a) * 300,
+            dmg, pierce: this.pierce, life: this.life, r: 6, color: P.boomerang, src: this.id,
+            homing: this.turn,
+          });
+        }
+      }
+    },
+  },
+  {
+    // 链式激光的觉醒：连锁不再是一条链，而是从每个被击中的目标再分叉一次
+    id: 'thunderstorm',
+    name: '雷暴',
+    evolved: true,
+    awakened: true,
+    maxLevel: 1,
+    desc: ['激光命中后连锁，每个被击中的目标再向外分叉一次'],
+    dmg: T([64]),
+    arcDmg: T([30]),
+    forkDmg: T([18]),
+    rate: T([1.5]),
+    links: 5,
+    forks: 2,
+    range: 240,
+    forkRange: 170,
+    info(lv, w) {
+      return [
+        `激光 ${(this.dmg(lv) * w.stats.damageMul).toFixed(0)}，连锁 ${this.links} 个`,
+        `每个再分叉 ${this.forks} 次，每叉 ${(this.forkDmg(lv) * w.stats.damageMul).toFixed(0)}`,
+      ];
+    },
+    tick(w, inst, dt, api) {
+      inst.timer -= dt * api.rateMul(w);
+      while (inst.timer <= 0) {
+        inst.timer += 1 / this.rate(inst.level);
+        const target = api.nearestEnemy(w, w.player.x, w.player.y);
+        if (!target) { inst.timer = 0; break; }
+        const ang = Math.atan2(target.y - w.player.y, target.x - w.player.x);
+        api.spawnBullet(w, w.player.x, w.player.y, {
+          vx: Math.cos(ang) * 760, vy: Math.sin(ang) * 760,
+          dmg: this.dmg(inst.level) * api.dmgMul(w), pierce: 999, life: 0.9, r: 10, color: P.lance, src: this.id,
+        });
+        const arc = this.arcDmg(inst.level) * api.dmgMul(w);
+        const fork = this.forkDmg(inst.level) * api.dmgMul(w);
+        const hit = api.nearestN(w, target.x, target.y, this.links, this.range);
+        let fx = w.player.x, fy = w.player.y;
+        for (const e of hit) {
+          api.chainFx(w, fx, fy, e.x, e.y);
+          fx = e.x; fy = e.y;
+          api.hurtOne(w, e, arc, this.id);
+          // 二级分叉：从每个被击中的目标再往外找两个
+          for (const e2 of api.nearestN(w, e.x, e.y, this.forks + 1, this.forkRange)) {
+            if (e2 === e) continue;
+            api.chainFx(w, e.x, e.y, e2.x, e2.y);
+            api.hurtOne(w, e2, fork, this.id);
+          }
+        }
+      }
+    },
+  },
+];
+
+export const ALL_WEAPONS = [...WEAPONS, ...EVO_WEAPONS, ...AWAKEN_WEAPONS];
 
 export function findEvolution(w) {
   // 返回当前满足条件的进化项（素材都在手上且都到 EVO_LEVEL）
@@ -459,6 +718,22 @@ export function findEvolution(w) {
     const inst = w.weapons.find((x) => x.id === id);
     return inst && inst.level >= EVO_LEVEL;
   }));
+}
+
+// 当前满足条件的觉醒项：源武器满级 + 已经打倒 AWAKEN_ZONES 只交界 Boss
+export function findAwakening(w) {
+  if ((w.zoneIndex || 0) < AWAKEN_ZONES) return [];
+  return AWAKENINGS.filter((aw) => {
+    const inst = w.weapons.find((x) => x.id === aw.from);
+    const def = findWeapon(aw.from);
+    return inst && def && inst.level >= def.maxLevel;
+  });
+}
+
+// 觉醒：原地换成终态武器，占同一个槽（不像进化那样合并两把、腾出槽位）
+export function awakenWeapon(w, aw) {
+  w.weapons = w.weapons.map((x) => (x.id === aw.from ? { id: aw.id, level: 1, timer: 0 } : x));
+  w.awakened = (w.awakened || []).concat(aw.id);
 }
 
 // 建索引而不是每次 Array.find：findWeapon 在热路径上（每帧对每把武器查一次）

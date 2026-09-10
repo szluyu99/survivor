@@ -598,7 +598,7 @@ test('召唤技能会在 Boss 身边产小怪', () => {
 });
 
 // ---- 武器进化 ----
-import { EVOLUTIONS, EVO_LEVEL, EVO_WEAPONS, ALL_WEAPONS, findEvolution } from '../src/weapons.js';
+import { EVOLUTIONS, EVO_LEVEL, EVO_WEAPONS, ALL_WEAPONS, AWAKEN_WEAPONS, AWAKENINGS, AWAKEN_ZONES, findEvolution, findAwakening } from '../src/weapons.js';
 
 function forceMaterials(seed, ids, level = EVO_LEVEL) {
   const w = createWorld(seed);
@@ -716,7 +716,7 @@ test('归巢弹会拐弯追人', () => {
 
 test('每把进化武器的 info() 都能给出可读数值', () => {
   const w = createWorld(1);
-  for (const def of EVO_WEAPONS) {
+  for (const def of [...EVO_WEAPONS, ...AWAKEN_WEAPONS]) {
     for (let lv = 1; lv <= def.maxLevel; lv++) {
       const lines = def.info(lv, w);
       assert.ok(lines.length >= 1);
@@ -727,9 +727,85 @@ test('每把进化武器的 info() 都能给出可读数值', () => {
   }
 });
 
-test('findWeapon 能找到进化武器，ALL_WEAPONS 覆盖基础 + 进化', () => {
-  assert.equal(ALL_WEAPONS.length, WEAPONS.length + EVO_WEAPONS.length, `武器总数不对：${ALL_WEAPONS.length}`);
+// ---- 光束：持续单体，越照越烫，脱靶降温 ----
+import { rollLoot } from '../src/upgrades.js';
+
+test('光束照得越久越疼，脱靶之后会降温', () => {
+  const w = labWorld(1);
+  w.weapons = [{ id: 'beam', level: 1, timer: 0 }];
+  const target = placeEnemy(w, 'grunt', 120, 0);
+  const dmgIn = (seconds) => {
+    const before = target.hp;
+    run(w, seconds);
+    return before - target.hp;
+  };
+  const first = dmgIn(0.5);       // 刚开始，热度还低
+  run(w, 3);                      // 烧一会儿，热度顶满
+  const hot = dmgIn(0.5);
+  assert.ok(first > 0, '光束没造成伤害');
+  assert.ok(hot > first * 1.2, `热度没有抬高输出：起手 ${first.toFixed(1)} → 烧热 ${hot.toFixed(1)}`);
+  const heatHot = w.weapons[0].heat;
+
+  // 把目标搬出射程：热度要降回来，而且不再有伤害
+  target.x = 5000;
+  const before = target.hp;
+  run(w, 1);
+  assert.equal(target.hp, before, '脱靶了还在掉血');
+  assert.ok(w.weapons[0].heat < heatHot, `脱靶之后热度没降：${heatHot} → ${w.weapons[0].heat}`);
+});
+
+test('光束的射程有上限，够不到的目标一下都打不到', () => {
+  const w = labWorld(2);
+  const def = findWeapon('beam');
+  w.weapons = [{ id: 'beam', level: 1, timer: 0 }];
+  const far = placeEnemy(w, 'grunt', def.range(1) + 60, 0);
+  const before = far.hp;
+  run(w, 2);
+  assert.equal(far.hp, before, '射程外的目标被打到了');
+});
+
+// ---- 二段进化（觉醒）----
+test('觉醒要同时满足"源武器满级"和"打倒过三只交界 Boss"', () => {
+  const w = labWorld(3);
+  const aw = AWAKENINGS[0];
+  const src = findWeapon(aw.from);
+  w.weapons = [{ id: aw.from, level: src.maxLevel, timer: 0 }];
+
+  w.zoneIndex = 0;
+  assert.deepEqual(findAwakening(w), [], '还没推进就能觉醒');
+  w.zoneIndex = AWAKEN_ZONES;
+  assert.ok(findAwakening(w).some((x) => x.id === aw.id), '条件齐了却拿不到觉醒');
+  // 源武器没满级就不算
+  w.weapons = [{ id: aw.from, level: src.maxLevel - 1, timer: 0 }];
+  assert.deepEqual(findAwakening(w), [], '源武器没满级也能觉醒');
+});
+
+test('觉醒卡出在战利品里，选了就原地换成终态武器（不占新槽）', () => {
+  const w = labWorld(4);
+  const aw = AWAKENINGS[0];
+  const src = findWeapon(aw.from);
+  w.weapons = [{ id: 'bolt', level: 2, timer: 0 }, { id: aw.from, level: src.maxLevel, timer: 0 }];
+  w.zoneIndex = AWAKEN_ZONES;
+  const cards = rollLoot(w);
+  const k = cards.findIndex((c) => c.awaken);
+  assert.ok(k >= 0, `战利品里没有觉醒卡：${cards.map((c) => c.name)}`);
+  assert.equal(cards.length, 3, '战利品还是三选一');
+
+  const slots = w.weapons.length;
+  cards[k].apply(w);
+  assert.equal(w.weapons.length, slots, '觉醒不该多占一个槽');
+  assert.ok(w.weapons.some((x) => x.id === aw.id), '没换成觉醒武器');
+  assert.ok(!w.weapons.some((x) => x.id === aw.from), '源武器还留在手上');
+  assert.deepEqual(w.awakened, [aw.id]);
+  // 换完之后 tick 得能跑（终态武器最容易漏 info/tick）
+  run(w, 1);
+});
+
+test('findWeapon 能找到进化和觉醒武器，ALL_WEAPONS 覆盖三张表', () => {
+  assert.equal(ALL_WEAPONS.length, WEAPONS.length + EVO_WEAPONS.length + AWAKEN_WEAPONS.length,
+    `武器总数不对：${ALL_WEAPONS.length}`);
   for (const def of EVO_WEAPONS) assert.ok(findWeapon(def.id), `findWeapon 找不到 ${def.id}`);
+  for (const def of AWAKEN_WEAPONS) assert.ok(findWeapon(def.id), `findWeapon 找不到 ${def.id}`);
 });
 
 // ---- Boss 二阶段 ----

@@ -46,17 +46,23 @@ export function createFx({ onDeath, onWin } = {}) {
 
   // 跳字合并半径。密集场面里一秒能有几十次命中，每次都单独弹一个数字的话
   // 屏幕上就是一片糊在一起的数字（池子 48 个也很快见底）。
-  // 近处已有跳字就把伤害累加进去，只留一个不断变大的数
-  const NUM_MERGE_R2 = 30 * 30;
+  // 近处已有跳字就把伤害累加进去，只留一个不断变大的数。
+  // 30 → 36 是因为后来加的范围武器（新星的脉冲、贯日炮的线）一帧命中十几只，
+  // 30px 的圈已经拦不住"擦边叠在一起"的那几对
+  const NUM_MERGE_R2 = 36 * 36;
 
   function popNumber(x, y, amount, crit = false) {
     for (const o of numbers) {
-      if (!o.active || o.crit !== crit) continue;
+      if (!o.active) continue;
       const dx = o.x - x, dy = o.y - y;
       if (dx * dx + dy * dy > NUM_MERGE_R2) continue;
+      // 暴击和普通也合并：分开合并的话，同一个位置会同时飘一个 17px 的暴击数
+      // 和一个 13px 的普通数，那两个必然叠在一起（范围武器一帧十几次命中时最明显）。
+      // 只要参与合并的有一次暴击，这一坨就按暴击显示
       o.amount += amount;
-      o.text = crit ? `${Math.round(o.amount)}!` : String(Math.round(o.amount));
-      o.life = Math.max(o.life, crit ? 0.75 : 0.55); // 还在累加就续上寿命
+      o.crit = o.crit || crit;
+      o.text = o.crit ? `${Math.round(o.amount)}!` : String(Math.round(o.amount));
+      o.life = Math.max(o.life, o.crit ? 0.75 : 0.55); // 还在累加就续上寿命
       return;
     }
     const n = take(numbers);

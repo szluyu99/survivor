@@ -5,7 +5,7 @@
 // 这些错误要么静默（升级到某级后文案是 undefined），要么在半局之后才崩。
 // 这里集中检查一遍，测试和 CI 都跑它。
 
-import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, MAX_SLOTS } from './weapons.js';
+import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, AWAKENINGS, AWAKEN_WEAPONS, AWAKEN_ZONES, MAX_SLOTS } from './weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS } from './skills.js';
 import { KINDS } from './enemies.js';
 import { TERRAIN } from './terrain.js';
@@ -91,6 +91,20 @@ export function validateContent() {
       if (!WEAPONS.some((d) => d.id === from)) errors.push(`进化 ${evo.id}：素材 ${from} 不是基础武器`);
     }
   }
+
+  // 二段进化：源必须是进化武器、产物必须在 AWAKEN_WEAPONS 里，
+  // 而且每把进化武器最多一条觉醒线（两条的话战利品里会互相抢位置）
+  const awakenFrom = AWAKENINGS.map((a) => a.from);
+  if (new Set(awakenFrom).size !== awakenFrom.length) errors.push('同一把进化武器有多条觉醒线');
+  for (const aw of AWAKENINGS) {
+    if (!AWAKEN_WEAPONS.some((d) => d.id === aw.id)) errors.push(`觉醒 ${aw.id}：产物不在 AWAKEN_WEAPONS 里`);
+    if (!EVO_WEAPONS.some((d) => d.id === aw.from)) errors.push(`觉醒 ${aw.id}：源 ${aw.from} 不是进化武器`);
+  }
+  for (const def of AWAKEN_WEAPONS) {
+    if (def.maxLevel !== 1) errors.push(`觉醒武器 ${def.id}：应该是一个终态（maxLevel 1）`);
+    if (!AWAKENINGS.some((a) => a.id === def.id)) errors.push(`觉醒武器 ${def.id}：没有任何配方能拿到它`);
+  }
+  if (!(AWAKEN_ZONES >= 1)) errors.push('觉醒的区域门槛必须为正，否则第一段就能拿到');
 
   for (const def of SKILLS) checkSkill(def, errors);
   const skillIds = SKILLS.map((d) => d.id);

@@ -1,6 +1,6 @@
 // 升级系统：通用词条、诅咒卡、武器升级与进化、每次升级抽三张，以及交界 Boss 的战利品。
 // 逻辑层的其他部分只通过 rollChoices / rollLoot / chooseUpgrade 和这里打交道。
-import { WEAPONS, MAX_SLOTS, findWeapon, findEvolution } from './weapons.js';
+import { WEAPONS, MAX_SLOTS, findWeapon, findEvolution, findAwakening, awakenWeapon, AWAKENINGS } from './weapons.js';
 import { SKILLS, MAX_SKILL_SLOTS, findSkill } from './skills.js';
 import { CARDS } from './tuning.js';
 
@@ -217,10 +217,25 @@ const LOOT_BY_ID = new Map(LOOT.map((l) => [l.id, l]));
 // 战利品卡长得和升级卡一样（key/name/desc/apply），这样 HUD 画卡那套代码能直接复用
 const lootCard = (l) => ({ key: `loot:${l.id}`, name: l.name, desc: l.desc, loot: true, apply: l.apply });
 
-// 抽三张。用世界自己的 rng，所以录像和存档都能重演
+// 抽三张。用世界自己的 rng，所以录像和存档都能重演。
+// 觉醒卡（二段进化）如果满足条件就占掉一张位置——它的出现条件已经足够苛刻
+// （源武器满级 + 打倒三只交界 Boss），再让它和六张补给抢概率就基本见不到了
 export function rollLoot(w) {
-  const bag = LOOT.slice();
   const out = [];
+  const ready = findAwakening(w);
+  if (ready.length) {
+    const aw = ready[Math.floor(w.rng() * ready.length)];
+    const def = findWeapon(aw.id);
+    out.push({
+      key: `awaken:${aw.id}`,
+      name: `觉醒 · ${def.name}`,
+      desc: def.desc[0],
+      loot: true,
+      awaken: true,
+      apply: (x) => awakenWeapon(x, aw),
+    });
+  }
+  const bag = LOOT.slice();
   while (out.length < 3 && bag.length) {
     out.push(lootCard(bag.splice(Math.floor(w.rng() * bag.length), 1)[0]));
   }
@@ -229,7 +244,17 @@ export function rollLoot(w) {
 
 // 按 key 找回一张（读档用：带函数的卡没法 JSON 化，只能存 key 再重建，且不消耗随机数）
 export function lootByKey(key) {
-  const l = LOOT_BY_ID.get(String(key).replace(/^loot:/, ''));
+  const k = String(key);
+  if (k.startsWith('awaken:')) {
+    const aw = AWAKENINGS.find((a) => a.id === k.slice('awaken:'.length));
+    if (!aw) return null;
+    const def = findWeapon(aw.id);
+    return {
+      key: k, name: `觉醒 · ${def.name}`, desc: def.desc[0], loot: true, awaken: true,
+      apply: (x) => awakenWeapon(x, aw),
+    };
+  }
+  const l = LOOT_BY_ID.get(k.replace(/^loot:/, ''));
   return l ? lootCard(l) : null;
 }
 

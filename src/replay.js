@@ -17,8 +17,9 @@ import { cardByKey, lootByKey } from './upgrades.js';
 // v7：加了无尽轮次（loop 决定敌人额外倍率）；
 // v8：加了精英原型（elite）、统一的减伤字段（armor 取代 shielded）、子弹引信（fuse）；
 // v9：区域交界 Boss 战（zoneBoss 决定区域时间是否冻结）；
-// v10：交界 Boss 的战利品三选一（lootKeys，挑完才换区）
-export const REPLAY_VERSION = 10;
+// v10：交界 Boss 的战利品三选一（lootKeys，挑完才换区）；
+// v11：二段进化（awakened）+ 新武器光束的 inst.heat（武器实例字段随 weapons 一起走）
+export const REPLAY_VERSION = 11;
 const STEP = 1 / 60;
 
 // ---------- 快照 ----------
@@ -74,6 +75,7 @@ export function snapshot(w) {
     weapons: w.weapons.map((x) => ({ ...x })),
     skills: w.skills.map((x) => ({ ...x })),
     evolved: [...w.evolved],
+    awakened: [...(w.awakened || [])],
     banned: [...w.banned],
     rerolls: w.rerolls,
     banishes: w.banishes,
@@ -130,6 +132,7 @@ export function restore(snap) {
   w.weapons = snap.weapons.map((x) => ({ ...x }));
   w.skills = snap.skills.map((x) => ({ ...x }));
   w.evolved = [...snap.evolved];
+  w.awakened = [...(snap.awakened || [])];
   w.banned = [...snap.banned];
   w.log = {
     damageBy: { ...snap.log.damageBy },

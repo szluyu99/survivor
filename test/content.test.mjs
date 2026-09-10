@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateContent } from '../src/validate.js';
-import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, findWeapon } from '../src/weapons.js';
+import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, AWAKEN_WEAPONS, findWeapon } from '../src/weapons.js';
 import { SKILLS, findSkill } from '../src/skills.js';
 import { PLAYER, DASH, XP, SPAWN, WAVE, SPAWN_TIMERS, BOSS, TERRAIN_TUNING, CARDS } from '../src/tuning.js';
 import { labWorld, putEnemy, putTerrain, run, movers, countActive } from './fixtures.mjs';
@@ -38,7 +38,7 @@ test('查表走的是索引，不是每次线性扫描', () => {
   for (const def of SKILLS) assert.equal(findSkill(def.id), def);
   assert.equal(findWeapon('不存在'), undefined);
   assert.equal(findSkill('不存在'), undefined);
-  assert.equal(ALL_WEAPONS.length, WEAPONS.length + EVO_WEAPONS.length);
+  assert.equal(ALL_WEAPONS.length, WEAPONS.length + EVO_WEAPONS.length + AWAKEN_WEAPONS.length);
 });
 
 test('调参表里的数值都在合理范围（防手滑打错小数点）', () => {

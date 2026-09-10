@@ -99,6 +99,7 @@ export function createWorld(seed = 1, heroId = DEFAULT_HERO, perks = null, diffi
     choices: null,
     loot: null,           // 打倒交界 Boss 后的三选一，挑完才换区
     evolved: [],
+    awakened: [],         // 二段进化过的武器 id（战利品里的觉醒卡）
     chests: 0,
     // 选卡时的两个交互：重抽和排除。排除掉的卡这一局不再出现
     rerolls: CARDS.rerolls,

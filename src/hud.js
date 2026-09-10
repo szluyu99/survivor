@@ -507,14 +507,16 @@ export function createHud(ctx, deps) {
     ctx.fillText(`打倒了${currentZone(w).name}的 Boss，挑完就进${next.name}`, VIEW_W / 2, CARD_Y - 26);
     w.loot.forEach((u, i) => {
       const x = cardX(i);
+      // 觉醒卡（二段进化）用进化色区分：它和其余五张补给不是一个量级的东西
+      const accent = u.awaken ? P.evo : P.chest;
       ctx.fillStyle = P.card;
       ctx.fillRect(x, CARD_Y, CARD_W, CARD_H);
-      ctx.strokeStyle = P.chest;
+      ctx.strokeStyle = accent;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, CARD_Y, CARD_W, CARD_H);
       ctx.lineWidth = 1;
-      ctx.fillStyle = P.chest;
-      ctx.font = 'bold 26px sans-serif';
+      ctx.fillStyle = accent;
+      ctx.font = u.awaken ? 'bold 20px sans-serif' : 'bold 26px sans-serif';
       ctx.fillText(u.name, x + CARD_W / 2, CARD_Y + 62);
       ctx.fillStyle = P.dim;
       ctx.font = '14px sans-serif';
