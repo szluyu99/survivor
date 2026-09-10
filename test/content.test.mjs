@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { validateContent } from '../src/validate.js';
 import { WEAPONS, EVO_WEAPONS, ALL_WEAPONS, EVOLUTIONS, AWAKEN_WEAPONS, findWeapon } from '../src/weapons.js';
 import { SKILLS, findSkill } from '../src/skills.js';
+import { loopOf, loopScale } from '../src/zones.js';
 import { PLAYER, DASH, XP, SPAWN, WAVE, SPAWN_TIMERS, BOSS, TERRAIN_TUNING, CARDS } from '../src/tuning.js';
 import { labWorld, putEnemy, putTerrain, run, movers, countActive } from './fixtures.mjs';
 import { createWorld, HEROES, findHero, DEFAULT_HERO, ZONES, ZONE_SECONDS, currentZone, update, chooseUpgrade } from '../src/sim.js';
@@ -196,7 +197,7 @@ test('关掉 Boss 的那种局（测试/平衡工具）区域到点就换', () =
   assert.equal(w.bossCount, 0, '关掉 Boss 却刷出来了');
 });
 
-test('轮次会给敌人叠加成，第 0 轮没有加成', () => {
+test('段数会给敌人叠加成，第一圈之内没有加成', () => {
   const base = createWorld(7);
   base.t = 120;
   base.spawnTimer = 1e9;
@@ -208,15 +209,34 @@ test('轮次会给敌人叠加成，第 0 轮没有加成', () => {
     update(w, 1 / 60, { dx: 0, dy: 0 });
     return w.enemies.find((e) => e.active && e.kind !== 'boss');
   };
-  // 同一个 seed、同一时刻，只有 loop 不同
-  const a = createWorld(7); a.t = 120; a.eliteTimer = 1e9; a.bossTimer = 1e9;
-  const b = createWorld(7); b.t = 120; b.eliteTimer = 1e9; b.bossTimer = 1e9; b.loop = 2;
-  const ea = spawnOne(a);
-  const eb = spawnOne(b);
-  assert.ok(ea && eb, '没刷出可比较的敌人');
-  assert.ok(eb.maxHp > ea.maxHp * 1.5, `第 3 轮的血量没涨够：${ea.maxHp.toFixed(0)} → ${eb.maxHp.toFixed(0)}`);
-  assert.ok(eb.speed > ea.speed, '轮次没提升移速');
-  assert.ok(eb.dmg > ea.dmg, '轮次没提升伤害');
+  // 同一个 seed、同一时刻，只有"打通的段数"不同。
+  // 加成按段数算（`zoneIndex`），第一圈之内是 0——历史平衡阈值和通关都发生在第一圈里
+  const mk = (zoneIndex) => {
+    const w = createWorld(7);
+    w.t = 120;
+    w.eliteTimer = 1e9;
+    w.bossTimer = 1e9;
+    w.zoneIndex = zoneIndex;
+    w.loop = loopOf(w);
+    return w;
+  };
+  const first = mk(ZONES.length - 1);          // 第一圈最后一段：不该有加成
+  const third = mk(ZONES.length * 3 - 1);      // 第三圈：加成应该很明显
+  const e1 = spawnOne(first);
+  const e3 = spawnOne(third);
+  assert.ok(e1 && e3, '没刷出可比较的敌人');
+  assert.ok(e3.maxHp > e1.maxHp * 1.5, `第三圈的血量没涨够：${e1.maxHp.toFixed(0)} → ${e3.maxHp.toFixed(0)}`);
+  assert.ok(e3.speed > e1.speed, '段数没提升移速');
+  assert.ok(e3.dmg > e1.dmg, '段数没提升伤害');
+  // "第一圈之内没有加成"要直接问 loopScale：换成比较刷出来的怪不行——
+  // 不同段的兵种权重不一样，刷出来的兵种就不同，血量本来就没法直接比
+  for (let zi = 0; zi < ZONES.length; zi++) {
+    assert.equal(loopScale({ zoneIndex: zi }), null, `第一圈第 ${zi} 段不该有加成`);
+  }
+  const s1 = loopScale({ zoneIndex: ZONES.length });
+  const s2 = loopScale({ zoneIndex: ZONES.length + 1 });
+  assert.ok(s1.hp > 1, '第一圈之后应该开始涨');
+  assert.ok(s2.hp > s1.hp, '加成应该逐段变高，而不是每圈跳一次');
   assert.equal(base.loop, 0, '新世界的轮次必须是 0（平衡数据的锚点）');
 });
 

@@ -189,6 +189,18 @@ function tickBoss(w, e, dt, ctx) {
       e.state = e.plan;
       e.stateT = e.plan === 'charge' ? BOSS.charge : e.plan === 'shoot' ? volleys * BOSS.volleyGap : 0.5;
       e.volley = 0;
+      // 幻影：冲撞开始的那一帧先闪到玩家背后，再朝玩家冲。
+      // 位置只由玩家的位置和朝向决定，不掷随机数，所以回放照样能重演
+      if (e.plan === 'charge' && arch.blink) {
+        const fx0 = w.player.faceX, fy0 = w.player.faceY;
+        const fl = Math.hypot(fx0, fy0) || 1;
+        e.x = w.player.x - (fx0 / fl) * arch.blink;
+        e.y = w.player.y - (fy0 / fl) * arch.blink;
+        const back = Math.atan2(w.player.y - e.y, w.player.x - e.x);
+        e.moveX = Math.cos(back);
+        e.moveY = Math.sin(back);
+        ctx.emit(w, 'bossblink', e.x, e.y, e.r);
+      }
       if (e.plan === 'summon') {
         // 守卫者召唤的是护卫（活着就给自己减伤），其他原型召唤冲锋兵
         const minionKind = arch.guard ? arch.guard.kind : 'rusher';

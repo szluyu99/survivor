@@ -284,6 +284,13 @@ export function createFx({ onDeath, onWin } = {}) {
       fxState.shake = Math.max(fxState.shake, 8);
       sfx.boss();
     },
+    // 幻影闪到背后：落点炸一圈 + 一个收缩的环，"它出现在这儿了"
+    bossblink: (f) => {
+      burst(f.x, f.y, 18, P.interrupt, 200, 3);
+      ring(f.x, f.y, f.amount * 2.4, P.interrupt);
+      fxState.shake = Math.max(fxState.shake, 5);
+      sfx.bossTell();
+    },
     bosstell: () => sfx.bossTell(),
     bossshoot: (f) => {
       burst(f.x, f.y, 8, P.foeBullet, 120, 3);

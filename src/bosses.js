@@ -36,6 +36,17 @@ export const BOSS_KINDS = [
     guard: { kind: 'tank', radius: 260, damageTaken: 0.45 },
     ring: P.enemy.tank,
   },
+  {
+    id: 'phantom',
+    name: '幻影',
+    // 第四个原型，配雪原。前三只都是"正面硬碰"（躲冲撞 / 排清场顺序 / 先杀谁），
+    // 缺一个考验"它在哪"的：预警结束的那一刻它会闪到玩家背后再冲撞，
+    // 所以不能只盯着预警时它站的位置往反方向躲
+    plans: { charge: 0.6, shoot: 0.28, summon: 0.12 },
+    hpMul: 0.9,
+    blink: 210,        // 冲撞前闪现到玩家背后多远处（0 / 不写 = 不闪）
+    ring: P.interrupt,
+  },
 ];
 
 const BY_ID = new Map(BOSS_KINDS.map((b) => [b.id, b]));

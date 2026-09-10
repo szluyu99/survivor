@@ -50,6 +50,20 @@ export const ZONES = [
     boss: 'warden',
     tint: 'rgba(120,70,140,0.07)',
   },
+  {
+    id: 'snow',
+    name: '雪原',
+    hint: '空旷，冲锋兵和射手成群，靠数量压人',
+    // 前三段的地形是越来越密（开阔 → 泥泞 → 岩块），缺一段"跑得开但压力靠数量"的：
+    // 地形稀疏 = 没有掩体也没有减速带，全靠走位和清场速度
+    // 危险来自数量而不是"没有硬怪"：第一版把肉盾/召唤者压到 0.5/0.6，
+    // 结果这一段反而是全局最轻松的（机器人有一局直接跑过 400 秒的上限）
+    weights: { grunt: 0.9, rusher: 1.6, shooter: 1.5, tank: 0.9, summoner: 1, splitter: 0.9 },
+    terrain: { rockShare: 0.35, maxFillers: 16 },
+    burst: ['rusher', 'shooter'],
+    boss: 'phantom',
+    tint: 'rgba(150,175,205,0.07)',
+  },
 ];
 
 const BY_ID = new Map(ZONES.map((z) => [z.id, z]));
@@ -83,9 +97,15 @@ export function zoneBoss(w) {
 // 无尽轮次：区域循环完一整轮算一轮。第 0 轮就是第一遍走完之前
 export const loopOf = (w) => Math.floor((w.zoneIndex || 0) / ZONES.length);
 
-// 轮次带来的敌人加成。乘方叠加，所以刷怪那边直接乘上就行
+// 轮次带来的敌人加成。乘方叠加，所以刷怪那边直接乘上就行。
+//
+// 指数按"段数"算而不是整数轮次，但第一圈保持 0（历史平衡基线就是第一圈跑出来的，
+// 通关也发生在第一圈里，动它等于把所有阈值作废）。
+// 第一圈之后每打通一段涨 1/区域数——加第四个区域时发现，一轮变长会把加成推后近 70 秒，
+// 机器人有一局直接顶到 400 秒上限还没死；按段数算之后"每段涨多少"和区域总数无关，
+// 以后再加区域也不会把曲线冲淡，而且同一轮内部是逐段变难，不再是"过了交界突然硬一档"
 export function loopScale(w) {
-  const n = w.loop || 0;
+  const n = Math.max(0, ((w.zoneIndex || 0) - ZONES.length + 1) / ZONES.length);
   if (n <= 0) return null;
   return {
     hp: LOOP.hpMul ** n,

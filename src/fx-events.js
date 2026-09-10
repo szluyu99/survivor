@@ -14,7 +14,7 @@ export const FX_EVENTS = [
   // 精英原型
   'elitebomb', 'elitesplit', 'eliteshield',
   // Boss
-  'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission',
+  'boss', 'bosstell', 'bossshoot', 'bosssummon', 'bossrage', 'bossdead', 'interrupt', 'bossfission', 'bossblink',
   // 地图
   'chest', 'zone', 'loop',
   // 交界 Boss 的战利品
