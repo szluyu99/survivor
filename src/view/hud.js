@@ -8,6 +8,7 @@
 // 这里只负责画，状态（是否暂停、静音、最好成绩）由 game.js 通过 deps 传进来，
 // hud 不持有任何游戏状态，测试里也能单独驱动。
 import { P } from '../shared/palette.js';
+import { FONT } from './font.js';
 import { createScreens } from './screens.js';
 import { createPanels } from './panels.js';
 import { VIEW_W, VIEW_H } from '../shared/viewport.js';
@@ -75,17 +76,17 @@ export function createHud(ctx, deps) {
     ctx.fillStyle = ready ? P.player : P.faint;
     ctx.fillRect(16, 46, 220 * (ready ? 1 : 1 - p.dashCd / DASH.cd), 5);
     ctx.fillStyle = ready ? P.player : P.faint;
-    ctx.font = '11px ui-monospace, monospace';
+    ctx.font = FONT.num(11);
     ctx.textAlign = 'left';
     ctx.fillText(ready ? '冲刺就绪（Shift / 空格 / 右键）' : `冲刺 ${p.dashCd.toFixed(1)}s`, 16, 66);
 
     ctx.fillStyle = P.dim;
-    ctx.font = '14px ui-monospace, monospace';
+    ctx.font = FONT.num(14);
     ctx.textAlign = 'left';
     ctx.fillText(`Lv.${p.level}  击杀 ${w.kills}`, 16, 86);
     ctx.textAlign = 'right';
     const m = Math.floor(w.t / 60), s = Math.floor(w.t % 60);
-    ctx.font = '22px ui-monospace, monospace';
+    ctx.font = FONT.num(22);
     ctx.fillStyle = P.text;
     ctx.fillText(`${m}:${String(s).padStart(2, '0')}`, VIEW_W - 16, 34);
     // 当前区域 + 还剩多久换：换区域会改兵种配比，值得让人提前知道。
@@ -94,7 +95,7 @@ export function createHud(ctx, deps) {
     // 进了无尽轮次之后前面加上轮数，它是这一局"打到哪儿了"的刻度。
     // 其余次要信息（装备、最好成绩、阶段、精英倒计时）都收进 Tab 详情浮层，
     // 常显的只留"这一秒要做决定"用得上的
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = FONT.bold(13);
     ctx.fillStyle = w.zoneBoss ? P.danger : (w.loop > 0 ? P.danger : P.accent);
     const loopTag = w.loop > 0 ? `第${w.loop + 1}轮 ` : '';
     const zoneTag = w.zoneBoss ? 'Boss 战' : `${Math.max(0, ZONE_SECONDS - w.zoneT).toFixed(0)}s`;
@@ -119,7 +120,7 @@ export function createHud(ctx, deps) {
       ctx.strokeRect(bx, 14, bw, 10);
       ctx.textAlign = 'center';
       ctx.fillStyle = P.warn;
-      ctx.font = 'bold 12px sans-serif';
+      ctx.font = FONT.bold(12);
       // Boss 原型名 + 减伤状态：不写出来的话"打不动"看起来像 bug
       const arch = findBossKind(boss.boss);
       ctx.fillText(
@@ -136,12 +137,12 @@ export function createHud(ctx, deps) {
       ctx.fillRect(bx, 28, bw * ratio, 5);
       ctx.textAlign = 'left';
       ctx.fillStyle = P.interrupt;
-      ctx.font = '10px ui-monospace, monospace';
+      ctx.font = FONT.num(10);
       ctx.fillText(`打断 ${Math.round(ratio * 100)}%`, bx, 44);
     } else if (boss.state === 'stagger') {
       ctx.textAlign = 'left';
       ctx.fillStyle = P.interrupt;
-      ctx.font = 'bold 11px sans-serif';
+      ctx.font = FONT.bold(11);
       ctx.fillText('硬直中，随便打', bx, 44);
     }
     // 门禁提示：交界 Boss 挡着的时候把"打倒它才能往前走"写在血条旁边。
@@ -149,12 +150,12 @@ export function createHud(ctx, deps) {
     if (w.zoneBoss) {
       ctx.textAlign = 'right';
       ctx.fillStyle = P.accent;
-      ctx.font = '11px sans-serif';
+      ctx.font = FONT.ui(11);
       ctx.fillText(`打倒它才能进${ZONES[(w.zoneIndex + 1) % ZONES.length].name}`, bx + bw, 44);
     }
     ctx.textAlign = 'center';
     ctx.fillStyle = P.warn;
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = FONT.bold(12);
     const tag = boss.rage ? 'BOSS 狂暴' : 'BOSS';
       const label = boss.state === 'telegraph'
         ? `${tag}：准备${boss.plan === 'charge' ? '冲撞' : boss.plan === 'shoot' ? '弹幕' : '召唤'}`
@@ -168,7 +169,7 @@ export function createHud(ctx, deps) {
     ctx.lineWidth = 1;
     ctx.strokeRect(PAUSE_BTN.x, PAUSE_BTN.y, PAUSE_BTN.w, PAUSE_BTN.h);
     ctx.fillStyle = P.dimmer;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ctx.fillText(uiPaused() ? '继续（ESC）' : '暂停（ESC）', PAUSE_BTN.x + 10, PAUSE_BTN.y + 18);
     ctx.strokeRect(INFO_BTN.x, INFO_BTN.y, INFO_BTN.w, INFO_BTN.h);
     ctx.fillStyle = infoOpen() ? P.accent : P.dimmer;
@@ -188,7 +189,7 @@ export function createHud(ctx, deps) {
     ctx.strokeRect(bx, by, bw, bh);
     ctx.textAlign = 'left';
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = FONT.bold(13);
     ctx.fillText('本局详情', bx + 12, by + 20);
 
     const bestRun = best();
@@ -202,7 +203,7 @@ export function createHud(ctx, deps) {
       ['最好成绩', bestRun ? `${clock(bestRun.t)} / ${bestRun.kills} 杀` : '暂无'],
       ['音效', mutedHint() ? '已静音（M）' : '开（M）'],
     ];
-    ctx.font = '12px ui-monospace, monospace';
+    ctx.font = FONT.num(12);
     rows.forEach(([k, v], i) => {
       const y = by + 40 + i * 16;
       ctx.fillStyle = P.dimmer;
@@ -234,9 +235,9 @@ export function createHud(ctx, deps) {
       ctx.textAlign = 'center';
       if (inst) {
         ctx.fillStyle = ready ? P.text : P.dimmer;
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = FONT.bold(13);
         ctx.fillText(def.name, b.x + b.w / 2, b.y + 26);
-        ctx.font = '11px ui-monospace, monospace';
+        ctx.font = FONT.num(11);
         ctx.fillStyle = P.dimmer;
         ctx.fillText(ready ? b.key : `${inst.cd.toFixed(1)}s`, b.x + b.w / 2, b.y + 46);
         if (inst.level > 1) {
@@ -245,7 +246,7 @@ export function createHud(ctx, deps) {
         }
       } else {
         ctx.fillStyle = P.faint;
-        ctx.font = '11px sans-serif';
+        ctx.font = FONT.ui(11);
         ctx.fillText('空', b.x + b.w / 2, b.y + 30);
         ctx.fillText(b.key, b.x + b.w / 2, b.y + 46);
       }

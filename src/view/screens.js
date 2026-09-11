@@ -4,6 +4,7 @@
 // 局内 HUD 每帧都画、要抠调用数；局外屏一帧只画一个、几乎只是排版。
 // hud.js 负责把它们组装起来对外，所以 game.js 那边的调用方式没有变化。
 import { P } from '../shared/palette.js';
+import { FONT } from './font.js';
 import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 import { HERO_CARD, heroCardX, SHOP_ROW, shopRowY, MENU_CARD, menuCardRect, BACK_BTN, START_BTN } from './layout.js';
 import { HEROES } from '../content/heroes.js';
@@ -30,11 +31,11 @@ export function createScreens(ctx, ui) {
     drawVignette();
     ctx.textAlign = 'center';
     ctx.fillStyle = P.text;
-    ctx.font = 'bold 24px sans-serif';
+    ctx.font = FONT.bold(24);
     ctx.fillText(title, VIEW_W / 2, 52);
     if (subtitle) {
       ctx.fillStyle = P.dim;
-      ctx.font = '13px sans-serif';
+      ctx.font = FONT.ui(13);
       ctx.fillText(subtitle, VIEW_W / 2, 78);
     }
   }
@@ -47,7 +48,7 @@ export function createScreens(ctx, ui) {
     ctx.strokeRect(BACK_BTN.x, BACK_BTN.y, BACK_BTN.w, BACK_BTN.h);
     ctx.textAlign = 'center';
     ctx.fillStyle = P.dimmer;
-    ctx.font = '13px sans-serif';
+    ctx.font = FONT.ui(13);
     ctx.fillText(label, BACK_BTN.x + BACK_BTN.w / 2, BACK_BTN.y + 20);
   }
 
@@ -67,10 +68,10 @@ export function createScreens(ctx, ui) {
     ctx.stroke();
     ctx.textAlign = 'center';
     ctx.fillStyle = P.text;
-    ctx.font = 'bold 30px sans-serif';
+    ctx.font = FONT.bold(30);
     ctx.fillText('色块幸存者', cx, 106);
     ctx.fillStyle = P.calm;
-    ctx.font = '13px sans-serif';
+    ctx.font = FONT.ui(13);
     ctx.fillText(`目标：走完 ${ZONES.map((z) => z.name).join(' → ')}，打倒最后一个区域的 Boss`, cx, 132);
 
     // 卡片网格：标题一行，说明小字另起一行（竖排按钮时挤在同一行，长一点的说明就会顶到边）
@@ -84,27 +85,27 @@ export function createScreens(ctx, ui) {
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.textAlign = 'left';
       ctx.fillStyle = P.dimmer;
-      ctx.font = '11px ui-monospace, monospace';
+      ctx.font = FONT.num(11);
       ctx.fillText(String(i + 1), r.x + 12, r.y + 24);
       ctx.fillStyle = it.disabled ? P.faint : (on ? P.warn : P.text);
-      ctx.font = 'bold 15px sans-serif';
+      ctx.font = FONT.bold(15);
       ctx.fillText(it.label, r.x + 32, r.y + 24);
       if (it.note) {
         ctx.fillStyle = it.disabled ? P.fainter : P.dimmer;
-        ctx.font = '12px sans-serif';
+        ctx.font = FONT.ui(12);
         ctx.fillText(it.note, r.x + 32, r.y + 44);
       }
     });
 
     ctx.textAlign = 'center';
     ctx.fillStyle = P.accent;
-    ctx.font = '13px ui-monospace, monospace';
+    ctx.font = FONT.num(13);
     const beaten = meta().beaten.length
       ? `　已通关 ${meta().beaten.map((id) => findDifficulty(id).name).join('、')}`
       : '';
     ctx.fillText(`残片 ${meta().shards}${beaten}`, cx, 448);
     ctx.fillStyle = P.faint;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ctx.fillText('↑↓ 选择　回车确认　数字键直达', cx, 472);
     const bestRun = best();
     if (bestRun) ctx.fillText(`最好成绩：存活 ${clock(bestRun.t)}，击杀 ${bestRun.kills}`, cx, 494);
@@ -119,11 +120,11 @@ export function createScreens(ctx, ui) {
     drawHeroCards();
     ctx.textAlign = 'center';
     ctx.fillStyle = P.accent;
-    ctx.font = '13px sans-serif';
+    ctx.font = FONT.ui(13);
     const others = DIFFICULTIES.filter((d) => difficultyUnlocked(meta(), d.id)).length > 1;
     ctx.fillText(`难度：${diff.name}　${others ? 'D 切换' : '通关后解锁噩梦'}`, VIEW_W / 2, 392);
     ctx.fillStyle = P.faint;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ctx.fillText('← → 换选中　回车开始　ESC 返回', VIEW_W / 2, 414);
 
     // 开始按钮：这一屏唯一会开局的地方
@@ -134,7 +135,7 @@ export function createScreens(ctx, ui) {
     ctx.strokeRect(START_BTN.x, START_BTN.y, START_BTN.w, START_BTN.h);
     ctx.lineWidth = 1;
     ctx.fillStyle = P.warn;
-    ctx.font = 'bold 15px sans-serif';
+    ctx.font = FONT.bold(15);
     ctx.fillText('开始（回车）', START_BTN.x + START_BTN.w / 2, START_BTN.y + 21);
     drawBackBtn();
   }
@@ -145,7 +146,7 @@ export function createScreens(ctx, ui) {
     const m = meta();
     ctx.textAlign = 'left';
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('永久强化（每局都生效）', SHOP_ROW.leftX, SHOP_ROW.y0 - 14);
     PERKS.forEach((perk, i) => {
       const lv = m.perks[perk.id] || 0;
@@ -161,7 +162,7 @@ export function createScreens(ctx, ui) {
     });
 
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('角色解锁', SHOP_ROW.rightX, SHOP_ROW.y0 - 14);
     HEROES.forEach((h, i) => {
       const owned = isUnlocked(m, h.id);
@@ -177,7 +178,7 @@ export function createScreens(ctx, ui) {
 
     ctx.textAlign = 'center';
     ctx.fillStyle = P.faint;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ctx.fillText('永久强化的幅度刻意压得很小，满级也只有 +30 血 / +12% 伤害 / +9% 移速', VIEW_W / 2, VIEW_H - 60);
     drawBackBtn();
   }
@@ -190,14 +191,14 @@ export function createScreens(ctx, ui) {
     ctx.strokeRect(x, y, SHOP_ROW.w, SHOP_ROW.h);
     ctx.textAlign = 'left';
     ctx.fillStyle = owned ? P.calm : P.text;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText(name, x + 12, y + 22);
     ctx.fillStyle = P.dim;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ctx.fillText(desc, x + 12, y + 42);
     ctx.textAlign = 'right';
     ctx.fillStyle = owned ? P.dimmer : (afford ? P.warn : P.faint);
-    ctx.font = '13px ui-monospace, monospace';
+    ctx.font = FONT.num(13);
     ctx.fillText(price, x + SHOP_ROW.w - 12, y + 30);
     ctx.textAlign = 'left';
   }
@@ -210,9 +211,9 @@ export function createScreens(ctx, ui) {
 
     ctx.textAlign = 'left';
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('累计统计', 70, 108);
-    ctx.font = '13px ui-monospace, monospace';
+    ctx.font = FONT.num(13);
     statRows(stats, m).forEach(([k, v], i) => {
       const y = 132 + i * 22;
       ctx.fillStyle = P.dimmer;
@@ -222,20 +223,20 @@ export function createScreens(ctx, ui) {
     });
 
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('成就', 470, 108);
     const rows = achievementRows(stats, m);
     rows.forEach((r, i) => {
       const y = 128 + i * 32;
       ctx.fillStyle = r.done ? P.calm : P.dimmer;
-      ctx.font = 'bold 13px sans-serif';
+      ctx.font = FONT.bold(13);
       ctx.fillText(r.done ? `✓ ${r.name}` : `· ${r.name}`, 470, y);
       ctx.fillStyle = r.done ? P.dim : P.faint;
-      ctx.font = '12px sans-serif';
+      ctx.font = FONT.ui(12);
       ctx.fillText(r.desc, 560, y);
       ctx.textAlign = 'right';
       ctx.fillStyle = r.done ? P.calm : P.faint;
-      ctx.font = '12px ui-monospace, monospace';
+      ctx.font = FONT.num(12);
       ctx.fillText(r.text, VIEW_W - 70, y);
       ctx.textAlign = 'left';
       // 未达成的画一条细进度条，比只写数字直观
@@ -257,7 +258,7 @@ export function createScreens(ctx, ui) {
     const cx = VIEW_W / 2;
     ctx.textAlign = 'center';
     ctx.fillStyle = P.dim;
-    ctx.font = '14px sans-serif';
+    ctx.font = FONT.ui(14);
     [
       'WASD / 方向键移动，鼠标按住朝指针走，手机按住屏幕拖出摇杆',
       '攻击是自动的，你只需要走位；捡蓝色经验球升级，每次升级三选一',
@@ -269,7 +270,7 @@ export function createScreens(ctx, ui) {
     ].forEach((t, i) => ctx.fillText(t, cx, 112 + i * 24));
 
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('兵种（形状比颜色好认，也对色盲友好）', cx, 306);
     const legend = [
       ['grunt', '杂兵'], ['rusher', '冲锋兵'], ['tank', '肉盾'],
@@ -281,15 +282,15 @@ export function createScreens(ctx, ui) {
       const x = startX + i * 78;
       drawEntity(kind, x, 344, 13, P.enemy[kind], -Math.PI / 2);
       ctx.fillStyle = P.dimmer;
-      ctx.font = '12px sans-serif';
+      ctx.font = FONT.ui(12);
       ctx.fillText(name, x, 370);
     });
 
     ctx.fillStyle = P.accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = FONT.bold(14);
     ctx.fillText('区域（每 100 秒换一段，兵种和地形都会变）', cx, 406);
     ctx.fillStyle = P.dim;
-    ctx.font = '12px sans-serif';
+    ctx.font = FONT.ui(12);
     ZONES.forEach((z, i) => {
       ctx.fillText(`${z.name}：${z.hint}`, cx, 430 + i * 20);
     });
@@ -312,31 +313,31 @@ export function createScreens(ctx, ui) {
 
       ctx.textAlign = 'left';
       ctx.fillStyle = P.dimmer;
-      ctx.font = '11px ui-monospace, monospace';
+      ctx.font = FONT.num(11);
       ctx.fillText(String(i + 1), x + 10, y + 20);
       ctx.textAlign = 'center';
       ctx.fillStyle = on ? P.warn : (owned ? P.text : P.dimmer);
-      ctx.font = 'bold 20px sans-serif';
+      ctx.font = FONT.bold(20);
       ctx.fillText(h.name, x + HERO_CARD.w / 2, y + 40);
       ctx.fillStyle = owned ? P.accent : P.faint;
-      ctx.font = '13px sans-serif';
+      ctx.font = FONT.ui(13);
       ctx.fillText(`起手：${WEAPON_NAME[h.weapon] || h.weapon}`, x + HERO_CARD.w / 2, y + 70);
       ctx.fillStyle = owned ? P.dim : P.faint;
-      ctx.font = '13px sans-serif';
+      ctx.font = FONT.ui(13);
       wrapText(h.desc, x + HERO_CARD.w / 2, y + 104, HERO_CARD.w - 24, 20);
       ctx.fillStyle = P.faint;
-      ctx.font = '12px sans-serif';
+      ctx.font = FONT.ui(12);
       ctx.fillText(h.hint, x + HERO_CARD.w / 2, y + HERO_CARD.h - 58);
       // 这个角色的最长存活：选角色时能看出自己哪个练得最好（数据来自成就墙那套统计）
       if (owned) {
         const best = m.stats.heroBest[h.id] || 0;
         ctx.fillStyle = best > 0 ? P.calm : P.fainter;
-        ctx.font = '12px ui-monospace, monospace';
+        ctx.font = FONT.num(12);
         ctx.fillText(best > 0 ? `最长 ${clock(best)}` : '还没玩过', x + HERO_CARD.w / 2, y + HERO_CARD.h - 34);
       }
       if (!owned) {
         ctx.fillStyle = m.shards >= heroCost(h.id) ? P.calm : P.faint;
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = FONT.bold(13);
         ctx.fillText(`未解锁　${heroCost(h.id)} 片`, x + HERO_CARD.w / 2, y + HERO_CARD.h - 16);
       }
     });

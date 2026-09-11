@@ -7,21 +7,38 @@
 // 这里也是全项目对 canvas 调用数最敏感的地方：同色实体攒一条路径、
 // 粒子透明度量化成 8 档、碎片按颜色分组——密集场面下每帧 fill/stroke 必须保持在 100 次以内
 // （有断言守着）。改这个文件前先看一眼 test/render.test.mjs 里那两条批量绘制断言。
+//
+// 分两种合成模式画：实体（有深色描边、要能互相遮挡）走默认的 source-over，
+// 光相关的东西（投射物拖尾、粒子、闪电、光环、光晕精灵）走 additive 块里的 'lighter'。
+// 叠加模式下两个特效重合会变亮而不是互相盖住，密集弹幕会自然出现"热区"。
+// 描边色是深色，在 'lighter' 下等于不存在，所以带描边的东西一律不许进 additive 块。
 import { P } from '../shared/palette.js';
+import { FONT } from './font.js';
 import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 import { BOSS, PLAYER } from '../core/tuning.js';
 import { currentZone } from '../content/zones.js';
 import { EVO_WEAPONS, AWAKEN_WEAPONS } from '../content/weapons.js';
 import { findBossKind } from '../content/bosses.js';
 import { findEliteKind } from '../content/elites.js';
+import { createGlow } from './glow.js';
 
 // deps: { shapes, fx }
 export function createWorldRender(ctx, deps) {
   const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = deps.shapes;
   const fx = deps.fx;
   const { state: fxState, particles, numbers, bolts, ghosts, shards, pushGhost } = fx;
+  const glow = createGlow(ctx);
+
+  // 叠加块：进去之前和出来之后都由它负责切合成模式，避免漏掉一次 reset
+  // 就把后面所有东西都画成发光的（调试这种问题很痛苦，所以只留这一个入口）
+  function additive(fn) {
+    ctx.globalCompositeOperation = 'lighter';
+    fn();
+    ctx.globalCompositeOperation = 'source-over';
+  }
 
   const buckets = new Map();
+
   const PARTICLE_ALPHA_STEPS = 8; // 粒子透明度量化档数：够顺滑，又能把同档的攒成一批
   function bucketReset() {
     for (const arr of buckets.values()) arr.length = 0;
@@ -31,6 +48,10 @@ export function createWorldRender(ctx, deps) {
     if (!arr) buckets.set(color, (arr = []));
     arr.push(item);
   }
+
+  // 光晕的临时列表：复用同一个数组，格式是扁平的 [x, y, r, …]（屏幕坐标）。
+  // 不用对象数组是因为这是每帧都跑的路径，一屏几十个 {x, y, r} 就是每帧几十个临时对象
+  const glowList = [];
 
 
   function drawGems(w, camX, camY, color, big) {
@@ -194,6 +215,16 @@ export function createWorldRender(ctx, deps) {
     drawGems(w, camX, camY, P.gem, false);
     drawGems(w, camX, camY, P.gemBig, true);
 
+    // 大经验球给一圈光晕：它值好几点经验，但之前只比小球大 3 像素，混战里根本挑不出来。
+    // 只有大球有（小球一屏能有几百个，每个一次 drawImage 不值得）
+    {
+      glowList.length = 0;
+      for (const g of w.gems) {
+        if (g.active && g.value > 1) glowList.push(g.x - camX, g.y - camY, g.r * 3.4);
+      }
+      if (glowList.length) additive(() => glow.drawMany(glowList, P.gemBig, 0.5));
+    }
+
     // 出场涟漪：一圈向外扩、渐隐的细环，攒一条路径一次 stroke
     {
       ctx.beginPath();
@@ -253,6 +284,28 @@ export function createWorldRender(ctx, deps) {
         ctx.globalAlpha = 0.4;
         ctx.stroke();
         ctx.globalAlpha = 1;
+      }
+    }
+
+    // Boss 和精英的底光：它们是这一段的主角，光晕让"场上有个大家伙"在余光里也成立。
+    // Boss 狂暴后换成狂暴色，远远看见颜色变了就知道进二阶段了。
+    // 画在实体之前，所以光是从身下透出来的，不会把身上那圈深色描边冲淡
+    {
+      let any = false;
+      for (const e of w.enemies) {
+        if (e.active && (e.kind === 'boss' || e.kind === 'elite')) { any = true; break; }
+      }
+      if (any) {
+        additive(() => {
+          for (const e of w.enemies) {
+            if (!e.active) continue;
+            if (e.kind === 'boss') {
+              glow.draw(e.x - camX, e.y - camY, e.r * 2.8, e.rage ? P.bossRage : P.enemy.boss, 0.5);
+            } else if (e.kind === 'elite') {
+              glow.draw(e.x - camX, e.y - camY, e.r * 2.4, findEliteKind(e.elite).ring, 0.38);
+            }
+          }
+        });
       }
     }
 
@@ -473,7 +526,8 @@ export function createWorldRender(ctx, deps) {
     }
 
     // 高速弹的拖尾：沿速度方向拉一小段线。同色攒一条路径，几十颗子弹也只多一次 stroke。
-    // 之前所有投射物都是一样大小的圆点，一屏几十颗完全读不出谁是谁、往哪飞
+    // 之前所有投射物都是一样大小的圆点，一屏几十颗完全读不出谁是谁、往哪飞。
+    // 走叠加：一串子弹重叠时尾迹会自然变亮成一道光，而不是互相盖出一段段深浅
     bucketReset();
     for (const b of w.bullets) {
       if (!b.active) continue;
@@ -481,36 +535,40 @@ export function createWorldRender(ctx, deps) {
       if (sp2 < 300 * 300) continue; // 慢的（地雷、埋在地上的）不拖尾
       bucketPush(b.foe ? P.foeBullet : (b.color || P.bolt), b);
     }
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.45;
-    for (const [color, list] of buckets) {
-      if (!list.length) continue;
-      ctx.beginPath();
-      for (const b of list) {
-        const sp = Math.hypot(b.vx, b.vy) || 1;
-        const tail = Math.min(26, sp * 0.035);
-        ctx.moveTo(b.x - camX, b.y - camY);
-        ctx.lineTo(b.x - camX - (b.vx / sp) * tail, b.y - camY - (b.vy / sp) * tail);
+    additive(() => {
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.45;
+      for (const [color, list] of buckets) {
+        if (!list.length) continue;
+        ctx.beginPath();
+        for (const b of list) {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const tail = Math.min(26, sp * 0.035);
+          ctx.moveTo(b.x - camX, b.y - camY);
+          ctx.lineTo(b.x - camX - (b.vx / sp) * tail, b.y - camY - (b.vy / sp) * tail);
+        }
+        ctx.strokeStyle = color;
+        ctx.stroke();
       }
-      ctx.strokeStyle = color;
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
+      ctx.globalAlpha = 1;
+    });
 
-    // 进化/觉醒武器的弹体光晕
+    // 进化/觉醒武器的弹体光晕：换成预渲染的光晕精灵。
+    // 原来是"放大 2.1 倍的半透明同色圆"，硬边、且两颗挨着只会互相遮挡；
+    // 现在是带衰减的一团光，叠加模式下重合处会变亮
     bucketReset();
     for (const b of w.bullets) {
       if (b.active && GLOW_SRC.has(b.src)) bucketPush(b.color || P.bolt, b);
     }
-    ctx.globalAlpha = 0.22;
-    for (const [color, list] of buckets) {
-      if (!list.length) continue;
-      ctx.beginPath();
-      for (const b of list) subPath('grunt', b.x - camX, b.y - camY, b.r * 2.1, 0);
-      ctx.fillStyle = color;
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
+    additive(() => {
+      for (const [color, list] of buckets) {
+        if (!list.length) continue;
+        glowList.length = 0;
+        for (const b of list) glowList.push(b.x - camX, b.y - camY, b.r * 3.6);
+        glow.drawMany(glowList, color, 0.55);
+      }
+    });
+
 
     // 弹体：形状按发射它的武器来（b.src 是武器 id，渲染层自己查表，逻辑层不用多存字段）
     bucketReset();
@@ -607,29 +665,40 @@ export function createWorldRender(ctx, deps) {
       ctx.globalAlpha = 1;
     }
 
-    // 技能的扩散圆环
-    for (const o of fx.rings) {
-      if (!o.active) continue;
-      ctx.strokeStyle = o.color;
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = Math.max(0, o.life / 0.45);
-      ctx.beginPath();
-      ctx.arc(o.x - camX, o.y - camY, o.r, 0, Math.PI * 2);
-      ctx.stroke();
+    // 技能的扩散圆环 + 闪电链：两者都是"光"，一起放进叠加块，
+    // 环和链交叉的地方会亮出一个交点，比原来单纯互相盖住更像放电
+    additive(() => {
+      for (const o of fx.rings) {
+        if (!o.active) continue;
+        ctx.strokeStyle = o.color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = Math.max(0, o.life / 0.45);
+        ctx.beginPath();
+        ctx.arc(o.x - camX, o.y - camY, o.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      // 闪电链：一段一段的折线
+      ctx.strokeStyle = P.chain;
+      ctx.lineWidth = 2;
+      for (const b of bolts) {
+        if (!b.active) continue;
+        ctx.globalAlpha = Math.min(1, b.life / 0.14);
+        ctx.beginPath();
+        ctx.moveTo(b.x1 - camX, b.y1 - camY);
+        ctx.lineTo(b.x2 - camX, b.y2 - camY);
+        ctx.stroke();
+      }
       ctx.globalAlpha = 1;
+    });
+    // 环绕球：球体本身有描边，所以留在普通模式；光晕另开一个叠加块
+    if (w.orbs.some((o) => o.active)) {
+      glowList.length = 0;
+      for (const o of w.orbs) {
+        if (o.active) glowList.push(o.x - camX, o.y - camY, o.r * 3.2);
+      }
+      additive(() => glow.drawMany(glowList, P.orb, 0.5));
     }
-    // 闪电链：一段一段的折线
-    ctx.strokeStyle = P.chain;
-    ctx.lineWidth = 2;
-    for (const b of bolts) {
-      if (!b.active) continue;
-      ctx.globalAlpha = Math.min(1, b.life / 0.14);
-      ctx.beginPath();
-      ctx.moveTo(b.x1 - camX, b.y1 - camY);
-      ctx.lineTo(b.x2 - camX, b.y2 - camY);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
     for (const o of w.orbs) {
       if (!o.active) continue;
       drawEntity('grunt', o.x - camX, o.y - camY, o.r, P.orb, 0, 1.5);
@@ -643,18 +712,31 @@ export function createWorldRender(ctx, deps) {
     ctx.beginPath();
     ctx.ellipse(pcx, pcy + w.player.r * 0.9, w.player.r * 0.95, w.player.r * 0.4, 0, 0, Math.PI * 2);
     ctx.fill();
+    // 玩家常驻的一圈柔光：一百只怪的场面里"我在哪"是第一优先级的信息，
+    // 光比"再画一个环"更省视觉带宽——它不占轮廓，只是把周围一小圈提亮。
+    // 冲刺时给得更足，顺便让残影那一串看起来是同一道光拉出来的
+    additive(() => {
+      const boost = w.player.dashT > 0 ? 1.5 : 1;
+      glow.draw(pcx, pcy, w.player.r * 3.4 * boost, P.player, 0.42 * boost);
+      // 升级瞬间再叠一层大范围的亮，和外扩的亮环是同一件事的两个尺度
+      if (fxState.levelGlow > 0) {
+        glow.draw(pcx, pcy, w.player.r * 9, P.levelSpark, 0.55 * fxState.levelGlow);
+      }
+    });
     // 升级后的短暂发光：两圈向外扩的亮环，和金色冲击环是同一件事的近景表达
     if (fxState.levelGlow > 0) {
       const t0 = 1 - fxState.levelGlow / 0.7;
-      ctx.strokeStyle = P.levelSpark;
-      ctx.lineWidth = 3;
-      for (let i = 0; i < 2; i++) {
-        ctx.globalAlpha = fxState.levelGlow * (i === 0 ? 0.9 : 0.5);
-        ctx.beginPath();
-        ctx.arc(pcx, pcy, w.player.r + 6 + i * 9 + t0 * 14, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
+      additive(() => {
+        ctx.strokeStyle = P.levelSpark;
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 2; i++) {
+          ctx.globalAlpha = fxState.levelGlow * (i === 0 ? 0.9 : 0.5);
+          ctx.beginPath();
+          ctx.arc(pcx, pcy, w.player.r + 6 + i * 9 + t0 * 14, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      });
     }
 
     // 速度由渲染层自己按帧差算（逻辑层不用多存字段），冲刺时直接给满
@@ -688,27 +770,31 @@ export function createWorldRender(ctx, deps) {
 
     // 粒子：按颜色分组，透明度量化成 8 档再批量画。
     // 逐个画的话每个粒子都要改 fillStyle + globalAlpha + 一次 fill，
-    // 一帧两百多个粒子就是七八百次状态切换；量化到 8 档在小粒子上看不出来
+    // 一帧两百多个粒子就是七八百次状态切换；量化到 8 档在小粒子上看不出来。
+    // 走叠加：命中火花密集重叠的地方会烧出一片更亮的白，这是"打得很爽"最直接的表达
     bucketReset();
     for (const p of particles) if (p.active) bucketPush(p.color, p);
-    for (const [color, list] of buckets) {
-      if (!list.length) continue;
-      ctx.fillStyle = color;
-      for (let lv = 1; lv <= PARTICLE_ALPHA_STEPS; lv++) {
-        let n = 0;
-        ctx.beginPath();
-        for (const p of list) {
-          const a = Math.max(0, Math.min(1, p.life / p.max));
-          if (Math.ceil(a * PARTICLE_ALPHA_STEPS) !== lv) continue;
-          const x = p.x - camX, y = p.y - camY;
-          ctx.moveTo(x + p.r, y);
-          ctx.arc(x, y, p.r, 0, Math.PI * 2);
-          n++;
+    additive(() => {
+      for (const [color, list] of buckets) {
+        if (!list.length) continue;
+        ctx.fillStyle = color;
+        for (let lv = 1; lv <= PARTICLE_ALPHA_STEPS; lv++) {
+          let n = 0;
+          ctx.beginPath();
+          for (const p of list) {
+            const a = Math.max(0, Math.min(1, p.life / p.max));
+            if (Math.ceil(a * PARTICLE_ALPHA_STEPS) !== lv) continue;
+            const x = p.x - camX, y = p.y - camY;
+            ctx.moveTo(x + p.r, y);
+            ctx.arc(x, y, p.r, 0, Math.PI * 2);
+            n++;
+          }
+          if (n) { ctx.globalAlpha = lv / PARTICLE_ALPHA_STEPS; ctx.fill(); }
         }
-        if (n) { ctx.globalAlpha = lv / PARTICLE_ALPHA_STEPS; ctx.fill(); }
       }
-    }
-    ctx.globalAlpha = 1;
+      ctx.globalAlpha = 1;
+    });
+
 
     // 跳字分两趟画（普通、暴击）：ctx.font 每次赋值浏览器都要重新解析字体，
     // 逐个设置的话一帧最多解析 48 次，分趟之后只有 2 次
@@ -719,7 +805,7 @@ export function createWorldRender(ctx, deps) {
       for (const n of numbers) {
         if (!n.active || !!n.crit !== crit) continue;
         if (!any) {
-          ctx.font = crit ? 'bold 17px ui-monospace, monospace' : 'bold 13px ui-monospace, monospace';
+          ctx.font = crit ? FONT.numBold(17) : FONT.numBold(13);
           ctx.fillStyle = crit ? P.warn : P.hitSpark;
           any = true;
         }
@@ -783,7 +869,7 @@ export function createWorldRender(ctx, deps) {
       ctx.textAlign = 'center';
       ctx.globalAlpha = Math.min(1, fxState.warn);
       ctx.fillStyle = fxState.warnColor;
-      ctx.font = 'bold 24px sans-serif';
+      ctx.font = FONT.bold(24);
       ctx.fillText(fxState.warnText, VIEW_W / 2, 110);
       ctx.globalAlpha = 1;
     }

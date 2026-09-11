@@ -9,7 +9,7 @@ let gradients = 0; // 暗角渐变只建一次并缓存，所以要用累计计�
 const CTX_METHODS = [
   'setTransform', 'fillRect', 'strokeRect', 'beginPath', 'arc', 'ellipse', 'rect',
   'fill', 'stroke', 'closePath', 'moveTo', 'lineTo', 'fillText', 'save', 'restore',
-  'translate', 'clearRect', 'rotate', 'scale',
+  'translate', 'clearRect', 'rotate', 'scale', 'drawImage',
 ];
 
 function makeCtx() {
@@ -21,6 +21,13 @@ function makeCtx() {
     calls.push(['createRadialGradient', args]);
     return { addColorStop: (...a) => calls.push(['addColorStop', a]) };
   };
+  // 合成模式要记下来：叠加块忘了归位的话，之后画的所有东西（包括整个 HUD）
+  // 都会变成发光叠加，而这不会报任何错——只能靠断言拦
+  let comp = 'source-over';
+  Object.defineProperty(ctx, 'globalCompositeOperation', {
+    get: () => comp,
+    set: (v) => { comp = v; calls.push(['composite', [v]]); },
+  });
   return ctx;
 }
 
@@ -54,6 +61,13 @@ globalThis.document = {
   hidden: false,
   getElementById: () => canvas,
   addEventListener: record(handlers.document),
+  // 光晕精灵要一张离屏 canvas。给它一个真的（假的）实现而不是让它降级，
+  // 这样"生成精灵"这条路径也在烟测覆盖范围里——它用的 destination-in
+  // 和渐变都是很容易写错却不会报错的东西
+  createElement: (tag) => {
+    if (tag !== 'canvas') throw new Error(`没准备这种元素：${tag}`);
+    return { width: 0, height: 0, getContext: () => makeCtx() };
+  },
 };
 // 固定随机种子：game.js 默认用 Date.now() 造种子，每次跑测试都是不同的一局，
 // 于是"能不能活过 20 秒""什么时候死"都会变，依赖对局结果的用例就会时红时绿。
@@ -1343,6 +1357,38 @@ test('选卡界面能点重抽和排除，键盘 R / Shift+数字 也能用', ()
   // 最后正常选一张，回到游戏
   fire(handlers.window, 'keydown', { code: 'Digit1', preventDefault() {} });
   runFrames(5);
+});
+
+// 下面两条盯的是"光"这一层。位置有讲究：必须在崩溃那条用例之前
+// （崩了之后主循环就一直画崩溃屏，世界层根本不再画），
+// 又必须在这一批"每条自己 freshRun"的用例之间——这份烟测是一条共享的时间线，
+// 往前推帧会把依赖对局进度的用例挤歪（插在中间试过一次，"打倒交界 Boss 弹战利品"直接红了）
+test('叠加特效层：用了 lighter，而且每次都归位成 source-over', () => {
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  calls.length = 0;
+  runFrames(20);
+  const comps = calls.filter(([m]) => m === 'composite').map(([, a]) => a[0]);
+  // 离屏光晕精灵自己用 destination-in 剪形状，那是另一张 canvas 上的事，不参与配平
+  const world = comps.filter((c) => c !== 'destination-in');
+  assert.ok(world.includes('lighter'), '一帧都没进过叠加块，特效层没生效');
+  // 最危险的失误是叠加块里提前 return 导致没恢复：那之后画的所有东西——HUD、面板、
+  // 暗角——全都变成发光叠加，画面整体泛白，但一个报错都没有
+  assert.equal(world.at(-1), 'source-over', '最后一次切换不是归位，叠加模式漏出去了');
+  const opens = world.filter((c) => c === 'lighter').length;
+  const closes = world.filter((c) => c === 'source-over').length;
+  assert.equal(opens, closes, `叠加块开了 ${opens} 次、关了 ${closes} 次，没配平`);
+});
+
+test('光晕精灵只生成一次：同一种颜色不许每帧重画离屏图', () => {
+  // 精灵是预渲染的：一种颜色一张 64×64 离屏图，之后每帧只 drawImage。
+  // 退化成"每帧重建"的话画面看起来完全一样，只是悄悄慢十倍
+  assert.ok(freshRun(), '拿不到一局活着的游戏');
+  runFrames(20); // 先跑一段，把这一局用到的颜色都生成完
+  const before = gradients;
+  calls.length = 0;
+  runFrames(30);
+  assert.ok(calls.some(([m]) => m === 'drawImage'), '光晕一次都没画（精灵路径没跑起来）');
+  assert.equal(gradients, before, `又新建了 ${gradients - before} 个渐变，精灵缓存失效了`);
 });
 
 test('崩溃时把复现材料写进 localStorage（这游戏是确定性的，录像就能重演）', async () => {

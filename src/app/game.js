@@ -3,6 +3,7 @@ import { createWorld, update, chooseUpgrade, reroll, banish, findHero, DEFAULT_H
 import { VIEW_W, VIEW_H } from '../shared/viewport.js';
 import { unlock, toggleMute, sfx } from '../view/audio.js';
 import { P } from '../shared/palette.js';
+import { FONT } from '../view/font.js';
 import { createShapes } from '../view/shapes.js';
 import { createFx } from '../view/fx.js';
 import { CARD_W, CARD_H, CARD_Y, cardX, cardHit, PAUSE_BTN, inPauseBtn, SKILL_BTN, skillBtnHit, inRerollBtn, banishHit, inReplayBtn, heroCardHit, HERO_CARD, shopRowHit, menuCardHit, MENU_CARD, inBackBtn, inStartBtn, tabBtnHit, inInfoBtn, inExitBtn, sandboxRowHit, sandboxBtnHit, inSandboxHandle, inSandboxHandleMin } from '../view/layout.js';
@@ -643,7 +644,7 @@ function drawCrash(err) {
   ctx.fillStyle = P.crashBg;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = P.crashText;
-  ctx.font = '16px ui-monospace, monospace';
+  ctx.font = FONT.num(16);
   ctx.textAlign = 'left';
   ctx.fillText('游戏崩了。控制台有完整堆栈，复现材料在 localStorage 的 survivor.crash：', 20, 40);
   const msg = String(err && err.message ? err.message : err);

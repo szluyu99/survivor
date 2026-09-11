@@ -26,6 +26,10 @@ const texts = [];
 let font = '13px sans-serif';
 let align = 'left';
 
+// 字号要从字体串里挑出来，不能用 parseFloat：'bold 24px ...' 的 parseFloat 是 NaN，
+// 以前所有加粗文字都被当成 13px 量，标题之间的重叠一律漏检
+const sizeOf = (f) => Number((/(\d+(?:\.\d+)?)px/.exec(f) || [])[1]) || 13;
+
 const charWidth = (ch, size) => (ch.codePointAt(0) > 0x2e80 ? size : size * 0.62);
 function widthOf(str, size) {
   let w = 0;
@@ -40,11 +44,11 @@ function makeCtx() {
     'rotate', 'scale'];
   for (const m of noop) ctx[m] = () => {};
   ctx.createRadialGradient = () => ({ addColorStop() {} });
-  ctx.measureText = (t) => ({ width: widthOf(t, parseFloat(font) || 13) });
+  ctx.measureText = (t) => ({ width: widthOf(t, sizeOf(font)) });
   ctx.fillText = (t, x, y) => {
     const s = String(t);
     if (!s.trim()) return;
-    const size = parseFloat(font) || 13;
+    const size = sizeOf(font);
     const w = widthOf(s, size);
     const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
     // 基线在 y，字身大约从 y-0.78em 到 y+0.22em
