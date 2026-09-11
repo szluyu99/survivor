@@ -4,6 +4,9 @@
 
 **零依赖、零构建**：一个 `index.html` 加一批 ES module 源码，配个静态服务器就能跑，没有 npm 依赖、没有打包步骤。
 
+> 隔了一段时间回来接手？先看 `NOTES.md` 的第二节「下次从这里接上」——那里写着最后做完的是什么、
+> 下一步该动哪只脚、以及哪些数值还等着人眼判断。这份 README 讲的是"项目长什么样"。
+
 ## 本地跑
 
 ```bash
@@ -16,7 +19,7 @@ npm run serve      # 等价于 python3 -m http.server 8080
 ## 开发命令
 
 ```bash
-npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（234 个）
+npm test           # 逻辑层 + 渲染层烟测 + 内容契约 + 存档回放 + 局外进度 + UI 排版（237 个）
 npm run balance    # 平衡回归报告（给人看的）：武器强度、局长、兵种出场、帧率无关性、单帧耗时
 npm run check      # 平衡断言（给 CI 用的）：不合格直接非 0 退出，约 105 秒
 npm run check:quick # 快速档：3 个 seed + 跳过两组重型检查，约 20 秒。样本量敏感的断言降级成提醒
@@ -55,7 +58,7 @@ src/
   core/     世界与规则：sim / pool（对象池 + 确定性随机）/ replay（快照与录像）/ tuning（所有可调数值）
   content/  内容表：武器 技能 升级卡 兵种 Boss 精英 地形 区域 角色 难度 局外进度 成就 内容校验 fx 事件登记
   view/     表现层：world-render（世界层绘制）hud（局内）panels（各种面板）screens（局外几屏）
-            fx shapes layout audio
+            fx shapes glow font layout audio
   app/      装配与外围：game（主循环 + 各屏路由）input（输入设备）progress（局外持久化）sandbox（工具屏）
   shared/   跨层共享的数据：viewport（视野尺寸）palette（语义色板）
 ```
@@ -80,8 +83,9 @@ src/
 - `content/elites.js` —— 精英原型表：自爆 / 护盾 / 裂变三套机制，写法和 Boss 原型一致。
 - `content/bosses.js` —— Boss 原型表：招式权重、血量倍率、裂变/护卫机制、描边色。
   第一个原型是基准原型（招式权重和加原型之前完全一致），历史 Boss 平衡数据以它为锚点。
-- `content/zones.js` —— 区域表：兵种权重倍率、地形覆盖、冲锋潮兵种、Boss 原型、色调。
+- `content/zones.js` —— 区域表：兵种权重倍率、地形覆盖、冲锋潮兵种、Boss 原型、地面色与地面图案、色调。
   权重是"在 KINDS 基础权重上乘多少"而不是绝对值，这样调兵种基础强度时区域配比会跟着走。
+  地面图案名必须是 `view/shapes.js` 的 `GROUND_PATTERNS` 之一（写错只会静默退回方格网，所以 `validate.js` 拦着）。
 - `content/achievements.js` —— 累计统计的累加规则 + 成就表（`progress()` 返回 `[当前, 目标]`，
   判定只读统计和存档，所以随时可以重算，不需要存"已解锁"）。
 - `content/meta.js` —— 局外进度：残片结算公式、角色解锁价、永久强化表。
@@ -106,7 +110,7 @@ src/
 
 渲染层：
 
-- `app/game.js` —— 装配 + 主循环 + 各屏路由（756 行，从 1743 行拆到这里）。
+- `app/game.js` —— 装配 + 主循环 + 各屏路由（758 行，从 1743 行拆到这里）。
   世界层绘制、局外屏、沙盒、局外进度、输入设备分别在 `world-render.js` / `screens.js` /
   `sandbox.js` / `progress.js` / `input.js`。
 - `app/input.js` —— 输入设备层：键盘按下的集合、指针位置、触摸摇杆、边沿触发的冲刺与技能。
@@ -119,7 +123,7 @@ src/
   分两种合成模式画：实体走默认的 `source-over`（要靠深色描边互相分开），
   光相关的东西（拖尾、粒子、闪电、光环、光晕）走 `additive()` 块里的 `'lighter'`，
   重叠处变亮而不是互相盖住。深色描边在叠加模式下等于不存在，所以带描边的东西一律不进叠加块。
-- `src/render` 相关：`view/shapes.js`（形状/描边/网格/暗角）、`view/hud.js`（局内 HUD，并把 panels/screens 组装成一套对外 API）、`view/panels.js`（暂停/选卡/战利品/结算/通关/沙盒控制台）、
+- `src/render` 相关：`view/shapes.js`（形状/描边/地面图案与远景层/暗角）、`view/hud.js`（局内 HUD，并把 panels/screens 组装成一套对外 API）、`view/panels.js`（暂停/选卡/战利品/结算/通关/沙盒控制台）、
   `view/screens.js`（局外的几屏：主菜单 / 开局前的角色屏 / 局外强化 / 成就与统计 / 操作说明——
   它和局内 HUD 的关注点完全不同，前者一帧只画一屏、几乎只是排版，后者每帧都画、要抠调用数）、`view/fx.js`（粒子/跳字/闪电/震屏，消费 sim 登记的 fx 事件）、
   `view/glow.js`（光晕精灵：一种颜色一张 64×64 离屏图，之后每帧只 `drawImage`；不用 `shadowBlur`，它每帧重算模糊）、
@@ -163,8 +167,11 @@ src/
    `Math.random()` / `Date.now()` / `performance.now()`——随机数只能来自 `w.rng()`，时间只能来自 `w.t`。
    破坏它的后果是录像和存档从此不可重演，而游戏表面照常运行。
 2. **逻辑层不许碰 DOM**（`document` / `window` / `localStorage` / `requestAnimationFrame`），
-   也不许 import 表现层（`game.js` / `hud.js` / `fx.js` / `shapes.js` / `audio.js` / `layout.js`）。
+   也不许 import 表现层（`view/` 和 `app/` 下的任何文件）。
    它必须能在 node 里裸跑——测试和平衡脚本都建立在这一点上。
+   唯一的例外是 `content/validate.js`：它是内容检查器，要读 `view/layout.js` 的坐标常量
+   （"角色卡放不下"这类）和 `view/shapes.js` 的 `GROUND_PATTERNS`。检查器读表现层是它的职责，
+   所以在 arch 里显式开了白名单，而不是把规则放宽。
 3. **`enemies.js` / `weapons.js` / `skills.js` / `terrain.js` / `upgrades.js` / `zones.js` /
    `bosses.js` / `elites.js` 不许 import `sim.js`**：它们需要的能力由 sim 通过 `ctx` / `api` 注入，
    否则是循环依赖。
@@ -175,9 +182,16 @@ src/
 ## 加内容的约定
 
 - 加武器 / 技能 / 兵种 / 地形：往对应模块的表里加一项即可，不用改 `sim.js`
+- 加区域：`zones.js` 里加一项，`pattern` 必须是 `shapes.js` 的 `GROUND_PATTERNS` 之一，
+  `ground` / `tint` 走 `palette.js`；两个区域不许用同一种图案或地面色（`validate.js` 拦着）。
+  注意加区域会拉长通关线，改完看一眼 `npm run check` 的第 9 和第 11 条
 - 调数值：只改 `tuning.js`，然后 `npm run check`（断言）+ `npm run balance`（看具体数字）
 - 新增 fx 事件：先加进 `fx-events.js` 的登记表，否则 `emit()` 会直接抛错；
   再去 `fx.js` 的 `handlers` 里加处理，否则契约测试会失败
+- 画新的"会发光的东西"：放进 `world-render.js` 的 `additive(fn)` 块，需要柔光就用 `glow.draw` / `glow.drawMany`
+  （别用 `shadowBlur`）。带深色描边的东西不要进叠加块——描边在 `'lighter'` 下等于不存在
+- 写文字：字体走 `view/font.js` 的 `FONT.ui / bold / num / numBold`，不要手写字体串
+  （canvas 不继承 CSS 的 `font-family`，手写一定会漏掉中文字体栈）
 - 写测试：用 `test/fixtures.mjs` 里的 `labWorld` / `putEnemy` / `putTerrain` / `run`，
   不要再各写一遍造实体的代码
 - 改 UI 文案或坐标：`test/ui-layout.test.mjs` 会把每个界面画一遍、量出所有文字的包围盒，
