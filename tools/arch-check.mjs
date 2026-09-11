@@ -57,8 +57,11 @@ for (const rel of files) {
       if (src.includes(dom)) fail(rel, `逻辑层碰了 ${dom}——它必须能在 node 里裸跑（测试和平衡脚本都依赖这点）`);
     }
     for (const t of targets) {
-      // content/validate.js 是内容检查器，需要读 view/layout.js 的常量（"角色卡放不下"这类）
-      if (VIEW.has(layerOf(t)) && !(rel === 'content/validate.js' && t === 'view/layout.js')) {
+      // content/validate.js 是内容检查器，需要读表现层的常量：
+      // view/layout.js（"角色卡放不下"这类）和 view/shapes.js 的 GROUND_PATTERNS
+      // （区域表里写的地面图案得真有人画）。检查器读表现层是它的职责，不是耦合
+      const ok = rel === 'content/validate.js' && (t === 'view/layout.js' || t === 'view/shapes.js');
+      if (VIEW.has(layerOf(t)) && !ok) {
         fail(rel, `逻辑层 import 了表现层 ${t}`);
       }
     }

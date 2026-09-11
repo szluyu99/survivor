@@ -31,7 +31,7 @@ function finishRun(w) {
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = createShapes(ctx);
+const { circle, shapePath, subPath, drawEntity, drawGrid, drawDust, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = createShapes(ctx);
 
 // 批量绘制用的分组桶：key 是颜色（都是 palette 里的常量字符串，不产生新字符串），
 // value 是复用的数组。每帧只把长度清零、不重建，热循环里零分配
@@ -50,7 +50,7 @@ window.addEventListener('resize', resize);
 const fx = createFx({ onDeath: (w) => progress.noteBest(w), onWin: (w) => finishRun(w) });
 const { consumeFx, stepFx, state: fxState } = fx;
 // 世界层绘制在 world-render.js（它一个 UI 状态都不读；HUD 和面板留在这里编排）
-const { drawWorld } = createWorldRender(ctx, { shapes: { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker }, fx });
+const { drawWorld } = createWorldRender(ctx, { shapes: { circle, shapePath, subPath, drawEntity, drawGrid, drawDust, drawVignette, drawDangerEdge, drawTerrain, edgeMarker }, fx });
 
 // 输入设备层在 input.js（键盘集合 / 指针 / 摇杆 / 边沿触发的冲刺与技能）。
 // 这里只保留"这一下点在了哪个按钮上"那部分路由

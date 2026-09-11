@@ -24,7 +24,7 @@ import { createGlow } from './glow.js';
 
 // deps: { shapes, fx }
 export function createWorldRender(ctx, deps) {
-  const { circle, shapePath, subPath, drawEntity, drawGrid, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = deps.shapes;
+  const { circle, shapePath, subPath, drawEntity, drawGrid, drawDust, drawVignette, drawDangerEdge, drawTerrain, edgeMarker } = deps.shapes;
   const fx = deps.fx;
   const { state: fxState, particles, numbers, bolts, ghosts, shards, pushGhost } = fx;
   const glow = createGlow(ctx);
@@ -158,7 +158,11 @@ export function createWorldRender(ctx, deps) {
     if (fxState.shake > 0) {
       ctx.translate((Math.random() - 0.5) * fxState.shake, (Math.random() - 0.5) * fxState.shake);
     }
-    drawGrid(camX, camY);
+    // 背景分三层：远景斑点（0.45 倍视差）→ 本区域的地面图案 → 地形。
+    // 之前只有一层四区域共用的方格网，既没有深度也分不出"我现在在哪一段"
+    const zone = currentZone(w);
+    drawDust(camX, camY);
+    drawGrid(camX, camY, zone.ground, zone.pattern);
     // 地形画在实体下面：泥地是"地上的水洼"，岩块也不该盖住玩家
     for (const t of w.terrain) if (t.active) drawTerrain(t, camX, camY);
 

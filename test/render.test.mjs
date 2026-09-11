@@ -1425,6 +1425,66 @@ test('每一种登记的 fx 事件都有渲染层处理（漏接会让动作没�
   assert.deepEqual(extra, [], `这些处理没有对应的登记项（可能是改名后的残留）：${extra.join(', ')}`);
 });
 
+// 背景层：每个区域的地面图案必须真的不一样，远景那层必须真的有视差。
+// 用桩 ctx 单独驱动 createShapes，不碰共享的那条时间线
+test('每个区域的地面图案不同，且都只用一次 stroke 画完', async () => {
+  const { createShapes, GROUND_PATTERNS } = await import('../src/view/shapes.js');
+  const { ZONES } = await import('../src/content/zones.js');
+  const rec = { pts: 0, strokes: 0, fills: 0, closes: 0, color: '' };
+  const stub = {
+    beginPath() {}, closePath() { rec.closes++; }, fill() { rec.fills++; }, stroke() { rec.strokes++; },
+    arc() { rec.pts++; }, rect() {}, ellipse() {}, fillRect() {}, strokeRect() {}, drawImage() {},
+    createRadialGradient: () => ({ addColorStop() {} }),
+    moveTo() { rec.pts++; }, lineTo() { rec.pts++; },
+  };
+  for (const p of ['fillStyle', 'lineWidth', 'globalAlpha']) stub[p] = '';
+  Object.defineProperty(stub, 'strokeStyle', { get: () => rec.color, set: (v) => { rec.color = v; } });
+  const { drawGrid, drawDust } = createShapes(stub);
+
+  const seen = new Map();
+  for (const z of ZONES) {
+    Object.assign(rec, { pts: 0, strokes: 0, closes: 0, color: '' });
+    drawGrid(300, 200, z.ground, z.pattern);
+    assert.equal(rec.strokes, 1, `${z.name} 的地面图案不是一次 stroke 画完的（${rec.strokes} 次）`);
+    assert.ok(rec.pts > 10, `${z.name} 的地面几乎没画东西（${rec.pts} 个点）`);
+    assert.equal(rec.color, z.ground, `${z.name} 没用自己的地面色`);
+    // 用"点数 + closePath 次数"当图案指纹：两个区域指纹相同就说明图案其实一样
+    const fp = `${rec.pts}/${rec.closes}`;
+    assert.ok(!seen.has(fp), `${z.name} 和 ${seen.get(fp)} 的地面图案画出来是一样的`);
+    seen.set(fp, z.name);
+  }
+  // 图案名都在登记表里（写错会静默退回方格网，validate 也拦，这里再兜一层）
+  for (const z of ZONES) assert.ok(GROUND_PATTERNS.includes(z.pattern), `${z.name} 的图案名不在登记表里`);
+
+  // 远景视差：相机走 100，这一层只能走 45（0.45 倍）。等速就等于没有视差。
+  // 不能直接比"最左边那个点"的位移——贴片会绕回、边缘的点会被裁掉，
+  // 两帧里可见的其实不是同一批点（这么写过一次，量出来是 10.4）。
+  // 改成整层按贴片宽度取模来核对：位移对了的话，每个点都能对回原来的位置
+  const TILE = 960;
+  const at = (camX) => {
+    const xs = [];
+    const realMove = stub.moveTo, realArc = stub.arc, realLine = stub.lineTo;
+    stub.moveTo = (x) => xs.push(x);
+    stub.arc = () => {};
+    stub.lineTo = () => {};
+    drawDust(camX, 0);
+    stub.moveTo = realMove; stub.arc = realArc; stub.lineTo = realLine;
+    return xs;
+  };
+  const base = at(0), moved = at(100);
+  assert.ok(base.length > 8, `远景斑点太少了（${base.length} 个）`);
+  const fits = (shift) => {
+    let hit = 0;
+    for (const x of moved) {
+      const back = ((x + shift) % TILE + TILE) % TILE;
+      if (base.some((b) => Math.abs(((b % TILE) + TILE) % TILE - back) < 0.01)) hit++;
+    }
+    return hit / moved.length;
+  };
+  assert.ok(fits(45) > 0.99, `按 0.45 倍视差只对上 ${(fits(45) * 100).toFixed(0)}% 的斑点`);
+  assert.ok(fits(100) < 0.9, '远景和世界同速在动，那就不是视差层了');
+});
+
 // 屏幕外的 Boss / 精英指示箭头。三角必须落在视口里、贴着目标那一侧的边，
 // 不然它要么看不见，要么指错方向
 test('边缘指示箭头贴着目标那一侧的边，且不画到屏幕外', async () => {

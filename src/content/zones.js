@@ -7,6 +7,9 @@
 //
 // 写法和其他内容表一致：一条配置就是一个区域。weights 是"在基础权重上乘多少"，
 // 不是绝对值——这样 KINDS 里调兵种基础强度时，区域配比会跟着走，不用两边改。
+//
+// ground / pattern / tint 三个字段是纯表现：地面色、地面图案、整屏色调。
+// 图案名由 view/shapes.js 的 GROUND_PATTERNS 决定，写错会被契约测试拦下来
 import { TERRAIN_TUNING, LOOP } from '../core/tuning.js';
 import { P } from '../shared/palette.js';
 
@@ -28,6 +31,8 @@ export const ZONES = [
     terrain: {},
     burst: ['rusher', 'grunt'],
     boss: 'brute',
+    ground: P.grid,
+    pattern: 'grid',
     tint: null,
   },
   {
@@ -39,6 +44,9 @@ export const ZONES = [
     terrain: { rockShare: 0.2, maxFillers: 34 },
     burst: ['rusher', 'splitter'],
     boss: 'fission',
+    // 只有横线、还带起伏：像水面，不像格子地板
+    ground: P.ground.marsh,
+    pattern: 'wave',
     tint: P.zoneTint.marsh,
   },
   {
@@ -49,6 +57,9 @@ export const ZONES = [
     terrain: { rockShare: 0.92, maxFillers: 30, chestCooldown: 20 },
     burst: ['rusher', 'tank'],
     boss: 'warden',
+    // 蜂窝：这一段的名字就叫巢穴，召唤者也在这儿最多
+    ground: P.ground.lair,
+    pattern: 'hex',
     tint: P.zoneTint.lair,
   },
   {
@@ -63,6 +74,9 @@ export const ZONES = [
     terrain: { rockShare: 0.35, maxFillers: 16 },
     burst: ['rusher', 'shooter'],
     boss: 'phantom',
+    // 稀疏十字点：地面几乎是空的，和"没有掩体、全靠走位"这件事对上
+    ground: P.ground.snow,
+    pattern: 'dots',
     tint: P.zoneTint.snow,
   },
 ];

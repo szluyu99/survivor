@@ -13,6 +13,7 @@ import { TRAITS, CURSES, LOOT } from './upgrades.js';
 import { FX_EVENTS } from './fx-events.js';
 import { HEROES } from './heroes.js';
 import { HERO_CARD } from '../view/layout.js';
+import { GROUND_PATTERNS } from '../view/shapes.js';
 import { PERKS, heroCost } from './meta.js';
 import { ZONES, ZONE_SECONDS } from './zones.js';
 import { BOSS_KINDS } from './bosses.js';
@@ -196,6 +197,11 @@ export function validateContent() {
       if (!(v > 0)) errors.push(`${at}：地形字段 ${field} 的值不合法`);
     }
     if (z.tint !== null && typeof z.tint !== 'string') errors.push(`${at}：tint 应该是颜色字符串或 null`);
+    if (typeof z.ground !== 'string') errors.push(`${at}：ground 应该是地面色字符串`);
+    // 图案名写错不会报错，只会静默退回方格网——四个区域看起来一模一样
+    if (!GROUND_PATTERNS.includes(z.pattern)) {
+      errors.push(`${at}：地面图案 ${z.pattern} 没人画（可选：${GROUND_PATTERNS.join(' / ')}）`);
+    }
     if (!Array.isArray(z.burst) || z.burst.length !== 2) errors.push(`${at}：burst 应该是两个兵种`);
     for (const kind of z.burst || []) {
       if (!KINDS[kind]) errors.push(`${at}：冲锋潮兵种 ${kind} 不存在`);
@@ -205,6 +211,11 @@ export function validateContent() {
   if (Object.keys(ZONES[0].weights || {}).length || Object.keys(ZONES[0].terrain || {}).length) {
     errors.push('第一个区域必须是基准区域（不改权重也不改地形），平衡数据以它为锚点');
   }
+  // 换区必须看得出来：两个区域用同一种地面图案的话，这一段和上一段在画面上没有区别
+  const patterns = ZONES.map((z) => z.pattern);
+  if (new Set(patterns).size !== patterns.length) errors.push('有两个区域用了同一种地面图案，换区在画面上看不出来');
+  const grounds = ZONES.map((z) => z.ground);
+  if (new Set(grounds).size !== grounds.length) errors.push('有两个区域用了同一种地面色');
   // 区域之间必须真的不一样，否则配置写了等于没写
   const fingerprints = ZONES.map((z) => JSON.stringify([z.weights, z.terrain, z.burst]));
   if (new Set(fingerprints).size !== fingerprints.length) errors.push('有两个区域的配置完全相同');
